@@ -5,21 +5,42 @@ hit means. Written for whoever picks this up next — including me, later.
 
 ---
 
-## 1. Start from cold
+## 1. Run the whole thing
+
+Two commands, from the repository root:
 
 ```
-powershell -ExecutionPolicy Bypass -File .\scripts\dev-db.ps1 status
+npm run db start
+npm run dev
 ```
 
-If it says "Not running", `start`. If there is no cluster at all, `setup`, then:
+That starts four processes — one backend, three frontends, all sharing one
+database:
+
+| | URL | Who it is for |
+|---|---|---|
+| Backend API | http://localhost:3000 | Where everything is recorded |
+| Member app | http://localhost:5173 | Customers |
+| Verification page | http://localhost:5174 | Staff at the counter |
+| Admin dashboard | http://localhost:5175 | The business owner |
+
+Give it about 20 seconds. The API and three Vite servers start together and
+compete for CPU on first boot; an earlier check at 15 s reported the API down
+when it was simply still starting. Ctrl-C stops all four together.
+
+Seeded logins, both with password `privilege-guest-dev-only`:
+`admin@pgp.test` (owner) and `fatima.a@pgp.test` (outlet staff).
+
+**First run only**, if there is no database yet:
 
 ```
-cd apps\api
-npm run migrate
-npm run seed
+npm run db setup
+cd apps\api && npm run migrate && npm run seed
 ```
 
-Then, from the repository root:
+`npm run db` also takes `status`, `stop` and `reset`.
+
+## 1b. Verify it
 
 ```
 npm test
