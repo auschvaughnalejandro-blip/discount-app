@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 
 import type { Env } from './config/env.js';
+import authorizationPlugin from './plugins/authorization.js';
+import errorHandlerPlugin from './plugins/error-handler.js';
 import prismaPlugin from './plugins/prisma.js';
 import authRoutes from './routes/auth.js';
 import healthRoutes from './routes/health.js';
@@ -29,18 +31,21 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
     // deployment topology is known.
   });
 
-  await app.register(fp(async (instance) => {
-    instance.decorate('env', env);
-  }));
+  await app.register(
+    fp(async (instance) => {
+      instance.decorate('env', env);
+    }, { name: 'env' }),
+  );
 
+  await app.register(errorHandlerPlugin);
   await app.register(prismaPlugin);
+
+  // Registered before any routes: its onRoute hook only sees routes added
+  // after it, so every route file below is covered and none can opt out by
+  // being registered earlier (R17).
+  await app.register(authorizationPlugin);
+
   await app.register(healthRoutes);
-  // Stage 3 introduces the route wrapper that requires every route to declare
-  // a permission (R17) and fails startup on an undeclared one. These auth
-  // routes are the deliberately public exceptions — you cannot authenticate
-  // through an endpoint that itself requires authentication — and will be
-  // registered through that wrapper's explicit public escape hatch once it
-  // exists, same as the health routes.
   await app.register(authRoutes);
 
   return app;

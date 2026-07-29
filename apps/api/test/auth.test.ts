@@ -127,38 +127,57 @@ describe('OTP fails after 5 attempts', () => {
 });
 
 describe('login timing does not differ measurably between existing and non-existent accounts', () => {
-  it('takes comparable wall-clock time either way', async () => {
+  // Argon2id at m=65536,t=3,p=2 costs ~250ms by design, and this test needs
+  // 16 of them. Slowness is the feature being relied on, so the timeout is
+  // raised rather than the sample reduced.
+  it('takes comparable wall-clock time either way', { timeout: 60_000 }, async () => {
     resetRateLimits();
 
-    const iterations = 5;
+    const login = async (email: string): Promise<number> => {
+      const started = performance.now();
+      await request(app.server).post('/auth/staff/login').send({ email, password: 'wrong-password' });
+      return performance.now() - started;
+    };
+
+    // Warm-up, not measured: the first Argon2id call in a process pays for
+    // native module load and the lazily-built dummy hash, which would
+    // otherwise land entirely on whichever path happened to run first.
+    await login('admin@pgp.test');
+    await login(`warmup-${Date.now()}@pgp.test`);
+
+    const iterations = 7;
     const existingAccountTimes: number[] = [];
     const nonExistentAccountTimes: number[] = [];
 
     for (let i = 0; i < iterations; i += 1) {
-      const startExisting = performance.now();
-      await request(app.server)
-        .post('/auth/staff/login')
-        .send({ email: 'admin@pgp.test', password: 'definitely-the-wrong-password' });
-      existingAccountTimes.push(performance.now() - startExisting);
-
-      const startMissing = performance.now();
-      await request(app.server)
-        .post('/auth/staff/login')
-        .send({ email: `nobody-${i}-${Date.now()}@pgp.test`, password: 'whatever' });
-      nonExistentAccountTimes.push(performance.now() - startMissing);
+      existingAccountTimes.push(await login('admin@pgp.test'));
+      nonExistentAccountTimes.push(await login(`nobody-${i}-${Date.now()}@pgp.test`));
+      resetRateLimits();
     }
 
-    const average = (values: number[]): number => values.reduce((a, b) => a + b, 0) / values.length;
-    const existingAvg = average(existingAccountTimes);
-    const missingAvg = average(nonExistentAccountTimes);
-    const ratio = Math.max(existingAvg, missingAvg) / Math.min(existingAvg, missingAvg);
+    // Median, not mean. The property under test is a *systematic* difference
+    // between the two paths; a single scheduling stall on a loaded machine is
+    // noise, and the mean lets one such outlier decide the result.
+    const median = (values: number[]): number => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted[middle] ?? 0;
+    };
 
-    // Best-effort rather than exact: both paths run one real Argon2id
-    // verification (against the real hash or the fixed dummy hash), so
-    // timing should be close. A generous bound avoids flakiness on shared or
-    // loaded hardware while still catching a genuinely missing dummy-hash
-    // branch, which would make the non-existent-account path near-instant
-    // and push the ratio well past this bound.
-    expect(ratio).toBeLessThan(3);
+    const existing = median(existingAccountTimes);
+    const missing = median(nonExistentAccountTimes);
+    const ratio = Math.max(existing, missing) / Math.min(existing, missing);
+
+    // Both paths run exactly one real Argon2id verification — against the
+    // account's own hash, or against a fixed dummy hash — so the times should
+    // be close. The bound is deliberately loose: it exists to catch the
+    // dummy-hash branch going missing, which would make the non-existent
+    // account path a database miss and nothing else, i.e. an order of
+    // magnitude faster. It is not a defence against a fine-grained timing
+    // oracle, which this test cannot honestly claim to detect.
+    expect(
+      ratio,
+      `existing=${existing.toFixed(1)}ms missing=${missing.toFixed(1)}ms ratio=${ratio.toFixed(2)}`,
+    ).toBeLessThan(3);
   });
 });

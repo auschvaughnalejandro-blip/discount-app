@@ -1,13 +1,13 @@
 # Progress
 
 Last updated: 2026-07-29
-Current stage: 2 (complete) — next is Stage 3, Authorization
+Current stage: 3 (complete) — next is Stage 4, Member lifecycle
 
 ## Stages
 - [x] 0 — Foundation
 - [x] 1 — Data model
 - [x] 2 — Authentication
-- [ ] 3 — Authorization
+- [x] 3 — Authorization
 - [ ] 4 — Member lifecycle
 - [ ] 5 — Benefits
 - [ ] 6 — Identity codes
@@ -146,9 +146,78 @@ Beyond the 8 listed criteria, also built:
   password, wrong OTP, revoked/expired/reused refresh token) — no branch
   reveals which specific thing was wrong.
 
+### Stage 3 — Authorization
+Status: complete
+
+Files created:
+- `apps/api/src/security/permissions.ts` — the permission catalogue and role matrix
+- `apps/api/src/security/scope.ts` — `scopeFor*` fragments and `scopedWhere`
+- `apps/api/src/plugins/authorization.ts` — R17 boot check + principal resolution
+- `apps/api/src/plugins/error-handler.ts` — 401/403/404/400 mapping
+- `apps/api/src/errors.ts`
+- `apps/api/test/authorization.test.ts` (39 tests), `apps/api/test/fetch-then-check.test.ts`
+
+Acceptance:
+- Registering a route without a `permission` field prevents the server starting — PASS.
+  Enforced by an `onRoute` hook, which fires for *every* route however it is
+  registered — including a plain `app.get()` that bypasses any helper. A wrapper
+  you must remember to call is exactly the control that fails under deadline.
+  A misspelled permission fails startup too.
+- An authorization matrix test covers every role against every endpoint, with
+  declared expectations — PASS. `EXPECTED_ROLE_ACCESS` in the test declares the
+  allowed roles for all 17 permissions independently of the implementation, and
+  a test asserts the two agree *and* that neither has an entry the other lacks —
+  so adding a permission without deciding who holds it is a test failure.
+  Exercised over real HTTP as well as against the table.
+- Fetching another member's record by ID as `outlet_staff` returns 404 — PASS,
+  and 403 at the route level, since `outlet_staff` holds no `members:read` at
+  all (R11 — "not filtered, absent"). The 404-not-403 behaviour for a caller who
+  *does* hold the permission but is out of scope is covered separately: an
+  out-of-scope member and a nonexistent one return byte-identical responses.
+- No handler loads a record and then checks permission afterwards — PASS, via
+  `fetch-then-check.test.ts`, which scans `src/routes` for Prisma reads of
+  scoped models and requires a scope fragment in the same statement. Three
+  pre-authentication reads in `auth.ts` are exempted with written reasons.
+
+Full suite: 68 tests passing.
+
+**A real defect was found and fixed while writing these tests.**
+security-implementation.md §5 illustrates scoping as
+`where: { id: req.params.id, ...scopeFor(principal) }`. That spread is only safe
+while the scope fragment shares no keys with the base query — and a member's
+scope is `{ id: <their own id> }`, which collides. The later spread wins, so the
+id the caller asked about was silently replaced by the caller's own id: the
+query then succeeded and returned the caller's own record for *any* id they
+asked about, a 200 where the answer had to be 404. Replaced with
+`scopedWhere(base, scope)`, which composes with `AND` and cannot clobber.
+A regression test demonstrates the old behaviour and pins the new one.
+
+A second defect: the authorization `preHandler` also runs for unmatched paths,
+where there is no route config to read — so every unknown URL returned 403
+instead of 404. Fixed, with a test.
+
+Also built (not in the Stage 3 list, but required by the above):
+- An error handler mapping `HttpError` subclasses, `ZodError` → 400, and
+  anything else → 500 with the detail logged rather than returned. Before this,
+  a malformed request body produced a 500; it now produces a 400.
+
 ## Open questions blocking work
 
-None blocking Stage 3. Two new items from Stage 2 are flagged directly below,
+None blocking Stage 4. One new item from Stage 3:
+
+- [ ] **Q7 — the `manager` role's write access to members is inferred, not stated.**
+  security-implementation.md §5's "can reach" column lists screens ("Member list,
+  member detail, reports"); its "explicitly cannot" column names exactly three
+  prohibitions (edit benefits, manage staff, export). product-definition.md §7
+  says "Members and reports; no benefit or staff configuration", and §7's Members
+  section includes creating and suspending. Implemented as **full member
+  operations + reports, no benefits/staff/export**, which satisfies every explicit
+  prohibition in both documents and matches the Stage 12 acceptance test.
+  If read-only was intended, remove the four write permissions from `MANAGER` in
+  `src/security/permissions.ts` — nothing else changes, and the matrix test will
+  point at the expectations that need updating.
+
+Two items from Stage 2 are flagged directly below,
 not buried — they represent real gaps against `security-implementation.md`,
 not routine open questions.
 

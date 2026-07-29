@@ -1,11 +1,13 @@
-import type { PrismaClient } from '@prisma/client';
+import type { PrismaClient, Role } from '@prisma/client';
 
 import { verifyAccessToken, type SubjectType } from './tokens.js';
 
 export interface Principal {
   subjectId: string;
   subjectType: SubjectType;
-  role?: string;
+  /** Present only for STAFF principals. Typed as the Prisma enum so the
+   * permission matrix lookup is exhaustive rather than string-keyed. */
+  role?: Role;
   outletId?: string;
 }
 

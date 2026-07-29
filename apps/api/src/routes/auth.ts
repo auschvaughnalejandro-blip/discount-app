@@ -15,6 +15,16 @@ import {
   RefreshTokenError,
 } from '../security/refresh-tokens.js';
 
+/**
+ * Every route in this file is public, and says so explicitly (R17) — you
+ * cannot require a token from an endpoint whose purpose is to issue one.
+ *
+ * Being public is not the same as being unprotected: each handler below
+ * applies its own rate limiting, uniform error shapes and constant-time
+ * comparisons. `public` here means "no principal required", not "no controls".
+ */
+const PUBLIC_ROUTE = { config: { permission: 'public' } } as const;
+
 const staffLoginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -58,7 +68,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   const env = app.env;
 
   // ── POST /auth/staff/login ────────────────────────────────────────────
-  app.post('/auth/staff/login', async (request, reply) => {
+  app.post('/auth/staff/login', PUBLIC_ROUTE, async (request, reply) => {
     const body = staffLoginSchema.parse(request.body);
 
     const ipLimit = checkRateLimit(`login:ip:${request.ip}`, {
@@ -126,7 +136,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── POST /auth/member/request-otp ─────────────────────────────────────
-  app.post('/auth/member/request-otp', async (request, reply) => {
+  app.post('/auth/member/request-otp', PUBLIC_ROUTE, async (request, reply) => {
     const body = requestOtpSchema.parse(request.body);
 
     const ipLimit = checkRateLimit(`otp-request:ip:${request.ip}`, {
@@ -165,7 +175,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── POST /auth/member/verify-otp ──────────────────────────────────────
-  app.post('/auth/member/verify-otp', async (request, reply) => {
+  app.post('/auth/member/verify-otp', PUBLIC_ROUTE, async (request, reply) => {
     const body = verifyOtpSchema.parse(request.body);
 
     const ipLimit = checkRateLimit(`otp-verify:ip:${request.ip}`, {
@@ -211,7 +221,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── POST /auth/refresh ─────────────────────────────────────────────────
-  app.post('/auth/refresh', async (request, reply) => {
+  app.post('/auth/refresh', PUBLIC_ROUTE, async (request, reply) => {
     const body = refreshSchema.parse(request.body);
 
     const identity = await identifyRefreshToken(app.prisma, body.refreshToken);
@@ -285,7 +295,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── POST /auth/logout ──────────────────────────────────────────────────
-  app.post('/auth/logout', async (request, reply) => {
+  app.post('/auth/logout', PUBLIC_ROUTE, async (request, reply) => {
     const body = logoutSchema.parse(request.body);
     // Always 200, whether or not the token was valid — its validity is not
     // something this endpoint discloses.
@@ -294,7 +304,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── POST /auth/logout-all ──────────────────────────────────────────────
-  app.post('/auth/logout-all', async (request, reply) => {
+  app.post('/auth/logout-all', PUBLIC_ROUTE, async (request, reply) => {
     const body = logoutSchema.parse(request.body);
 
     const identity = await identifyRefreshToken(app.prisma, body.refreshToken);

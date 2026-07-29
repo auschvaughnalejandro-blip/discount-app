@@ -258,3 +258,68 @@ control the OTP exists to provide (a leaked/logged live code is account takeover
 per §3) for the sake of convenience. Tests reach the hashed code through the
 database/module layer instead, matching the access a real SMS gateway would have
 had. Recorded as PROGRESS.md Q6.
+
+---
+
+**2026-07-29 — R17 enforced by an `onRoute` hook, not a route-registration wrapper.**
+Alternative: export a `registerRoute()` helper that requires a `permission` argument,
+as security-implementation.md §5's snippet implies.
+A wrapper only protects routes that remember to use it — a plain `app.get()` slips
+straight past, which is precisely the failure §5 describes ("a new endpoint shipped
+under deadline with no check at all"). Fastify's `onRoute` hook fires for every route
+registered after it regardless of how, so there is no bypass to remember. Routes
+declare `config: { permission }`, which is Fastify's own typed mechanism for
+per-route metadata and needs no module augmentation of the route-options type.
+
+---
+
+**2026-07-29 — `scopedWhere(base, scope)` instead of spreading the scope fragment.**
+Alternative: the literal `where: { id: req.params.id, ...scopeFor(principal) }` from §5.
+The spread is only safe while the fragment shares no keys with the base query. It
+shares `id` — a member's scope is `{ id: <their own id> }` — and the later spread
+wins, so the requested id was silently replaced by the caller's own. Every lookup
+then returned the caller's own record instead of 404. `AND` composition cannot
+clobber: both conditions must hold, so an out-of-scope id yields no rows. Same
+intent as §5, without the collision. Caught by a test, and pinned by a regression
+test that demonstrates the old behaviour.
+
+---
+
+**2026-07-29 — 403 for a route the role cannot use; 404 only for out-of-scope records.**
+Alternative: 404 everywhere, reading R18 maximally.
+§5's reasoning for 404 is specifically "a 403 confirms the record exists" — it is
+about records. Which endpoints exist is not a secret (they are in the client bundle
+and the API surface), so a 403 on a route leaks nothing. Records get 404, and an
+out-of-scope record is byte-identical to a nonexistent one. §11 accepts either for
+the `outlet_staff` list case ("must 404 or 403 on every one").
+
+---
+
+**2026-07-29 — The role matrix is written out exhaustively, including administrator.**
+Alternative: give `ADMINISTRATOR` a wildcard, since §5 says "everything".
+A wildcard means every permission added later is granted to that role silently, at
+the moment it is defined rather than when someone decides it should be. Listing all
+15 makes each grant a deliberate edit, and the matrix test fails if the catalogue and
+the expectations drift apart.
+
+---
+
+**2026-07-29 — Criterion 4 ("no fetch-then-check") is enforced by scanning source.**
+Alternative: rely on code review, or on the Stage 14 security review.
+It is a property of how handlers are written, not something a running server can be
+asked about — but it is also the single mistake §5 spends the most words warning
+about, and the one you make while writing an endpoint rather than while auditing one.
+`fetch-then-check.test.ts` scans `src/routes` for Prisma reads of scoped models and
+requires a scope fragment in the same statement, with an explicit exempt list carrying
+written reasons. At Stage 3 it has almost nothing to check; its value starts at Stage 4.
+
+---
+
+**2026-07-29 — The timing test compares medians over a warmed-up sample.**
+Alternative: the mean of a cold 5-iteration sample (what Stage 2 shipped).
+It flaked under load. The property under test is a *systematic* difference between
+the two login paths; a single scheduling stall is noise, and the mean lets one
+outlier decide the result. Median over 7 iterations after a warm-up (the first
+Argon2id call pays for native module load and the lazily-built dummy hash) is stable
+across repeated runs. The 3x bound is deliberately loose — it catches the dummy-hash
+branch going missing, not a fine-grained timing oracle, and the test says so.
