@@ -10,8 +10,7 @@ import type { Env } from '../config/env.js';
  * That makes the member app impossible to sign into by hand, which makes it
  * impossible to demonstrate.
  *
- * This prints the code to the server console — the terminal the developer is
- * already watching — so a local sign-in can be completed.
+ * This prints the code to the terminal the developer is already watching.
  *
  * ── Why the console and not the HTTP response ────────────────────────────
  *
@@ -36,13 +35,33 @@ export function isDevOtpEchoEnabled(env: Pick<Env, 'NODE_ENV' | 'DEV_OTP_ECHO'>)
 }
 
 /**
+ * Last four digits only.
+ *
+ * §9 forbids phone numbers in application logs, and this is still a log. Four
+ * digits is enough to tell two test members apart, which is the only reason
+ * the number is here at all.
+ */
+function maskPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  return digits.length <= 4 ? '••••' : `${'•'.repeat(6)}${digits.slice(-4)}`;
+}
+
+/**
  * Prints the code where a developer can see it. A no-op unless both gates pass.
  *
- * Deliberately loud: this is a live credential on screen, and nobody should be
- * able to leave it switched on without noticing.
+ * Written straight to stdout rather than through the logger, deliberately:
+ * pino serialises to a single JSON line, so a multi-line block arrives as
+ * literal `\n` escapes inside a string field — technically present, unreadable
+ * in a terminal, and therefore useless for the one job this has. This is a
+ * human-facing development affordance, not a log record; nothing depends on
+ * it being machine-parseable.
+ *
+ * Everything else in this process still goes through the logger and its
+ * redaction layer. This is the single exception, and it exists only when both
+ * gates above are open.
  */
 export function echoOtpForDevelopment(
-  logger: FastifyBaseLogger,
+  _logger: FastifyBaseLogger,
   env: Pick<Env, 'NODE_ENV' | 'DEV_OTP_ECHO'>,
   phone: string,
   code: string,
@@ -51,20 +70,25 @@ export function echoOtpForDevelopment(
     return;
   }
 
-  logger.warn(
-    `\n` +
-      `  ┌────────────────────────────────────────────────┐\n` +
-      `  │  DEVELOPMENT ONLY — verification code          │\n` +
-      `  │  ${phone.padEnd(44)}│\n` +
-      `  │  code: ${code.padEnd(40)}│\n` +
-      `  └────────────────────────────────────────────────┘\n` +
-      `  DEV_OTP_ECHO is on. Never enable this outside development.\n`,
-  );
+  const box = [
+    '',
+    '  ══════════════════════════════════════════',
+    '   VERIFICATION CODE  (development only)',
+    '',
+    `   phone ending  ${maskPhone(phone)}`,
+    `   CODE          ${code}`,
+    '',
+    '  ══════════════════════════════════════════',
+    '',
+  ].join('\n');
+
+  process.stdout.write(`${box}\n`);
 }
 
 /**
  * Printed once at startup so an operator cannot miss that codes are being
- * written to the log.
+ * written to the terminal. This one goes through the logger — it carries no
+ * credential and no personal data, and belongs in the log record.
  */
 export function warnIfDevOtpEchoEnabled(
   logger: FastifyBaseLogger,
@@ -72,7 +96,7 @@ export function warnIfDevOtpEchoEnabled(
 ): void {
   if (isDevOtpEchoEnabled(env)) {
     logger.warn(
-      'DEV_OTP_ECHO is enabled: one-time passcodes are printed to this log. ' +
+      'DEV_OTP_ECHO is enabled: one-time passcodes are printed to this terminal. ' +
         'Development only.',
     );
   }

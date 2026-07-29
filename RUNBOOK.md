@@ -39,13 +39,23 @@ Seeded logins:
 **Signing in as a member.** There is no SMS provider (PROGRESS.md Q6), so the
 one-time passcode is printed to the terminal running `npm run dev`:
 
+It appears between the JSON log lines, as real text:
+
 ```
-  ┌────────────────────────────────────────────────┐
-  │  DEVELOPMENT ONLY — verification code          │
-  │  +97455550001                                  │
-  │  code: 799501                                  │
-  └────────────────────────────────────────────────┘
+  ══════════════════════════════════════════
+   VERIFICATION CODE  (development only)
+
+   phone ending  ••••••0001
+   CODE          920515
+
+  ══════════════════════════════════════════
 ```
+
+Written straight to stdout, not through pino — a logger serialises to one JSON
+line, so a multi-line block would arrive as literal `
+` escapes: present,
+unreadable, useless. The phone shows its last four digits only, because §9
+forbids phone numbers in logs and this is still a log.
 
 Type that into the app. It only prints when `DEV_OTP_ECHO=true` **and**
 `NODE_ENV=development`; both gates must pass, and only the exact string `true`

@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadEnv } from '../src/config/env.js';
-import { isDevOtpEchoEnabled } from '../src/security/dev-otp.js';
+import { echoOtpForDevelopment, isDevOtpEchoEnabled } from '../src/security/dev-otp.js';
 
 describe('the dev OTP echo is off unless both gates pass', () => {
   it('is on only in development with the flag explicitly true', () => {
@@ -68,6 +68,76 @@ describe('the flag defaults off and fails closed on a typo', () => {
 
   it('is true only for exactly "true"', () => {
     expect(loadEnv({ ...base, DEV_OTP_ECHO: 'true' }).DEV_OTP_ECHO).toBe(true);
+  });
+});
+
+describe('what it prints', () => {
+  function capture(fn: () => void): string {
+    const written: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (process.stdout as any).write = (chunk: string) => {
+      written.push(String(chunk));
+      return true;
+    };
+    try {
+      fn();
+    } finally {
+      process.stdout.write = original;
+    }
+    return written.join('');
+  }
+
+  const noopLogger = { warn() {} } as unknown as Parameters<typeof echoOtpForDevelopment>[0];
+
+  it('prints the code, and the phone only as its last four digits', () => {
+    const output = capture(() =>
+      echoOtpForDevelopment(
+        noopLogger,
+        { NODE_ENV: 'development', DEV_OTP_ECHO: true },
+        '+97455550001',
+        '246813',
+      ),
+    );
+
+    expect(output).toContain('246813');
+
+    // §9 forbids phone numbers in logs, and this is still a log. Four digits
+    // is enough to tell two test members apart, which is the only reason the
+    // number appears at all.
+    expect(output).not.toContain('+97455550001');
+    expect(output).not.toContain('97455550001');
+    expect(output).toContain('0001');
+  });
+
+  it('renders as real lines, not escaped ones', () => {
+    // The whole point is that a human can read it in a terminal. Going
+    // through pino would serialise this to a single JSON line with literal
+    // \n escapes: present, unreadable, useless.
+    const output = capture(() =>
+      echoOtpForDevelopment(
+        noopLogger,
+        { NODE_ENV: 'development', DEV_OTP_ECHO: true },
+        '+97455550001',
+        '246813',
+      ),
+    );
+
+    expect(output.split('\n').length).toBeGreaterThan(5);
+    expect(output).not.toContain('\\n');
+  });
+
+  it('prints nothing at all when the gates are closed', () => {
+    const output = capture(() =>
+      echoOtpForDevelopment(
+        noopLogger,
+        { NODE_ENV: 'production', DEV_OTP_ECHO: true },
+        '+97455550001',
+        '246813',
+      ),
+    );
+
+    expect(output).toBe('');
   });
 });
 
