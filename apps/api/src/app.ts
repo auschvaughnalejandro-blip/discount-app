@@ -7,6 +7,7 @@ import errorHandlerPlugin from './plugins/error-handler.js';
 import prismaPlugin from './plugins/prisma.js';
 import adminMemberRoutes from './routes/admin-members.js';
 import authRoutes from './routes/auth.js';
+import benefitRoutes from './routes/benefits.js';
 import healthRoutes from './routes/health.js';
 import memberRoutes from './routes/member.js';
 
@@ -51,6 +52,7 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(authRoutes);
   await app.register(adminMemberRoutes);
   await app.register(memberRoutes);
+  await app.register(benefitRoutes);
 
   return app;
 }
