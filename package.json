@@ -22,7 +22,8 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "migrate": "npm run migrate --workspace @pgp/api",
-    "seed": "npm run seed --workspace @pgp/api"
+    "seed": "npm run seed --workspace @pgp/api",
+    "stop": "powershell -ExecutionPolicy Bypass -File ./scripts/stop.ps1"
   },
   "devDependencies": {
     "concurrently": "^9.2.4",

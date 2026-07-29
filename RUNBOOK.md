@@ -70,6 +70,20 @@ cd apps\api && npm run migrate && npm run seed
 
 `npm run db` also takes `status`, `stop` and `reset`.
 
+### If a window shows `EADDRINUSE` and then goes quiet
+
+Only one process can hold a port. A dev server left running -- from a closed
+terminal, a crash, or a stray background process -- makes the next one exit
+immediately. Its window then sits there showing nothing, which looks exactly
+like the application being broken.
+
+```
+npm run stop
+```
+
+Frees ports 3000, 5173, 5174 and 5175, then start again. It targets the process
+actually holding each port rather than killing every node.exe on the machine.
+
 ## 1b. Verify it
 
 ```
