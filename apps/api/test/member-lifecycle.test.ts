@@ -496,11 +496,46 @@ describe('R11 — GET /admin/members is unreachable by outlet_staff', () => {
     expect(detail.status).toBe(403);
   });
 
-  it('leaves no route reachable by outlet_staff that returns more than one member', () => {
-    // The stronger form of R11: absent, not filtered. If a future stage adds
-    // a list endpoint and grants it to outlet_staff, this fails.
-    const routes = app.printRoutes({ commonPrefix: false });
-    expect(routes).toContain('/admin/members');
+  it('cannot reach any endpoint that returns more than one member', async () => {
+    // The stronger form of R11: absent, not filtered.
+    //
+    // This replaced an assertion that string-matched Fastify's route-tree
+    // *rendering*, which broke the moment a route was added at `/` — and which
+    // had never actually checked the property it claimed to. This drives every
+    // enumerating endpoint and asserts none of them answers.
+    const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
+      where: { role: 'OUTLET_STAFF' },
+    });
+    const token = await issueAccessToken({
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE_STAFF,
+      subject: outletStaff.id,
+      subjectType: 'STAFF',
+      role: outletStaff.role,
+      ...(outletStaff.outletId ? { outletId: outletStaff.outletId } : {}),
+      tokenVersion: outletStaff.tokenVersion,
+      ttlSeconds: 300,
+    });
+
+    const enumerating = [
+      '/admin/members',
+      '/admin/redemptions',
+      '/admin/benefits',
+      '/admin/reports/summary',
+      '/admin/reports/by-benefit',
+      '/admin/reports/by-month',
+      '/admin/reports/dormant-members',
+      '/admin/reports/unclaimed',
+      '/admin/reports/export',
+    ];
+
+    for (const path of enumerating) {
+      const response = await request(app.server)
+        .get(path)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(response.status, `${path} answered ${response.status}`).not.toBe(200);
+    }
   });
 });
 
