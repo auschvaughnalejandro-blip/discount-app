@@ -1,0 +1,25 @@
+{
+  "name": "privilege-guest-program",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @pgp/api",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "migrate": "npm run migrate --workspace @pgp/api",
+    "seed": "npm run seed --workspace @pgp/api"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

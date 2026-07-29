@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: pgp-db
+    restart: unless-stopped
+    environment:
+      # Schema owner. The application connects as a separate, less privileged
+      # role created in Stage 1 so that the R7 revocation on "Redemption" bites.
+      POSTGRES_USER: pgp_owner
+      POSTGRES_PASSWORD: pgp_local_dev
+      POSTGRES_DB: pgp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgp-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgp_owner -d pgp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgp-db-data:
