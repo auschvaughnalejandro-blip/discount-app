@@ -3,6 +3,10 @@ dist/
 build/
 coverage/
 
+# Local PostgreSQL cluster used for development and integration tests, created
+# by scripts/dev-db.ps1. Disposable — delete it and re-run `setup` to rebuild.
+.devdb/
+
 .env
 .env.*
 !.env.example
