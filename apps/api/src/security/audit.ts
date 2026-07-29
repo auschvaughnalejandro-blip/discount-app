@@ -25,7 +25,10 @@ export type AuditAction =
   | 'verification.lookup.success'
   | 'verification.lookup.failure'
   | 'redemption.recorded'
-  | 'redemption.reversed';
+  | 'redemption.reversed'
+  | 'report.viewed'
+  | 'report.exported'
+  | 'report.export.throttled';
 
 export interface AuditEntry {
   action: AuditAction;

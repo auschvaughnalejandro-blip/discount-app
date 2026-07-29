@@ -84,6 +84,17 @@ const envSchema = z.object({
   // staff can act on that member for a few minutes, then the context expires."
   // "A few minutes" is the only quantity given.
   VERIFICATION_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+
+  // -- Stage 8 -- reporting ----------------------------------------------
+  // R13: "Enforce a minimum cohort size of 5 below which the endpoint returns
+  // 'insufficient data' rather than a number." The figure is given explicitly
+  // in §6, unlike most thresholds here.
+  REPORT_MIN_COHORT_SIZE: z.coerce.number().int().positive().default(5),
+  // §6: exports are "administrator-only, rate-limited, individually audited".
+  // No rate is specified; a handful a day fits an action that should never be
+  // routine.
+  RATE_LIMIT_EXPORT_PER_USER_MAX: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_EXPORT_WINDOW_SECONDS: z.coerce.number().int().positive().default(86400),
 });
 
 export type Env = z.infer<typeof envSchema>;
