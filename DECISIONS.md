@@ -149,3 +149,112 @@ The Stage 1 acceptance criteria are statements about the database — that a REV
 is effective, that a column is an integer, that a CHECK constraint fires. A mock
 cannot verify any of them; it would only assert that the test author remembered the
 rule. `test/health.test.ts` still runs without a database.
+
+---
+
+**2026-07-29 — Added `Member.tokenVersion`, beyond BUILD-PLAN.md's Stage 1 schema.**
+Alternative: leave it StaffUser-only, as literally specified.
+security-implementation.md §4 lists membership suspension among the events that must
+force re-authentication via token version, and calls tv "the mechanism behind
+logout-everywhere, role change, and emergency revocation" generally, not staff-only.
+Per prime directive #3, the security document wins conflicts on security matters.
+Recorded as a deviation in PROGRESS.md rather than a silent schema change.
+
+---
+
+**2026-07-29 — HS256 for access tokens, not EdDSA/RS256.**
+Alternative: generate an Ed25519 keypair and use EdDSA, as §4 prefers.
+§4 explicitly permits HS256 "within a single deployable." This build is one Fastify
+process serving all three surfaces (member, verify, admin) — a single deployable —
+so the explicit exception applies. Revisit if the API is ever split into separate
+deployables serving different audiences, at which point asymmetric signing lets each
+verify tokens without holding the signing secret.
+
+---
+
+**2026-07-29 — `resolvePrincipal` built now, not deferred to Stage 3.**
+Alternative: leave the token-version check for Stage 3's authorization wrapper.
+The Stage 2 build list itself includes "Token version check on every request" as a
+line item, separate from Stage 3's "route registration wrapper requiring a
+permission field" and "scopeFor(principal) ... applied inside every query." Building
+token validity resolution (signature + expiry + tv match) now, and leaving
+permission/scope strictly to Stage 3, follows the plan's own division rather than
+inventing one.
+
+---
+
+**2026-07-29 — Refresh tokens hashed with SHA-256, not Argon2id.**
+Alternative: use the same Argon2id parameters as passwords, for consistency.
+A refresh token is 256 bits of server-generated randomness, not a low-entropy
+human-chosen secret — brute-forcing it is infeasible regardless of hash speed, so
+Argon2id's deliberate slowness defends nothing here and would add real per-request
+latency. Passwords and OTP codes use slow/keyed hashing because they must resist
+guessing; refresh tokens don't need that property, only unlinkability from a DB leak,
+which SHA-256 already provides.
+
+---
+
+**2026-07-29 — OTP codes hashed with HMAC-SHA256, not Argon2id.**
+Alternative: Argon2id, matching passwords.
+A 6-digit OTP is a ~20-bit space — trivially brute-forced offline at any hash speed,
+so a slow hash buys nothing. The real defenses are the 5-minute TTL and 5-attempt
+lockout (security-implementation.md §3), both of which exist regardless of hash
+choice. HMAC (keyed by `OTP_CODE_HMAC_SECRET`) still prevents rainbow-table matching
+against a leaked table without the server secret.
+
+---
+
+**2026-07-29 — In-memory rate limiter, no new dependency.**
+Alternative: `@fastify/rate-limit`, or a Redis-backed store.
+§3/§4/§8 need limiting on two independent dimensions at once (per IP *and* per
+identifier) on the same route, which a single off-the-shelf plugin instance doesn't
+directly express. A ~40-line fixed-window module was simpler to get exactly right
+than configuring two overlapping instances of a general-purpose plugin. Known
+limitation, stated in the module's own comment: in-memory means limits reset on
+restart and don't share state across processes — revisit before running more than
+one API instance.
+
+---
+
+**2026-07-29 — Rate limit thresholds are a documented assumption.**
+Alternative: leave them unset until a number is specified somewhere.
+security-implementation.md says "strict" repeatedly but never gives a number. Per
+BUILD-PLAN §0 rule 4, implemented reasonable defaults (20 login attempts / 15 min per
+IP, 5 per identifier; similar for OTP) rather than blocking Stage 2 on a number no
+document supplies. Recorded in PROGRESS.md open questions (Q pending numbering) as
+tunable, not final.
+
+---
+
+**2026-07-29 — MFA is not enforced on staff login (Stage 2 gap, flagged not silently resolved).**
+Alternative: build a minimal TOTP challenge anyway, using a reasonable library.
+security-implementation.md §3 makes MFA mandatory "without exception," but
+BUILD-PLAN.md's Stage 2 endpoint list is closed at 6 endpoints with no MFA challenge
+endpoint, and no library, enrollment UX, or challenge shape is specified anywhere.
+Inventing one would violate rule 2 ("do not invent features") to satisfy rule 3
+("security wins") — the two prime directives conflict here, unlike the
+`Member.tokenVersion` case where security-implementation.md just filled a gap
+BUILD-PLAN.md left open. Recorded as PROGRESS.md Q5 and flagged directly to the user,
+rather than picked silently in either direction.
+
+---
+
+**2026-07-29 — Password pepper stored in an environment variable, not a KMS.**
+Alternative: skip the pepper entirely until a KMS exists.
+§3 requires a pepper "held in the key management service, not the database." No KMS
+exists anywhere in this build's stack or reference documents. An environment variable
+is the nearest available equivalent — it is at least not colocated with the password
+hashes it protects, which is the property the pepper exists for. `PASSWORD_PEPPER`
+in `.env.example` documents this as a placeholder, not a production-ready mechanism.
+
+---
+
+**2026-07-29 — SMS delivery is unimplemented; the OTP code is never exposed.**
+Alternative: log the OTP to the console in non-production, or return it in the API
+response when NODE_ENV !== 'production', to make manual testing possible.
+No SMS provider is named in any reference document — this is a genuine integration
+gap, not a design choice within Stage 2's scope. Either workaround weakens the same
+control the OTP exists to provide (a leaked/logged live code is account takeover,
+per §3) for the sake of convenience. Tests reach the hashed code through the
+database/module layer instead, matching the access a real SMS gateway would have
+had. Recorded as PROGRESS.md Q6.

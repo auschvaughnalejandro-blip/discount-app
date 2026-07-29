@@ -1,12 +1,12 @@
 # Progress
 
 Last updated: 2026-07-29
-Current stage: 1 (complete) — next is Stage 2, Authentication
+Current stage: 2 (complete) — next is Stage 3, Authorization
 
 ## Stages
 - [x] 0 — Foundation
 - [x] 1 — Data model
-- [ ] 2 — Authentication
+- [x] 2 — Authentication
 - [ ] 3 — Authorization
 - [ ] 4 — Member lifecycle
 - [ ] 5 — Benefits
@@ -98,10 +98,87 @@ benefit table — no percentage, cap or phone number appears in application code
 | events | 25% | Outside catering 20% | — | 20 | — |
 | lifestyle | 30% | Pool day pass 25% | — | — | — |
 
+### Stage 2 — Authentication
+Status: complete
+
+Files created:
+- `apps/api/prisma/migrations/20260729150000_member_token_version/migration.sql`
+  — adds `Member.tokenVersion` (see "Deviations from spec" below)
+- `apps/api/src/security/` — `password.ts`, `tokens.ts`, `refresh-tokens.ts`,
+  `otp.ts`, `rate-limit.ts`, `principal.ts`
+- `apps/api/src/routes/auth.ts` — all 6 endpoints
+- `apps/api/test/tokens.test.ts`, `apps/api/test/auth.test.ts`
+- `apps/api/prisma/seed.ts` refactored to call `src/security/password.ts`
+  instead of duplicating the Argon2id parameters inline
+
+Endpoints, all live: `POST /auth/staff/login`, `POST /auth/member/request-otp`,
+`POST /auth/member/verify-otp`, `POST /auth/refresh`, `POST /auth/logout`,
+`POST /auth/logout-all`.
+
+Acceptance — each is a test, all passing (`apps/api/test/tokens.test.ts` +
+`apps/api/test/auth.test.ts`, 9 tests together):
+- A token with `alg: none` is rejected — PASS
+- A token with a modified `role` claim is rejected — PASS (signature check fails)
+- An expired token is rejected — PASS
+- A token with the wrong `aud` is rejected — PASS
+- Replaying a used refresh token revokes the family and forces re-auth — PASS
+  (verified the *legitimately rotated successor* also stops working, not just
+  the replayed token itself)
+- Incrementing `tokenVersion` invalidates existing access tokens — PASS, via
+  `resolvePrincipal` (new; see below)
+- OTP fails after 5 attempts — PASS (locks out even the correct code afterward)
+- Login timing does not differ measurably between existing and non-existent
+  accounts — PASS, best-effort (ratio < 3x over 5 iterations; a real Argon2id
+  verification runs on both paths, against the account's own hash or a fixed
+  dummy hash)
+
+Full suite: 26 tests passing (9 new Stage 2 + 17 from Stages 0–1).
+
+Beyond the 8 listed criteria, also built:
+- `resolvePrincipal()` (`src/security/principal.ts`) — the Stage 2 build list's
+  own "Token version check on every request" line item. Verifies the JWT, then
+  confirms the subject is still `ACTIVE` and `tv` matches the subject's current
+  DB value. Stage 3 layers permission/scope checks on top of this; it does not
+  duplicate it.
+- Rate limiting (in-memory, per-process, per IP and per identifier) on login
+  and both OTP endpoints, per security-implementation.md §3/§4/§8.
+- Uniform, generic error responses across all failure branches (wrong
+  password, wrong OTP, revoked/expired/reused refresh token) — no branch
+  reveals which specific thing was wrong.
+
 ## Open questions blocking work
 
-None blocking. The four items below are recorded per BUILD-PLAN §0 rule 4 and
-carry `TODO(open-question)` comments where they touch code.
+None blocking Stage 3. Two new items from Stage 2 are flagged directly below,
+not buried — they represent real gaps against `security-implementation.md`,
+not routine open questions.
+
+- [ ] **Q5 — MFA is not enforced on login, despite §3: "MFA is mandatory on
+  every dashboard account, without exception."** `StaffUser.mfaSecret` exists
+  as the schema extension point (Stage 1), but BUILD-PLAN.md's Stage 2 endpoint
+  list has no MFA challenge endpoint, and no MFA library, enrollment flow, or
+  challenge/response shape is specified in any reference document. Building
+  one would mean inventing a feature outside what's specified (BUILD-PLAN §0
+  rule 2) rather than following a documented assumption. `POST
+  /auth/staff/login` currently succeeds on password alone.
+  **This is the one place in Stage 2 where BUILD-PLAN.md's closed endpoint
+  list and security-implementation.md's "without exception" requirement
+  point in different directions**, and prime directive #3 says the security
+  document wins on security matters — so this is recorded as a gap needing a
+  decision, not a silent resolution. Blocks full §3/§12 compliance; does not
+  block Stage 3.
+
+- [ ] **Q6 — No SMS provider is named anywhere in the reference documents.**
+  `POST /auth/member/request-otp` generates and stores a hashed OTP
+  (`src/security/otp.ts`) but nothing sends it anywhere. The plaintext code
+  is never logged, persisted in the clear, or returned by the API — doing so
+  to work around the missing provider would itself be a security regression.
+  Tests reach the code directly through the database/module layer, the way a
+  real SMS gateway would have been the only other recipient. Needs an SMS
+  provider decision before the member OTP flow is usable end-to-end outside
+  tests.
+
+The four items below carry forward from Stage 1, recorded per BUILD-PLAN §0
+rule 4, with `TODO(open-question)` comments where they touch code.
 
 - [ ] **Q1 — product-definition.md §11.1: what does the existing QR code do?**
   Documented assumption implemented: the code identifies the *member* and is
@@ -137,4 +214,21 @@ carry `TODO(open-question)` comments where they touch code.
 
 ## Deviations from spec
 
-- None.
+- **Added `Member.tokenVersion`, not in BUILD-PLAN.md's Stage 1 schema.**
+  That schema gives `tokenVersion` to `StaffUser` only. But
+  security-implementation.md §4 "Forced re-authentication" lists **membership
+  suspension** alongside staff password/role change as an event that must
+  invalidate outstanding access tokens, and token version is stated as "the
+  mechanism behind" that invalidation. Without the field on `Member`, Stage 4's
+  suspend action (and Stage 2's own `/auth/logout-all` for members) would have
+  no way to invalidate an already-issued member access token before it
+  naturally expires. Per BUILD-PLAN §0 rule 3 ("security rules are not
+  negotiable... where any document conflicts with it on a security matter, it
+  wins"), added the field via
+  `migrations/20260729150000_member_token_version`. See DECISIONS.md.
+- **HS256, not EdDSA/RS256, for access token signing.**
+  security-implementation.md §4 allows this explicitly: "HS256 acceptable
+  only within a single deployable." This build is one Fastify process serving
+  all three surfaces — a single deployable. See DECISIONS.md.
+- Everything else built to spec. Q5 (MFA) and Q6 (SMS delivery) above are
+  gaps, not silent deviations — both are flagged, not built around.

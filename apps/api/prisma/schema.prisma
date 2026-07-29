@@ -71,6 +71,10 @@ model Member {
   /// Null until the member activates the app. "Issued a card but never claimed
   /// the app" is a distinct, reportable state from "claimed but never redeemed".
   claimedAt       DateTime?
+  /// security-implementation.md §4 "Forced re-authentication" lists membership
+  /// suspension alongside password change and role change as an event that must
+  /// invalidate outstanding access tokens. Mirrors StaffUser.tokenVersion.
+  tokenVersion    Int          @default(1)
   createdByUserId String
   createdAt       DateTime     @default(now())
 

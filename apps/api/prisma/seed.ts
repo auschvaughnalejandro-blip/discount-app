@@ -10,15 +10,9 @@
  * table in docs/wireframes.html. None of it is duplicated in application code —
  * these rows are the only place the numbers live (R14).
  */
-import { hash, type Algorithm } from '@node-rs/argon2';
 import { Prisma, PrismaClient } from '@prisma/client';
 
-/**
- * `Algorithm` is an ambient `const enum`, which `verbatimModuleSyntax` cannot
- * import as a value. Annotating with the type keeps the value checked against
- * the enum rather than being a bare magic number.
- */
-const ARGON2ID: Algorithm = 2;
+import { hashPassword } from '../src/security/password.js';
 
 const databaseUrl = process.env['DATABASE_MIGRATION_URL'] ?? process.env['DATABASE_URL'];
 
@@ -27,25 +21,6 @@ if (!databaseUrl) {
 }
 
 const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
-
-/**
- * Parameters are fixed by docs/security-implementation.md §3 and are not
- * configurable — an environment variable here would be a way to silently
- * weaken password hashing.
- *
- * TODO(stage-2): §3 also requires a pepper held in the key management service,
- * passed as `secret`. Stage 2 owns credential handling and will introduce it,
- * at which point seeded hashes must be regenerated.
- */
-async function hashPassword(plaintext: string): Promise<string> {
-  return hash(plaintext, {
-    algorithm: ARGON2ID,
-    memoryCost: 65536, // 64 MB
-    timeCost: 3,
-    parallelism: 2,
-    outputLen: 32,
-  });
-}
 
 /**
  * Development credentials only. Real staff accounts are created through the
@@ -219,7 +194,10 @@ async function main(): Promise<void> {
 
   const administrator = await prisma.staffUser.upsert({
     where: { email: 'admin@pgp.test' },
-    update: {},
+    // Re-running the seed refreshes the dev password hash — useful after
+    // rotating PASSWORD_PEPPER locally — without disturbing tokenVersion or
+    // other fields a test run may have changed.
+    update: { passwordHash },
     create: {
       id: 'seed-staff-administrator',
       fullName: 'S. Abouelmagd',
@@ -238,7 +216,7 @@ async function main(): Promise<void> {
 
   await prisma.staffUser.upsert({
     where: { email: 'fatima.a@pgp.test' },
-    update: {},
+    update: { passwordHash },
     create: {
       id: 'seed-staff-outlet',
       fullName: 'Fatima A.',
