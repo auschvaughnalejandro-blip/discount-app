@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
 import { NotFoundError, RateLimitedError } from '../errors.js';
+import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
 import { checkRateLimit } from '../security/rate-limit.js';
@@ -208,6 +209,15 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
       ttlSeconds: env.REFRESH_TOKEN_TTL_MEMBER_SECONDS,
     });
 
+    await writeAudit(app.prisma, {
+      action: 'member.claimed',
+      principal: { subjectId: claimed.id, subjectType: 'MEMBER' },
+      subjectType: 'Member',
+      subjectId: claimed.id,
+      metadata: { memberNumber: claimed.memberNumber },
+      ipAddress: request.ip,
+    });
+
     return reply.code(200).send({
       memberNumber: claimed.memberNumber,
       accessToken,
@@ -312,6 +322,15 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     if (!updated) {
       throw new NotFoundError();
     }
+
+    await writeAudit(app.prisma, {
+      action: 'member.consent_changed',
+      principal,
+      subjectType: 'Member',
+      subjectId: member.id,
+      metadata: { channels: Object.keys(body) },
+      ipAddress: request.ip,
+    });
 
     return { consent: currentConsent(updated.consents) };
   });

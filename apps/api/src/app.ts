@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 
 import type { Env } from './config/env.js';
+import { REDACTED, REDACT_PATHS, redact } from './logging/redaction.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import prismaPlugin from './plugins/prisma.js';
@@ -28,9 +29,21 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
-      // Stage 9 adds the redaction layer that keeps member names, phone numbers
-      // and email addresses out of application logs. Until then, nothing that
-      // could carry member data is logged.
+      // §9: "Application logs contain no member names, phone numbers or email
+      // addresses. Enforce with a redaction layer on the logger rather than by
+      // convention." Paths cover the shapes pino logs itself; the serializers
+      // walk anything a caller passes, so `log.info({ member })` is safe even
+      // though nobody anticipated that call.
+      redact: { paths: REDACT_PATHS, censor: REDACTED },
+      serializers: {
+        member: redact,
+        members: redact,
+        body: redact,
+        user: redact,
+        staff: redact,
+        principal: redact,
+        data: redact,
+      },
     },
     // `trustProxy` has to be settled before per-IP rate limiting and audit IP
     // capture (Stage 9) can be believed. Left at its default until the

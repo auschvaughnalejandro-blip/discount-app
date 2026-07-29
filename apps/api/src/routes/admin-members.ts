@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
 import { NotFoundError } from '../errors.js';
+import { writeAudit } from '../security/audit.js';
 import { generateClaimCode } from '../security/claim-codes.js';
 import { revokeAllForSubject } from '../security/refresh-tokens.js';
 import { scopeForMember, scopedWhere } from '../security/scope.js';
@@ -96,6 +97,16 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       return { member, claimCodePlaintext: claim.plaintext, expiresAt: claimCode.expiresAt };
     });
 
+    await writeAudit(app.prisma, {
+      action: 'member.created',
+      principal: request.principal,
+      subjectType: 'Member',
+      subjectId: created.member.id,
+      // Membership number, never the name (§9).
+      metadata: { memberNumber: created.member.memberNumber },
+      ipAddress: request.ip,
+    });
+
     return reply.code(201).send({
       id: created.member.id,
       memberNumber: created.member.memberNumber,
@@ -156,6 +167,14 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       }),
     ]);
 
+    await writeAudit(app.prisma, {
+      action: 'member.listed',
+      principal,
+      subjectType: 'Member',
+      metadata: { returned: members.length, total, filters: Object.keys(filters) },
+      ipAddress: request.ip,
+    });
+
     return {
       total,
       limit,
@@ -207,6 +226,18 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       throw new NotFoundError();
     }
 
+    // §9: "Every member record viewed, and by whom." Wireframes D4 note 4
+    // puts the notice on the screen too, because telling staff their viewing
+    // is logged is a stronger control than the log alone.
+    await writeAudit(app.prisma, {
+      action: 'member.viewed',
+      principal,
+      subjectType: 'Member',
+      subjectId: member.id,
+      metadata: { memberNumber: member.memberNumber },
+      ipAddress: request.ip,
+    });
+
     const { consents, _count, ...fields } = member;
 
     return {
@@ -256,6 +287,15 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       },
     });
 
+    await writeAudit(app.prisma, {
+      action: 'member.updated',
+      principal,
+      subjectType: 'Member',
+      subjectId: updated.id,
+      metadata: { memberNumber: updated.memberNumber, changed: Object.keys(body) },
+      ipAddress: request.ip,
+    });
+
     return updated;
   });
 
@@ -300,6 +340,15 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       // could mint a fresh access token moments later.
       await revokeAllForSubject(app.prisma, existing.id, 'MEMBER');
 
+      await writeAudit(app.prisma, {
+        action: 'member.suspended',
+        principal,
+        subjectType: 'Member',
+        subjectId: member.id,
+        metadata: { memberNumber: member.memberNumber },
+        ipAddress: request.ip,
+      });
+
       return member;
     },
   );
@@ -323,11 +372,22 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
         throw new NotFoundError();
       }
 
-      return app.prisma.member.update({
+      const reinstated = await app.prisma.member.update({
         where: { id: existing.id },
         data: { status: 'ACTIVE' },
         select: { id: true, memberNumber: true, status: true },
       });
+
+      await writeAudit(app.prisma, {
+        action: 'member.reinstated',
+        principal,
+        subjectType: 'Member',
+        subjectId: reinstated.id,
+        metadata: { memberNumber: reinstated.memberNumber },
+        ipAddress: request.ip,
+      });
+
+      return reinstated;
     },
   );
 
@@ -368,6 +428,16 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
         });
 
         return tx.claimCode.create({ data: claim.row });
+      });
+
+      await writeAudit(app.prisma, {
+        action: 'member.claim_code_issued',
+        principal,
+        subjectType: 'Member',
+        subjectId: existing.id,
+        // Never the code itself, not even hashed.
+        metadata: { expiresAt: issued.expiresAt.toISOString() },
+        ipAddress: request.ip,
       });
 
       return reply.code(201).send({

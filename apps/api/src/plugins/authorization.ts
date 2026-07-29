@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import fp from 'fastify-plugin';
 
 import { ForbiddenError, UnauthorizedError } from '../errors.js';
+import { writeAudit } from '../security/audit.js';
 import {
   actorFor,
   isRoutePermission,
@@ -118,10 +119,22 @@ const authorizationPlugin: FastifyPluginAsync = async (app) => {
     }
 
     if (principal.subjectType === 'STAFF') {
-      if (!principal.role) {
-        throw new ForbiddenError();
-      }
-      if (!roleHasPermission(principal.role, permission)) {
+      if (!principal.role || !roleHasPermission(principal.role, permission)) {
+        // §9: every authorization denial is logged, so a spike in them is
+        // visible. Written before the throw, since the throw ends the request.
+        await writeAudit(request.server.prisma, {
+          action: 'authorization.denied',
+          principal,
+          subjectType: 'Route',
+          metadata: {
+            permission,
+            method: request.method,
+            url: request.routeOptions.url ?? request.url,
+            role: principal.role ?? null,
+          },
+          ipAddress: request.ip,
+        });
+
         // 403, not 404: this is about the route, which is not a secret. A
         // record the caller may not see returns 404 — see errors.ts and
         // src/security/scope.ts.

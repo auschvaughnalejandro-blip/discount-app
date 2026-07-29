@@ -2,6 +2,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import type { Env } from '../config/env.js';
+import { writeAudit } from '../security/audit.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { verifyAgainstDummy, verifyPassword } from '../security/password.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
@@ -97,6 +98,16 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       : await verifyAgainstDummy();
 
     if (!staff || !passwordOk || staff.status !== 'ACTIVE') {
+      // §9: every authentication event. The email is not recorded — a failed
+      // login against a non-existent account would otherwise write the
+      // attacker's guess into the audit trail.
+      await writeAudit(app.prisma, {
+        action: 'auth.login.failure',
+        subjectType: 'StaffUser',
+        ...(staff ? { subjectId: staff.id } : {}),
+        ipAddress: request.ip,
+      });
+
       return reply.code(401).send({ error: 'invalid_credentials', message: 'Invalid credentials.' });
     }
 
@@ -126,6 +137,14 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       subjectId: staff.id,
       subjectType: 'STAFF',
       ttlSeconds: env.REFRESH_TOKEN_TTL_STAFF_SECONDS,
+    });
+
+    await writeAudit(app.prisma, {
+      action: 'auth.login.success',
+      principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
+      subjectType: 'StaffUser',
+      subjectId: staff.id,
+      ipAddress: request.ip,
     });
 
     return reply.code(200).send({
@@ -267,6 +286,17 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       rotated = await rotateRefreshToken(app.prisma, body.refreshToken, ttlSeconds);
     } catch (error) {
       if (error instanceof RefreshTokenError) {
+        if (error.reason === 'reuse_detected') {
+          // §9 alerts on this: a replayed refresh token means the chain was
+          // compromised, and the whole family has just been revoked.
+          await writeAudit(app.prisma, {
+            action: 'auth.refresh.reuse_detected',
+            subjectType: identity.subjectType,
+            subjectId: identity.subjectId,
+            metadata: { familyId: identity.familyId },
+            ipAddress: request.ip,
+          });
+        }
         // Every rejection reason — not found, already revoked, expired, or a
         // detected replay — returns the same response and forces the client
         // back through login/OTP. Reuse detection has already revoked the
@@ -300,6 +330,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     // Always 200, whether or not the token was valid — its validity is not
     // something this endpoint discloses.
     await revokeToken(app.prisma, body.refreshToken);
+    await writeAudit(app.prisma, { action: 'auth.logout', ipAddress: request.ip });
     return reply.code(200).send({ success: true });
   });
 
@@ -326,6 +357,13 @@ const authRoutes: FastifyPluginAsync = async (app) => {
           data: { tokenVersion: { increment: 1 } },
         });
       }
+
+      await writeAudit(app.prisma, {
+        action: 'auth.logout_all',
+        subjectType: identity.subjectType,
+        subjectId: identity.subjectId,
+        ipAddress: request.ip,
+      });
     }
 
     return reply.code(200).send({ success: true });

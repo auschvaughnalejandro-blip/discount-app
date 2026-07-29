@@ -15,6 +15,14 @@ import type { Principal } from './principal.js';
  * application role in the Stage 1 migration, so a caller cannot rewrite its
  * own trail.
  */
+/**
+ * The actions security-implementation.md §9 requires:
+ *
+ *   every member record viewed, and by whom; every verification lookup,
+ *   successful or not; every export; every benefit change; every membership
+ *   created, suspended or reinstated; every authentication event and
+ *   permission change; and every authorization denial.
+ */
 export type AuditAction =
   | 'benefit.created'
   | 'benefit.updated'
@@ -28,7 +36,25 @@ export type AuditAction =
   | 'redemption.reversed'
   | 'report.viewed'
   | 'report.exported'
-  | 'report.export.throttled';
+  | 'report.export.throttled'
+  // §9: "Who viewed which member's history is itself sensitive information,
+  // and the hotel should be able to answer that question."
+  | 'member.viewed'
+  | 'member.listed'
+  | 'member.created'
+  | 'member.updated'
+  | 'member.suspended'
+  | 'member.reinstated'
+  | 'member.claim_code_issued'
+  | 'member.claimed'
+  | 'member.consent_changed'
+  | 'auth.login.success'
+  | 'auth.login.failure'
+  | 'auth.logout'
+  | 'auth.logout_all'
+  | 'auth.refresh.reuse_detected'
+  // Every authorization denial, so a spike in them is visible.
+  | 'authorization.denied';
 
 export interface AuditEntry {
   action: AuditAction;
