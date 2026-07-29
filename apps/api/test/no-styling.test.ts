@@ -108,3 +108,54 @@ describe('the member client hardcodes no benefit values', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * §4: "Never `localStorage` — any XSS flaw becomes total account theft." And
+ * "No tokens in URLs. They reach logs, history and referrer headers."
+ *
+ * Asserted here rather than only stated in SECURITY-REVIEW.md, because a
+ * documented claim decays the moment someone adds a "remember me" checkbox.
+ * Comments are stripped first: all three clients discuss localStorage in
+ * comments explaining why they avoid it.
+ */
+describe('clients store no token where a script or a log can reach it', () => {
+  function stripComments(source: string): string {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\*.*$/gm, '')
+      .replace(/\/\/.*$/gm, '');
+  }
+
+  it.each(CLIENT_APPS)('%s uses no web storage API', (name) => {
+    const dir = join(REPO_ROOT, 'apps', name);
+    if (!existsSync(dir)) {
+      return;
+    }
+
+    const offenders = sourceFiles(dir)
+      .filter((file) => /\.(ts|tsx)$/i.test(file))
+      .filter((file) => {
+        const code = stripComments(readFileSync(file, 'utf8'));
+        return /localStorage|sessionStorage|document\.cookie/.test(code);
+      });
+
+    expect(offenders).toEqual([]);
+  });
+
+  it.each(CLIENT_APPS)('%s puts no token in a URL', (name) => {
+    const dir = join(REPO_ROOT, 'apps', name);
+    if (!existsSync(dir)) {
+      return;
+    }
+
+    const offenders = sourceFiles(dir)
+      .filter((file) => /\.(ts|tsx)$/i.test(file))
+      .filter((file) => {
+        const code = stripComments(readFileSync(file, 'utf8'));
+        // A token appearing in a query string or interpolated into a path.
+        return /[?&](access_?token|token|jwt)=/i.test(code);
+      });
+
+    expect(offenders).toEqual([]);
+  });
+});

@@ -1,7 +1,10 @@
 # Progress
 
 Last updated: 2026-07-29
-Current stage: 9 (complete) — the API is finished; next is Stage 10, Member client
+Current stage: 14 (complete) — all stages built. 245 tests passing.
+
+See SECURITY-REVIEW.md for the §12 checklist: 22 confirmed, 3 partial,
+5 deferred. The deferred items are listed there, not buried.
 
 ## Stages
 - [x] 0 — Foundation
@@ -14,11 +17,11 @@ Current stage: 9 (complete) — the API is finished; next is Stage 10, Member cl
 - [x] 7 — Redemption
 - [x] 8 — Reporting
 - [x] 9 — Audit logging
-- [ ] 10 — Member client
-- [ ] 11 — Verification client
-- [ ] 12 — Admin client
-- [ ] 13 — Integration & acceptance
-- [ ] 14 — Security review
+- [x] 10 — Member client
+- [x] 11 — Verification client
+- [x] 12 — Admin client
+- [x] 13 — Integration & acceptance
+- [x] 14 — Security review
 
 ## Stage log
 
@@ -324,6 +327,44 @@ present.
 
 **Full suite: 197 tests passing.** The API is feature-complete against Stages
 0–9.
+
+### Stages 10-12 — the three clients
+Status: complete. `apps/web-member`, `apps/web-verify`, `apps/web-admin` —
+React + Vite, plain semantic HTML, no stylesheet and no `className` anywhere.
+
+`test/no-styling.test.ts` enforces it across all three: no stylesheet file, no
+`className` or inline style, no styling dependency, no benefit literal, and
+(added at Stage 14) no `localStorage`/`sessionStorage`/`document.cookie` and no
+token in a URL.
+
+The verification client has no list or search call in its API module at all.
+The server refuses both for `outlet_staff` regardless, but a client offering
+the button would still be wrong (R11 — absent, not hidden).
+
+Verified beyond the suite: API and Vite dev server brought up together, whole
+member journey driven through the client's own `/api` proxy — admin creates a
+member, phase 1 issues an OTP, phase 2 claims it, benefits load with real
+values, the card payload rotates between calls, history shows own rows only.
+
+### Stage 13 — Integration and acceptance
+Status: complete. `test/acceptance-journey.test.ts` — all twelve steps in
+order against one running server, no step stubbed, each using what the previous
+produced. Steps 11–12 are the headline: dining 25% → 20% via PATCH, and the
+next member request returns 20% with no restart.
+
+Also maps all eighteen business rules to the files that verify them.
+
+### Stage 14 — Security review
+Status: complete. `SECURITY-REVIEW.md`.
+
+22 confirmed, 3 partial, 5 deferred. Two real defects had already been found
+and fixed by earlier stages' guards and are documented there — the scope-spread
+clobbering bug (§5's own illustrative snippet is unsafe when the fragment
+collides on `id`) and the missing verification session.
+
+The five deferred items: MFA, httpOnly cookies + CSRF, KMS, alerting, and
+security headers/CORS. Each is either an integration no document specifies or a
+conflict needing a human decision.
 
 ## Open questions blocking work
 
