@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { Env } from '../config/env.js';
@@ -60,6 +63,19 @@ function maskPhone(phone: string): string {
  * redaction layer. This is the single exception, and it exists only when both
  * gates above are open.
  */
+/**
+ * Where the code is also written, so finding it never depends on which
+ * terminal happens to be in front of you.
+ *
+ * Two dev servers cannot both hold port 3000; the loser exits, and its window
+ * then shows nothing while the winner serves the requests. Hunting for a code
+ * in the wrong window is not a puzzle worth setting anyone. A file has one
+ * location regardless.
+ *
+ * Gitignored, and only ever written when both gates are open.
+ */
+export const DEV_OTP_FILE = 'VERIFICATION-CODE.txt';
+
 export function echoOtpForDevelopment(
   _logger: FastifyBaseLogger,
   env: Pick<Env, 'NODE_ENV' | 'DEV_OTP_ECHO'>,
@@ -83,6 +99,22 @@ export function echoOtpForDevelopment(
   ].join('\n');
 
   process.stdout.write(`${box}\n`);
+
+  // Best effort. A failure here must never break a sign-in — this is a
+  // convenience, and the code has already been printed above.
+  try {
+    writeFileSync(
+      resolve(process.cwd(), DEV_OTP_FILE),
+      `${code}\n\n` +
+        `phone ending ${maskPhone(phone)}\n` +
+        `issued ${new Date().toISOString()}\n` +
+        `valid for 5 minutes\n\n` +
+        `Development only. Overwritten each time a code is issued.\n`,
+      'utf8',
+    );
+  } catch {
+    // Ignored on purpose.
+  }
 }
 
 /**
