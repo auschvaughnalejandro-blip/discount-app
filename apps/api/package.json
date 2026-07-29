@@ -12,7 +12,8 @@
     "migrate": "prisma migrate deploy",
     "migrate:dev": "prisma migrate dev",
     "seed": "tsx --env-file=.env prisma/seed.ts",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "predev": "powershell -ExecutionPolicy Bypass -File ../../scripts/stop.ps1 -Ports 3000"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
