@@ -19,7 +19,13 @@ export type AuditAction =
   | 'benefit.created'
   | 'benefit.updated'
   | 'benefit.published'
-  | 'benefit.unpublished';
+  | 'benefit.unpublished'
+  // §9: "Every verification lookup, successful or not." A run of failures
+  // against non-existent numbers is someone probing the sequence.
+  | 'verification.lookup.success'
+  | 'verification.lookup.failure'
+  | 'redemption.recorded'
+  | 'redemption.reversed';
 
 export interface AuditEntry {
   action: AuditAction;

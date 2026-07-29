@@ -71,6 +71,19 @@ const envSchema = z.object({
   // §7: "start around 24 hours, monitor verification failures at outlets, and
   // adjust." Changing this must need no code change.
   IDENTITY_CODE_WINDOW_HOURS: z.coerce.number().positive().default(24),
+
+  // -- Stage 7 -- verification lookups ------------------------------------
+  // security-implementation.md §5: "Rate limited hard: a handful of lookups
+  // per staff member per hour. Membership numbers are sequential and printed
+  // on cards, so an unlimited lookup endpoint is an enumeration tool."
+  // "A handful per hour" is the only quantity given; 30 reads that generously
+  // for a busy restaurant shift. See PROGRESS.md.
+  RATE_LIMIT_VERIFY_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  RATE_LIMIT_VERIFY_PER_STAFF_MAX: z.coerce.number().int().positive().default(30),
+  // §5: the resolve result is "bound to a short-lived verification session --
+  // staff can act on that member for a few minutes, then the context expires."
+  // "A few minutes" is the only quantity given.
+  VERIFICATION_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 });
 
 export type Env = z.infer<typeof envSchema>;

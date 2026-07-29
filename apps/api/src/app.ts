@@ -11,6 +11,7 @@ import benefitRoutes from './routes/benefits.js';
 import healthRoutes from './routes/health.js';
 import identityRoutes from './routes/identity.js';
 import memberRoutes from './routes/member.js';
+import verifyRoutes from './routes/verify.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -55,6 +56,7 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(memberRoutes);
   await app.register(benefitRoutes);
   await app.register(identityRoutes);
+  await app.register(verifyRoutes);
 
   return app;
 }
