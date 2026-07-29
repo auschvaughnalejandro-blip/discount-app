@@ -1,7 +1,7 @@
 # Progress
 
 Last updated: 2026-07-29
-Current stage: 4 (complete) — next is Stage 5, Benefits
+Current stage: 9 (complete) — the API is finished; next is Stage 10, Member client
 
 ## Stages
 - [x] 0 — Foundation
@@ -9,11 +9,11 @@ Current stage: 4 (complete) — next is Stage 5, Benefits
 - [x] 2 — Authentication
 - [x] 3 — Authorization
 - [x] 4 — Member lifecycle
-- [ ] 5 — Benefits
-- [ ] 6 — Identity codes
-- [ ] 7 — Redemption
-- [ ] 8 — Reporting
-- [ ] 9 — Audit logging
+- [x] 5 — Benefits
+- [x] 6 — Identity codes
+- [x] 7 — Redemption
+- [x] 8 — Reporting
+- [x] 9 — Audit logging
 - [ ] 10 — Member client
 - [ ] 11 — Verification client
 - [ ] 12 — Admin client
@@ -255,6 +255,75 @@ legitimate (two pre-authentication, one transitively scoped) and one — a
 member instead. The guard was also taught to resolve a `where` passed as a
 variable, and given eight tests of its own proving that relaxation did not turn
 it into a no-op.
+
+### Stage 5 — Benefits
+Status: complete. `src/routes/benefits.ts`, `src/security/audit.ts`,
+`test/benefits.test.ts` (19 tests).
+
+Acceptance: **the headline R14 test passes** — an administrator PATCHes the
+dining discount 25% → 20% and the next member request to `GET /benefits` returns
+20%, same process, no restart. Enforced negatively too: a test scans `src/` for
+every value from the printed sheet and for a benefit key sitting next to a
+percentage, so the "just for now" lookup table fails the build. Unpublished
+benefits invisible to members; every change versioned, attributed, audited; a
+manager may read but not edit.
+
+### Stage 6 — Identity codes
+Status: complete. `src/security/identity-codes.ts`, `src/routes/identity.ts`,
+`test/identity-codes.test.ts` (16 tests).
+
+`v1.<memberRef>.<issuedAt>.<hmac>`, signed over all three parts so neither the
+reference nor the timestamp can be swapped alone. Signature is checked before
+freshness — checking age first would mean reasoning about a timestamp an
+attacker chose. Future-dated payloads rejected, or they would never expire. The
+window is a parameter; a test asserts the module contains no baked-in 24.
+
+### Stage 7 — Redemption
+Status: complete. `src/routes/verify.ts`,
+`src/security/verification-session.ts`, `test/redemption.test.ts` (32 tests).
+
+**Two real defects the fetch-then-check guard surfaced:**
+1. §5 requires the resolve result to be "bound to a short-lived verification
+   session". It was not built, so `POST /verify/redemptions` would accept any
+   member id an outlet_staff account sent, resolved or not. Now an HMAC over
+   (staffUserId, memberId, issuedAt), issued by resolve and required by record.
+2. The idempotency-key lookup was unscoped. The key is client-supplied, so a
+   guessed key disclosed another outlet's redemption. Now outlet-scoped.
+
+Acceptance: spa with 3 guests rejected (cap 2), events with 15 rejected (min
+20), both read from the database — widening the cap makes 3 succeed. Suspended
+member rejected, history preserved (completing the half of Stage 4's criterion
+that needed this endpoint). Idempotency verified including two submissions in
+flight at once. Reversal leaves the original byte-identical, compared column by
+column.
+
+### Stage 8 — Reporting
+Status: complete. `src/reporting/`, `src/routes/reports.ts`,
+`test/reporting.test.ts` (20 tests).
+
+Names map to `Prisma.Sql` fragments written in `src/reporting/metrics.ts`;
+nothing caller-supplied reaches a query. Tested with real injection payloads in
+both fields plus a source scan for `queryRawUnsafe` and concatenation.
+Suppression counts **distinct members, not rows** — four redemptions by one
+member is a cohort of one — and withholds the cohort size along with the
+figures. Verified against a benefit used by exactly three members, then taking
+that cohort to five. Export returns membership numbers, never names.
+
+### Stage 9 — Audit logging and redaction
+Status: complete. `src/logging/redaction.ts`, `test/audit.test.ts` (16 tests).
+
+Full §9 action list, including every authorization denial. Redaction uses two
+mechanisms: pino paths for shapes it logs itself, and a serializer that walks
+caller-supplied objects at any depth — the latter is what makes
+`log.info({ member })` safe. Opaque references pass through, or redaction would
+strip the identifiers that make an entry useful.
+
+Verified beyond the suite: brought the real dev server up, listed members over
+HTTP, grepped its actual log output for all four seeded member names. None
+present.
+
+**Full suite: 197 tests passing.** The API is feature-complete against Stages
+0–9.
 
 ## Open questions blocking work
 
