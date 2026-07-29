@@ -1,5 +1,8 @@
-// Stage 0 — Prisma initialised only. The data model is Stage 1.
-// Do not add models here ahead of Stage 1 (BUILD-PLAN §0 rule 5).
+// Privilege Guest Program — data model (Stage 1).
+//
+// There are no points, tiers, balances or earned currency in this programme.
+// Benefits are a fixed schedule granted on joining. If a `balance` column ever
+// appears here, it is a misreading of the specification.
 
 generator client {
   provider = "prisma-client-js"
@@ -7,5 +10,253 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // The application connects as the least-privileged role, which is denied
+  // UPDATE/DELETE on redemptions (R7).
   url      = env("DATABASE_URL")
+  // Migrations run as the schema owner. Prisma Migrate uses `directUrl` when
+  // it is present, so the revocation cannot be defeated by the migration that
+  // creates the tables.
+  directUrl = env("DATABASE_MIGRATION_URL")
+}
+
+enum MemberStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum Role {
+  ADMINISTRATOR
+  MANAGER
+  OUTLET_STAFF
+  SUPPORT
+}
+
+enum OutletKind {
+  DINING
+  SPA
+  ROOMS
+  EVENTS
+  OTHER
+}
+
+enum Channel {
+  EMAIL
+  SMS
+}
+
+enum SubjectType {
+  MEMBER
+  STAFF
+}
+
+/// Members are suspended, never deleted (R16) — deleting one destroys the
+/// redemption history reporting depends on.
+model Member {
+  /// Opaque internal reference. This is what the identity payload carries (R3);
+  /// `memberNumber` never appears in a code.
+  id              String       @id @default(uuid())
+  /// Public, sequential, printed on the physical card: "PG-0003". Guessable by
+  /// design, which is exactly why it is not the identity payload's subject.
+  memberNumber    String       @unique
+  fullName        String
+  phone           String?      @unique
+  email           String?
+  status          MemberStatus @default(ACTIVE)
+  joinedAt        DateTime
+  /// Null until the member activates the app. "Issued a card but never claimed
+  /// the app" is a distinct, reportable state from "claimed but never redeemed".
+  claimedAt       DateTime?
+  createdByUserId String
+  createdAt       DateTime     @default(now())
+
+  createdBy   StaffUser       @relation("MemberCreatedBy", fields: [createdByUserId], references: [id])
+  claimCodes  ClaimCode[]
+  redemptions Redemption[]
+  consents    ConsentRecord[]
+
+  @@index([status])
+  @@index([claimedAt])
+}
+
+/// Single-use invitation code that activates a membership (R1).
+model ClaimCode {
+  id        String    @id @default(uuid())
+  memberId  String
+  /// Never store plaintext (R2). At least 128 bits of entropy, and never
+  /// derived from the sequential membership number printed on the card.
+  codeHash  String    @unique
+  expiresAt DateTime
+  /// Set atomically on first successful activation. A second attempt fails.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId])
+  @@index([expiresAt])
+}
+
+model StaffUser {
+  id           String     @id @default(uuid())
+  fullName     String
+  email        String     @unique
+  passwordHash String
+  role         Role
+  /// Required when role = OUTLET_STAFF. Enforced by a CHECK constraint in the
+  /// migration, not only in application code.
+  outletId     String?
+  /// Incrementing this invalidates every outstanding access token for the user
+  /// — the mechanism behind logout-everywhere, role change and offboarding.
+  tokenVersion Int        @default(1)
+  mfaSecret    String?
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+
+  outlet         Outlet?      @relation(fields: [outletId], references: [id])
+  membersCreated Member[]     @relation("MemberCreatedBy")
+  redemptions    Redemption[]
+  benefitsEdited Benefit[]
+
+  @@index([role])
+  @@index([outletId])
+}
+
+model Outlet {
+  id     String     @id @default(uuid())
+  name   String
+  kind   OutletKind
+  active Boolean    @default(true)
+
+  staff       StaffUser[]
+  redemptions Redemption[]
+}
+
+/// Every value a member sees is a row here, never a constant in code (R14).
+/// Changing the dining discount from 25% to 20% must be a database update.
+model Benefit {
+  id              String   @id @default(uuid())
+  key             String   @unique
+  title           String
+  category        String
+  discountPct     Decimal  @db.Decimal(5, 2)
+  /// e.g. "Retail products" at the spa, "Outside catering" for events.
+  secondaryLabel  String?
+  secondaryPct    Decimal? @db.Decimal(5, 2)
+  /// e.g. { "6-12": 50, "0-6": 100 } — percentage off, by age band.
+  childRules      Json?
+  /// Party-size cap (R5). 6 for dining, 2 for spa.
+  maxGuests       Int?
+  /// Party-size floor (R6). Events require 20.
+  minGuests       Int?
+  reservationPhone String?
+  terms           String
+  published       Boolean  @default(false)
+  sortOrder       Int
+  /// Incremented on every change, with the editing user recorded, because
+  /// "who changed the spa discount, and when" is a question that will be asked.
+  version         Int      @default(1)
+  updatedByUserId String?
+  updatedAt       DateTime @updatedAt
+
+  updatedBy   StaffUser?   @relation(fields: [updatedByUserId], references: [id])
+  redemptions Redemption[]
+
+  @@index([published, sortOrder])
+}
+
+/// Immutable (R7). UPDATE and DELETE are revoked for the application role at
+/// the database level; a correction is a new row carrying `reversesId`.
+model Redemption {
+  id             String   @id @default(uuid())
+  memberId       String
+  benefitId      String
+  outletId       String
+  staffUserId    String
+  partySize      Int?
+  /// Minor units (fils) as an integer. Never a float — money does not survive
+  /// binary floating point.
+  billAmountMinor Int?
+  /// Client-supplied; a retried submission must not double-record (R8).
+  idempotencyKey String   @unique
+  /// Set on a reversing entry. The row it points at is never touched.
+  reversesId     String?  @unique
+  occurredAt     DateTime @default(now())
+
+  member    Member      @relation(fields: [memberId], references: [id])
+  benefit   Benefit     @relation(fields: [benefitId], references: [id])
+  outlet    Outlet      @relation(fields: [outletId], references: [id])
+  staffUser StaffUser   @relation(fields: [staffUserId], references: [id])
+  reverses  Redemption? @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy Redemption? @relation("Reversal")
+
+  @@index([memberId, occurredAt])
+  @@index([outletId, occurredAt])
+  @@index([benefitId, occurredAt])
+  @@index([occurredAt])
+}
+
+/// Consent is per channel, unticked by default, stored with timestamp and
+/// wording version (R15). Withdrawal takes effect immediately.
+model ConsentRecord {
+  id             String   @id @default(uuid())
+  memberId       String
+  channel        Channel
+  granted        Boolean
+  wordingVersion String
+  recordedAt     DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([memberId, channel, recordedAt])
+}
+
+/// Opaque refresh tokens, hashed at rest, grouped into families. Replaying a
+/// spent token revokes the entire family.
+model RefreshToken {
+  id          String      @id @default(uuid())
+  subjectId   String
+  subjectType SubjectType
+  familyId    String
+  tokenHash   String      @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+
+  @@index([familyId])
+  @@index([subjectType, subjectId])
+  @@index([expiresAt])
+}
+
+/// Append-only. Who viewed which member's history is itself sensitive.
+model AuditLog {
+  id          String   @id @default(uuid())
+  actorType   String
+  actorId     String?
+  action      String
+  subjectType String?
+  subjectId   String?
+  metadata    Json?
+  ipAddress   String?
+  occurredAt  DateTime @default(now())
+
+  @@index([actorId, occurredAt])
+  @@index([subjectType, subjectId, occurredAt])
+  @@index([action, occurredAt])
+}
+
+model OtpCode {
+  id        String    @id @default(uuid())
+  phone     String
+  /// Hashed at rest — a leaked table of live codes is account takeover.
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+
+  @@index([phone, expiresAt])
 }

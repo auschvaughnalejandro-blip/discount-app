@@ -68,3 +68,84 @@ Alternative: create `apps/web-member`, `apps/web-verify`, `apps/web-admin` as em
 workspaces now, matching BUILD-PLAN §4's directory listing.
 §0 rule 5 says do not work ahead, and the three apps are Stages 10–12. The root
 `workspaces` globs already cover `apps/*`, so nothing needs changing when they arrive.
+
+---
+
+**2026-07-29 — Membership numbers come from a PostgreSQL sequence, not application code.**
+Alternatives: `MAX(memberNumber) + 1` in the application; a UUID rendered as digits.
+R3 requires sequential public numbers. Computing the next value in application code
+races: two administrators creating a member at the same moment both read the same
+maximum. `member_number_seq` plus `next_member_number()` returning `PG-0004` makes
+that impossible, and keeps the format in one place.
+
+---
+
+**2026-07-29 — `directUrl` in the Prisma datasource, so migrations run as the schema owner.**
+Alternative: one connection string; or overriding `DATABASE_URL` in the migrate script.
+R7 only means something if the application role is not the table owner — an owner
+cannot be denied its own tables. Prisma Migrate uses `directUrl` when present, so
+`DATABASE_URL` stays the least-privileged application role and migrations get the
+owner without a wrapper script or an extra dependency.
+
+---
+
+**2026-07-29 — The app role is created in the Docker init script; grants live in a migration.**
+Alternative: create the role inside the migration too.
+Creating the role in a migration would put its password in version control. The
+init script reads it from a compose environment variable instead. The migration
+only GRANTs and REVOKEs, guarded so it is a no-op where the role does not exist —
+which is why the Stage 1 test asserts the rejection rather than assuming it.
+
+---
+
+**2026-07-29 — Five outlets, one per `OutletKind`.**
+Alternatives: the four outlets named in the wireframes (Crust, Olea, The Spa,
+Entrance), which leaves events and rooms with nowhere to record a redemption.
+The build plan calls for five. Chose Crust (DINING), The Spa (SPA), Rooms &
+Residence (ROOMS), Meetings & Events (EVENTS) and Entrance (OTHER, for valet), so
+every benefit has somewhere to be redeemed. Olea is dropped to stay at five; the
+real outlet list is client data to be entered through the dashboard.
+
+---
+
+**2026-07-29 — CHECK constraints for invariants Prisma cannot express.**
+Alternative: enforce these only in application code at Stage 7.
+`minGuests`/`maxGuests` coherence, positive party size, percentages within 0–100,
+an outlet on exactly the `OUTLET_STAFF` role, and a reversal not pointing at itself
+are all cheap in the database and cannot then be bypassed by a bug in a handler.
+Stage 7 still validates R5 and R6 per benefit — these are a backstop, not the rule.
+
+---
+
+**2026-07-29 — Argon2id parameters appear in the seed ahead of Stage 2.**
+Alternative: seed a placeholder hash and leave all hashing to Stage 2.
+The seed has to create a usable administrator, which means a real hash. It uses the
+exact parameters from security-implementation.md §3 (m=65536, t=3, p=2, 32-byte
+output). The pepper that §3 also requires is deferred to Stage 2 and marked
+`TODO(stage-2)`; seeded hashes must be regenerated when it lands.
+
+---
+
+**2026-07-29 — `Algorithm` imported as a type, with an annotated constant.**
+Alternative: disable `verbatimModuleSyntax`, or write a bare `2`.
+`@node-rs/argon2` exports `Algorithm` as an ambient `const enum`, which
+`verbatimModuleSyntax` cannot import as a value. `const ARGON2ID: Algorithm = 2`
+keeps the value checked against the enum rather than being an unexplained number,
+without weakening the compiler settings for the whole workspace.
+
+---
+
+**2026-07-29 — Compose publishes PostgreSQL on host port 5433.**
+Alternative: the default 5432.
+This machine already runs a PostgreSQL 18 service on 5432, so the compose stack
+would fail to bind. 5433 avoids the collision; the container still listens on 5432
+internally.
+
+---
+
+**2026-07-29 — Integration tests require a database rather than mocking Prisma.**
+Alternative: mock the Prisma client so `npm test` runs anywhere.
+The Stage 1 acceptance criteria are statements about the database — that a REVOKE
+is effective, that a column is an integer, that a CHECK constraint fires. A mock
+cannot verify any of them; it would only assert that the test author remembered the
+rule. `test/health.test.ts` still runs without a database.
