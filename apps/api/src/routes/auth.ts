@@ -3,7 +3,8 @@ import { z } from 'zod';
 
 import type { Env } from '../config/env.js';
 import { writeAudit } from '../security/audit.js';
-import { echoOtpForDevelopment } from '../security/dev-otp.js';
+import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
+import { normalizePhone } from '../security/phone.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { verifyAgainstDummy, verifyPassword } from '../security/password.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
@@ -174,17 +175,38 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return sendTooManyRequests(reply, identifierLimit.retryAfterSeconds);
     }
 
+    // Accepts 55550003, +974 5555 0003, 0097455550003 — all the same member.
+    const phone = normalizePhone(body.phone, {
+      defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE,
+    });
+
     // Only a claimed, active member can sign back in this way — an unclaimed
     // member goes through /member/claim (Stage 4), not this endpoint.
-    const member = await app.prisma.member.findUnique({ where: { phone: body.phone } });
+    const member = phone
+      ? await app.prisma.member.findUnique({ where: { phone } })
+      : null;
 
-    if (member && member.claimedAt !== null && member.status === 'ACTIVE') {
+    if (phone && member && member.claimedAt !== null && member.status === 'ACTIVE') {
       // TODO(open-question): no SMS provider is named anywhere in the
       // reference documents. `issueOtp` stores the hashed code; nothing
       // sends it. This is an unimplemented integration point, not a
       // silently-decided one — see PROGRESS.md.
-      const issued = await issueOtp(app.prisma, body.phone);
-      echoOtpForDevelopment(app.log, env, body.phone, issued.code);
+      const issued = await issueOtp(app.prisma, phone);
+      echoOtpForDevelopment(app.log, env, phone, issued.code);
+    } else {
+      // The HTTP response below is identical either way; this line exists so
+      // the terminal is never silent when a code was asked for.
+      echoNoOtpForDevelopment(
+        env,
+        phone ?? body.phone,
+        !phone
+          ? 'that is not a usable phone number'
+          : !member
+            ? 'no member has that number'
+            : member.claimedAt === null
+              ? 'membership not activated yet - use the invitation code'
+              : 'membership is suspended',
+      );
     }
 
     // Identical response whether or not the number is registered — on a
@@ -207,13 +229,17 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return sendTooManyRequests(reply, ipLimit.retryAfterSeconds);
     }
 
-    const result = await verifyOtp(app.prisma, body.phone, body.code);
+    const phone =
+      normalizePhone(body.phone, { defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE }) ??
+      body.phone;
+
+    const result = await verifyOtp(app.prisma, phone, body.code);
 
     if (!result.ok) {
       return reply.code(401).send({ error: 'invalid_code', message: 'Invalid or expired code.' });
     }
 
-    const member = await app.prisma.member.findUnique({ where: { phone: body.phone } });
+    const member = await app.prisma.member.findUnique({ where: { phone } });
 
     if (!member || member.status !== 'ACTIVE') {
       return reply.code(401).send({ error: 'invalid_code', message: 'Invalid or expired code.' });

@@ -137,6 +137,40 @@ export function echoOtpForDevelopment(
 }
 
 /**
+ * Printed when a code was asked for but none was issued.
+ *
+ * `/auth/member/request-otp` answers identically whether or not the number is
+ * registered (§3, account enumeration), which is correct and must stay — but
+ * it means an unrecognised number produces silence, and silence is
+ * indistinguishable from the feature being broken. This says which it was, to
+ * the developer only, and never over HTTP.
+ */
+export function echoNoOtpForDevelopment(
+  env: Pick<Env, 'NODE_ENV' | 'DEV_OTP_ECHO'>,
+  phone: string,
+  reason: string,
+): void {
+  if (!isDevOtpEchoEnabled(env)) {
+    return;
+  }
+
+  process.stdout.write(
+    [
+      '',
+      '  ══════════════════════════════════════════',
+      '   NO CODE ISSUED  (development only)',
+      '',
+      `   phone ending  ${maskPhone(phone)}`,
+      `   reason        ${reason}`,
+      '',
+      '  ══════════════════════════════════════════',
+      '',
+      '',
+    ].join('\n'),
+  );
+}
+
+/**
  * Printed once at startup so an operator cannot miss that codes are being
  * written to the terminal. This one goes through the logger — it carries no
  * credential and no personal data, and belongs in the log record.

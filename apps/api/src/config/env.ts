@@ -90,6 +90,11 @@ const envSchema = z.object({
   // exist. Defaults off, so it must be switched on deliberately.
   // Only the exact string "true" enables it. Anything else — absent, empty,
   // "1", "TRUE", "yes" — is off, so a typo fails closed.
+  // Applied to a bare local number so a member can type 55550003 rather than
+  // +97455550003. Configuration, not a constant, so a property in another
+  // country needs no code change.
+  DEFAULT_PHONE_COUNTRY_CODE: z.string().regex(/^\+\d{1,4}$/).default('+974'),
+
   DEV_OTP_ECHO: z
     .string()
     .default('false')

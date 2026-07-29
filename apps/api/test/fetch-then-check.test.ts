@@ -33,7 +33,9 @@ const READ_METHODS = ['findFirst', 'findMany', 'findUnique', 'findUniqueOrThrow'
 const EXEMPT: { file: string; snippet: string; reason: string }[] = [
   {
     file: 'auth.ts',
-    snippet: 'prisma.member.findUnique({ where: { phone: body.phone }',
+    // `{ phone }` since the number is normalised into a local before the
+    // lookup — 55550003 and +97455550003 must find the same member.
+    snippet: 'prisma.member.findUnique({ where: { phone }',
     reason:
       'Pre-authentication OTP lookup (request-otp and verify-otp). There is no principal yet, so ' +
       'there is nothing to scope to — establishing who the caller is IS the purpose of the call. ' +

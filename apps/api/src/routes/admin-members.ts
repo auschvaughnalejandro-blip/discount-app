@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { NotFoundError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { generateClaimCode } from '../security/claim-codes.js';
+import { normalizePhone } from '../security/phone.js';
 import { revokeAllForSubject } from '../security/refresh-tokens.js';
 import { scopeForMember, scopedWhere } from '../security/scope.js';
 
@@ -83,7 +84,14 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
         data: {
           memberNumber,
           fullName: body.fullName,
-          phone: body.phone ?? null,
+          // Normalised on the way in, or one member is created as
+          // +97455550003 and another as 55550003 and the unique index does not
+          // notice they are the same person.
+          phone: body.phone
+            ? (normalizePhone(body.phone, {
+                defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE,
+              }) ?? body.phone)
+            : null,
           email: body.email ?? null,
           status: 'ACTIVE',
           joinedAt: new Date(),
@@ -274,7 +282,15 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       where: { id: existing.id },
       data: {
         ...(body.fullName !== undefined ? { fullName: body.fullName } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
+        ...(body.phone !== undefined
+          ? {
+              phone: body.phone
+                ? (normalizePhone(body.phone, {
+                    defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE,
+                  }) ?? body.phone)
+                : null,
+            }
+          : {}),
         ...(body.email !== undefined ? { email: body.email } : {}),
       },
       select: {

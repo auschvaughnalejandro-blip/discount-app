@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { NotFoundError, RateLimitedError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
-import { echoOtpForDevelopment } from '../security/dev-otp.js';
+import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
+import { normalizePhone } from '../security/phone.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { issueRefreshToken } from '../security/refresh-tokens.js';
@@ -78,16 +79,27 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const phaseTwo = claimPhaseTwoSchema.safeParse(request.body);
-    const body = phaseTwo.success ? phaseTwo.data : claimPhaseOneSchema.parse(request.body);
+    const parsed = phaseTwo.success ? phaseTwo.data : claimPhaseOneSchema.parse(request.body);
+
+    // Normalised before anything compares it, so 55550003 and +97455550003
+    // are the same member rather than two.
+    const normalizedPhone = normalizePhone(parsed.phone, {
+      defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE,
+    });
+    const body = { ...parsed, phone: normalizedPhone ?? parsed.phone };
 
     // Every failure below returns this same response. Which part was wrong —
     // unknown code, expired code, already used, wrong phone — is exactly what
     // an attacker holding a discarded letter would want to learn.
-    const invalid = () =>
-      reply.code(400).send({
+    const invalid = (devReason: string) => {
+      // The HTTP body is identical for every failure (§3); this tells the
+      // developer which one it was, to the terminal only.
+      echoNoOtpForDevelopment(env, body.phone, devReason);
+      return reply.code(400).send({
         error: 'invalid_claim',
         message: 'That invitation code is not valid.',
       });
+    };
 
     const claimCode = await app.prisma.claimCode.findUnique({
       where: { codeHash: hashClaimCode(body.claimCode) },
@@ -102,18 +114,27 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
       },
     });
 
-    if (!claimCode || claimCode.usedAt !== null || claimCode.expiresAt.getTime() <= Date.now()) {
-      return invalid();
+    if (!claimCode) {
+      return invalid('no such invitation code');
     }
-    if (claimCode.member.status !== 'ACTIVE' || claimCode.member.claimedAt !== null) {
-      return invalid();
+    if (claimCode.usedAt !== null) {
+      return invalid('that invitation code has already been used');
+    }
+    if (claimCode.expiresAt.getTime() <= Date.now()) {
+      return invalid('that invitation code has expired');
+    }
+    if (claimCode.member.status !== 'ACTIVE') {
+      return invalid('that membership is suspended');
+    }
+    if (claimCode.member.claimedAt !== null) {
+      return invalid('that membership is already activated - use Sign in');
     }
 
     // Where the hotel already recorded a phone number, the one supplied must
     // match it. Where it did not, the member supplies it here and it becomes
     // their sign-in credential (wireframes screen 1 note 3).
     if (claimCode.member.phone !== null && claimCode.member.phone !== body.phone) {
-      return invalid();
+      return invalid('that invitation belongs to a different phone number');
     }
     if (claimCode.member.phone === null) {
       const takenBy = await app.prisma.member.findUnique({
@@ -121,7 +142,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
         select: { id: true },
       });
       if (takenBy && takenBy.id !== claimCode.memberId) {
-        return invalid();
+        return invalid('another membership already uses that phone number');
       }
     }
 
@@ -193,7 +214,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     });
 
     if (!claimed) {
-      return invalid();
+      return invalid('that invitation code was consumed by another request');
     }
 
     const accessToken = await issueAccessToken({
