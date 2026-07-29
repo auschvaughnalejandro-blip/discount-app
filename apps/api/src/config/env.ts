@@ -48,6 +48,22 @@ const envSchema = z.object({
   RATE_LIMIT_OTP_REQUEST_PER_IDENTIFIER_MAX: z.coerce.number().int().positive().default(3),
   RATE_LIMIT_OTP_VERIFY_PER_IP_MAX: z.coerce.number().int().positive().default(20),
   RATE_LIMIT_OTP_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
+
+  // ── Stage 4 — member lifecycle ────────────────────────────────────────
+  // security-implementation.md §3 requires claim codes to expire "after a
+  // defined period" but does not define one, and product-definition.md §8 is
+  // silent. 30 days assumes a posted invitation letter. See PROGRESS.md.
+  CLAIM_CODE_TTL_HOURS: z.coerce.number().int().positive().default(720),
+  // §10: consent is stored with the wording version it was given against, so
+  // a later change to the wording does not retroactively reinterpret it.
+  CONSENT_WORDING_VERSION: z.string().min(1).default('v1-2026-07'),
+  // §3: "Strict rate limiting on the activation endpoint, since a guessable
+  // claim code grants a genuine membership."
+  RATE_LIMIT_CLAIM_PER_IP_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_CLAIM_WINDOW_SECONDS: z.coerce.number().int().positive().default(900),
+  // §8: "Pagination caps so no endpoint can be coerced into returning the
+  // full membership."
+  MEMBER_LIST_MAX_PAGE_SIZE: z.coerce.number().int().positive().default(100),
 });
 
 export type Env = z.infer<typeof envSchema>;

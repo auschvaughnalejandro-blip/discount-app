@@ -5,8 +5,10 @@ import type { Env } from './config/env.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import prismaPlugin from './plugins/prisma.js';
+import adminMemberRoutes from './routes/admin-members.js';
 import authRoutes from './routes/auth.js';
 import healthRoutes from './routes/health.js';
+import memberRoutes from './routes/member.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -47,6 +49,8 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
+  await app.register(adminMemberRoutes);
+  await app.register(memberRoutes);
 
   return app;
 }
