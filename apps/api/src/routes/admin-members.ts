@@ -207,14 +207,17 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       throw new NotFoundError();
     }
 
+    const { consents, _count, ...fields } = member;
+
     return {
-      ...member,
+      ...fields,
       appClaimed: member.claimedAt !== null,
-      totalUses: member._count.redemptions,
-      // Latest record per channel wins; the full history stays available
-      // because consent rows are append-only and are the evidence of what was
-      // agreed and when (§10, wireframes D4 note 3).
-      consent: currentConsent(member.consents),
+      totalUses: _count.redemptions,
+      // Latest record per channel is the current state; the full history is
+      // returned alongside it because consent rows are append-only and are
+      // the evidence of what was agreed and when (§10, wireframes D4 note 3).
+      consent: currentConsent(consents),
+      consentHistory: consents,
     };
   });
 

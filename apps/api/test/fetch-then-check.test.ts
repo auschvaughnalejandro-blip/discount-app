@@ -129,51 +129,53 @@ function whereVariableIsScoped(lines: string[], callStart: number, call: string)
   return false;
 }
 
-function findUnscopedReads(): Finding[] {
+/** The analyzer, over one file's text. Separated so it can be tested itself. */
+function scanSource(relative: string, source: string): Finding[] {
   const findings: Finding[] = [];
+  const lines = source.split('\n');
 
-  for (const file of sourceFiles(ROUTES_DIR)) {
-    const relative = file.slice(file.lastIndexOf('routes') + 'routes'.length + 1);
-    const source = readFileSync(file, 'utf8');
-    const lines = source.split('\n');
-
-    for (const [index, line] of lines.entries()) {
-      for (const model of SCOPED_MODELS) {
-        for (const method of READ_METHODS) {
-          const pattern = `prisma.${model}.${method}`;
-          if (!line.includes(pattern)) {
-            continue;
-          }
-
-          // Look at the whole call, which may wrap across several lines.
-          const statement = lines.slice(index, index + 8).join('\n');
-          const callEnd = statement.indexOf('});');
-          const call = callEnd === -1 ? statement : statement.slice(0, callEnd);
-
-          if (call.includes('scopeFor')) {
-            continue;
-          }
-
-          if (whereVariableIsScoped(lines, index, call)) {
-            continue;
-          }
-
-          const exempt = EXEMPT.some(
-            (entry) =>
-              relative.endsWith(entry.file) &&
-              call.replace(/\s+/g, ' ').includes(entry.snippet.replace(/\s+/g, ' ')),
-          );
-          if (exempt) {
-            continue;
-          }
-
-          findings.push({ file: relative, line: index + 1, statement: call.trim() });
+  for (const [index, line] of lines.entries()) {
+    for (const model of SCOPED_MODELS) {
+      for (const method of READ_METHODS) {
+        const pattern = `prisma.${model}.${method}`;
+        if (!line.includes(pattern)) {
+          continue;
         }
+
+        // Look at the whole call, which may wrap across several lines.
+        const statement = lines.slice(index, index + 8).join('\n');
+        const callEnd = statement.indexOf('});');
+        const call = callEnd === -1 ? statement : statement.slice(0, callEnd);
+
+        if (call.includes('scopeFor')) {
+          continue;
+        }
+
+        if (whereVariableIsScoped(lines, index, call)) {
+          continue;
+        }
+
+        const exempt = EXEMPT.some(
+          (entry) =>
+            relative.endsWith(entry.file) &&
+            call.replace(/\s+/g, ' ').includes(entry.snippet.replace(/\s+/g, ' ')),
+        );
+        if (exempt) {
+          continue;
+        }
+
+        findings.push({ file: relative, line: index + 1, statement: call.trim() });
       }
     }
   }
 
   return findings;
+}
+
+function findUnscopedReads(): Finding[] {
+  return sourceFiles(ROUTES_DIR).flatMap((file) =>
+    scanSource(file.slice(file.lastIndexOf('routes') + 'routes'.length + 1), readFileSync(file, 'utf8')),
+  );
 }
 
 describe('no handler fetches a scoped record and checks permission afterwards', () => {
@@ -202,5 +204,103 @@ describe('no handler fetches a scoped record and checks permission afterwards', 
     const files = sourceFiles(ROUTES_DIR);
     expect(files.length).toBeGreaterThan(0);
     expect(files.some((f) => f.endsWith('auth.ts'))).toBe(true);
+  });
+});
+
+/**
+ * The analyzer accepts a `where` passed as a variable, which is a real
+ * pattern (the member list shares one between `count` and `findMany`) but
+ * also the obvious way for the check to become a no-op. These fix what it
+ * must still catch.
+ */
+describe('the guard itself still detects what it is for', () => {
+  it('flags a plain unscoped read', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      `const m = await app.prisma.member.findFirst({ where: { id: req.params.id } });`,
+    );
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it('flags the fetch-then-check pattern §5 warns about', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      [
+        `const m = await app.prisma.member.findUnique({ where: { id: req.params.id } });`,
+        `if (!can(principal, m)) { throw new ForbiddenError(); }`,
+      ].join('\n'),
+    );
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it('flags a read whose where variable was built without a scope', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      [
+        `const where = { id: req.params.id };`,
+        `const m = await app.prisma.member.findFirst({ where });`,
+      ].join('\n'),
+    );
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it('flags a read with no where clause at all', () => {
+    const findings = scanSource('synthetic.ts', `const all = await app.prisma.member.findMany();`);
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it('accepts an inline scope fragment', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      `const m = await app.prisma.member.findFirst({
+         where: scopedWhere({ id: req.params.id }, scopeForMember(principal)),
+       });`,
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it('accepts a where variable that was built with a scope', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      [
+        `const where = scopedWhere(filters, scopeForMember(principal));`,
+        `const m = await app.prisma.member.findMany({ where, take: 10 });`,
+      ].join('\n'),
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it('does not accept a scope assigned to a different variable', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      [
+        `const scoped = scopedWhere({}, scopeForMember(principal));`,
+        `const where = { id: req.params.id };`,
+        `const m = await app.prisma.member.findFirst({ where });`,
+      ].join('\n'),
+    );
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it('does not look past the lookbehind window for the assignment', () => {
+    const findings = scanSource(
+      'synthetic.ts',
+      [
+        `const where = scopedWhere(filters, scopeForMember(principal));`,
+        ...Array.from({ length: ASSIGNMENT_LOOKBEHIND + 5 }, () => '// filler'),
+        `const m = await app.prisma.member.findMany({ where });`,
+      ].join('\n'),
+    );
+
+    // A scope fragment defined far from the query it guards is hard to
+    // review, so the guard declines to bless it rather than searching further.
+    expect(findings).toHaveLength(1);
   });
 });

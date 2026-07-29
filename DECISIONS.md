@@ -323,3 +323,89 @@ outlier decide the result. Median over 7 iterations after a warm-up (the first
 Argon2id call pays for native module load and the lazily-built dummy hash) is stable
 across repeated runs. The 3x bound is deliberately loose — it catches the dummy-hash
 branch going missing, not a fine-grained timing oracle, and the test says so.
+
+---
+
+**2026-07-29 — `POST /member/claim` has two phases rather than two endpoints.**
+Alternative: add `POST /member/claim/verify`, or reuse `/auth/member/verify-otp`.
+product-definition.md §8's flow is `claim code + phone → OTP → consent → claimed`,
+which is two wireframe screens and so two round trips, but BUILD-PLAN.md's endpoint
+list has one route. The endpoint branches on whether an OTP is present. Reusing
+`/auth/member/verify-otp` was rejected because it deliberately serves only *claimed*
+members and has no consent capture. The claim code is re-sent in phase 2 and consumed
+only there, so an abandoned phase 1 — a mistyped phone number — does not burn the
+member's one invitation.
+
+---
+
+**2026-07-29 — Claim codes are 160 bits, not the `PG- ____ - ____` the wireframe sketches.**
+Alternative: match the wireframe's short, typeable placeholder.
+security-implementation.md §3 requires at least 128 bits and forbids deriving the code
+from the membership number. The wireframe's placeholder is roughly 40 bits, which is
+guessable at the rate an activation endpoint could be driven. Prime directive #3 gives
+the security document precedence on security matters, so the code is 20 random bytes
+in Crockford base32 (32 characters, hyphen-grouped for printing). Crockford excludes
+I, L, O and U, and the input is normalised for case, spacing and the usual
+1/I, 0/O confusions, so a code read off a letter and retyped still matches.
+
+---
+
+**2026-07-29 — Claim codes hashed with SHA-256, not Argon2id or HMAC.**
+Alternative: HMAC with a server secret, as OTP codes use.
+Same reasoning as refresh tokens: 160 bits of server-generated randomness cannot be
+brute forced at any hash speed, so a slow hash defends nothing. HMAC would add a
+second secret to manage for no gain over a plain hash here — the OTP case is different
+because a 6-digit code IS brute-forceable from a stolen table, and the key is what
+prevents that.
+
+---
+
+**2026-07-29 — Consent records a declined channel explicitly.**
+Alternative: write a row only when consent is granted.
+§10 requires consent "captured per channel, unticked by default, stored with timestamp
+and wording version". Writing nothing for a refusal makes "declined" and "never asked"
+indistinguishable a year later, which is exactly the question a complaint would raise.
+Both channels are required in the claim payload so an omission is never silently read
+as consent.
+
+---
+
+**2026-07-29 — Suspension increments `tokenVersion` and revokes refresh families.**
+Alternative: set `status = SUSPENDED` and let the status check catch it.
+A status check alone leaves an already-issued access token valid until it expires —
+up to 30 minutes for a member. §4 lists membership suspension among the events that
+must force re-authentication, and the mechanism it names is the token version.
+Refresh tokens are separate server-side state and are revoked explicitly, or the
+member could mint a fresh access token seconds later.
+
+---
+
+**2026-07-29 — `resend-claim` supersedes any outstanding code.**
+Alternative: allow several live codes per member.
+The predictable support request is a member who lost their invitation letter
+(wireframes D4 note 5). If issuing a replacement left the original valid, the lost
+letter would stay usable — which is the threat single-use codes exist to close.
+
+---
+
+**2026-07-29 — Tests set a known OTP rather than recovering the issued one.**
+Alternative: brute-force the 6-digit space against the stored HMAC; or have the
+endpoint return the code outside production.
+Returning the code, even in development, weakens the control the OTP exists to
+provide and creates a flag someone will eventually set in the wrong environment.
+Brute-forcing worked but cost ~1.5s per call and pushed four tests past the timeout.
+Overwriting the stored hash with the hash of a chosen code gives the test exactly
+the knowledge a real SMS gateway would have had, and the endpoint still runs its
+genuine verification path — constant-time compare, single use, attempt counting.
+
+---
+
+**2026-07-29 — The fetch-then-check guard resolves a `where` passed as a variable.**
+Alternative: require every scope fragment to be written inline at the call site.
+The member list builds one `where` and shares it between `count` and `findMany`;
+forcing it inline would mean duplicating the expression, and a guard that pushes code
+toward duplication gets disabled. The guard now resolves a `where` identifier back to
+its assignment within a 25-line lookbehind — short on purpose, because a scope fragment
+defined far from the query it guards is hard to review. Relaxing a security check is
+how it becomes a no-op, so the analyzer was split out and given eight tests fixing what
+it must still catch, including the exact fetch-then-check shape §5 warns about.

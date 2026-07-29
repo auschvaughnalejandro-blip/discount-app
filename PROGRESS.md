@@ -1,14 +1,14 @@
 # Progress
 
 Last updated: 2026-07-29
-Current stage: 3 (complete) — next is Stage 4, Member lifecycle
+Current stage: 4 (complete) — next is Stage 5, Benefits
 
 ## Stages
 - [x] 0 — Foundation
 - [x] 1 — Data model
 - [x] 2 — Authentication
 - [x] 3 — Authorization
-- [ ] 4 — Member lifecycle
+- [x] 4 — Member lifecycle
 - [ ] 5 — Benefits
 - [ ] 6 — Identity codes
 - [ ] 7 — Redemption
@@ -201,9 +201,72 @@ Also built (not in the Stage 3 list, but required by the above):
   anything else → 500 with the detail logged rather than returned. Before this,
   a malformed request body produced a 500; it now produces a 400.
 
+### Stage 4 — Member lifecycle
+Status: complete
+
+Files created:
+- `apps/api/src/security/claim-codes.ts`
+- `apps/api/src/routes/admin-members.ts` — the seven admin endpoints
+- `apps/api/src/routes/member.ts` — claim, me, consent
+- `apps/api/test/member-lifecycle.test.ts` (18 tests)
+
+Acceptance:
+- A claim code cannot be used twice — PASS. Consumption is an
+  `updateMany` carrying `usedAt: null` in its WHERE clause, so two concurrent
+  activations cannot both match; a test fires both at once and asserts exactly
+  one wins and exactly one row is marked used.
+- An expired claim code is rejected — PASS, and expired / unknown /
+  already-used / wrong-phone all return a byte-identical response. Which part
+  was wrong is what someone holding a discarded invitation letter wants to learn.
+- Claim codes are not derivable from the membership number — PASS. 160 bits of
+  `randomBytes`, Crockford base32, sharing no structure with `PG-nnnn`; stored
+  as SHA-256, never in plaintext.
+- Consent is stored per channel with a timestamp — PASS, including a *declined*
+  channel, which is recorded explicitly so that an absent row and a refusal
+  never look the same later. Withdrawal appends a new row; the grant stays.
+- Suspension blocks redemption but preserves history — PARTIAL, and honestly so.
+  Suspension is implemented and tested: the row and its consent history survive,
+  `tokenVersion` is incremented and refresh-token families revoked, so a live
+  session dies immediately (verified: a valid, unexpired access token stops
+  working and its refresh token cannot mint a replacement). **The redemption half
+  cannot be tested yet — there is no redemption endpoint until Stage 7.** R4 is
+  listed against Stage 7 in BUILD-PLAN §6, and the check belongs there.
+- `GET /admin/members` is unreachable by `outlet_staff` (R11) — PASS, 403 at the
+  route level, since that role holds no member-reading permission at all.
+
+Full suite: 94 tests passing.
+
+Notes:
+- **`POST /member/claim` has two phases.** §8's flow is
+  `claim code + phone → OTP → consent → claimed`, which is two wireframe screens
+  and therefore two calls, but BUILD-PLAN.md lists one endpoint. Rather than
+  invent a second, the one endpoint branches on whether an OTP is present. The
+  claim code is required again in phase 2 and only consumed there, so an
+  abandoned phase-1 call does not burn the member's invitation.
+- The claim code is returned to the administrator exactly once, at issue, to
+  print on the letter. Only its hash is stored, so it is not retrievable
+  afterwards — losing it means `/resend-claim`, which also supersedes any
+  outstanding code so a discarded letter stops working.
+
+**The Stage 3 fetch-then-check guard earned its place immediately**: it failed on
+first run against this stage's new code, flagging four reads. Three were
+legitimate (two pre-authentication, one transitively scoped) and one — a
+`ConsentRecord` read by `memberId` — was rewritten to read through the scoped
+member instead. The guard was also taught to resolve a `where` passed as a
+variable, and given eight tests of its own proving that relaxation did not turn
+it into a no-op.
+
 ## Open questions blocking work
 
-None blocking Stage 4. One new item from Stage 3:
+None blocking Stage 5. One new item from Stage 4:
+
+- [ ] **Q8 — claim code lifetime is a chosen default, not a specified one.**
+  security-implementation.md §3 requires expiry "after a defined period" and
+  product-definition.md §8 is silent on the length. `CLAIM_CODE_TTL_HOURS`
+  defaults to 720 (30 days), assuming a posted invitation letter. Configurable,
+  so changing it needs no code change.
+
+One item from Stage 3:
 
 - [ ] **Q7 — the `manager` role's write access to members is inferred, not stated.**
   security-implementation.md §5's "can reach" column lists screens ("Member list,
