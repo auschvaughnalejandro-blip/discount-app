@@ -9,6 +9,7 @@ import adminMemberRoutes from './routes/admin-members.js';
 import authRoutes from './routes/auth.js';
 import benefitRoutes from './routes/benefits.js';
 import healthRoutes from './routes/health.js';
+import identityRoutes from './routes/identity.js';
 import memberRoutes from './routes/member.js';
 
 declare module 'fastify' {
@@ -53,6 +54,7 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(adminMemberRoutes);
   await app.register(memberRoutes);
   await app.register(benefitRoutes);
+  await app.register(identityRoutes);
 
   return app;
 }

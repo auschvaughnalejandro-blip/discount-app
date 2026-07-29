@@ -64,6 +64,13 @@ const envSchema = z.object({
   // §8: "Pagination caps so no endpoint can be coerced into returning the
   // full membership."
   MEMBER_LIST_MAX_PAGE_SIZE: z.coerce.number().int().positive().default(100),
+
+  // ── Stage 6 — identity codes ──────────────────────────────────────────
+  IDENTITY_CODE_HMAC_SECRET: z.string().min(16),
+  // R9: the rotation window is a tunable setting, not a hardcoded constant.
+  // §7: "start around 24 hours, monitor verification failures at outlets, and
+  // adjust." Changing this must need no code change.
+  IDENTITY_CODE_WINDOW_HOURS: z.coerce.number().positive().default(24),
 });
 
 export type Env = z.infer<typeof envSchema>;

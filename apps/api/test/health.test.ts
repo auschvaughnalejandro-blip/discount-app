@@ -10,21 +10,16 @@ describe('GET /health', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
+    // Starts from the real environment (test/setup.ts loads apps/api/.env) and
+    // overrides only what this test is about. Listing every required variable
+    // by hand meant every stage that added one broke this file for no reason.
     const env = loadEnv({
+      ...process.env,
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
-      // Liveness must not touch the database, so the test deliberately supplies
-      // a URL that points nowhere.
+      // Liveness must not touch the database, so the test deliberately points
+      // at a URL that goes nowhere.
       DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/unused',
-      // Not exercised by a /health-only test, but loadEnv validates every
-      // required variable at startup regardless of which routes are hit —
-      // that's the point of validating eagerly rather than at first use.
-      PASSWORD_PEPPER: 'unused-but-must-be-present-32-chars',
-      OTP_CODE_HMAC_SECRET: 'unused-but-must-be-present-32-chars',
-      JWT_ISSUER: 'unused',
-      JWT_AUDIENCE_MEMBER: 'unused',
-      JWT_AUDIENCE_STAFF: 'unused',
-      JWT_SIGNING_KEY: 'unused-but-must-be-present-32-chars',
     });
 
     app = await buildApp({ env });
