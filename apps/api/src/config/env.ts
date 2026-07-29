@@ -85,6 +85,16 @@ const envSchema = z.object({
   // "A few minutes" is the only quantity given.
   VERIFICATION_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
+  // Development-only OTP delivery. Honoured only when NODE_ENV is
+  // 'development' as well -- see src/security/dev-otp.ts for why both gates
+  // exist. Defaults off, so it must be switched on deliberately.
+  // Only the exact string "true" enables it. Anything else — absent, empty,
+  // "1", "TRUE", "yes" — is off, so a typo fails closed.
+  DEV_OTP_ECHO: z
+    .string()
+    .default('false')
+    .transform((value) => value === 'true'),
+
   // -- Stage 8 -- reporting ----------------------------------------------
   // R13: "Enforce a minimum cohort size of 5 below which the endpoint returns
   // 'insufficient data' rather than a number." The figure is given explicitly

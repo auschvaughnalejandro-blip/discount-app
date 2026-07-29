@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { NotFoundError, RateLimitedError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
+import { echoOtpForDevelopment } from '../security/dev-otp.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { issueRefreshToken } from '../security/refresh-tokens.js';
@@ -128,7 +129,8 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     if (!phaseTwo.success) {
       // TODO(open-question): no SMS provider is specified anywhere in the
       // reference documents, so nothing delivers this. See PROGRESS.md Q6.
-      await issueOtp(app.prisma, body.phone);
+      const issued = await issueOtp(app.prisma, body.phone);
+      echoOtpForDevelopment(app.log, env, body.phone, issued.code);
 
       return reply.code(200).send({
         message: 'A verification code has been sent to that number.',

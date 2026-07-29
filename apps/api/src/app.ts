@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 
 import type { Env } from './config/env.js';
 import { REDACTED, REDACT_PATHS, redact } from './logging/redaction.js';
+import { warnIfDevOtpEchoEnabled } from './security/dev-otp.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import prismaPlugin from './plugins/prisma.js';
@@ -72,6 +73,8 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(identityRoutes);
   await app.register(verifyRoutes);
   await app.register(reportRoutes);
+
+  warnIfDevOtpEchoEnabled(app.log, env);
 
   return app;
 }

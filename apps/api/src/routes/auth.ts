@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { Env } from '../config/env.js';
 import { writeAudit } from '../security/audit.js';
+import { echoOtpForDevelopment } from '../security/dev-otp.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { verifyAgainstDummy, verifyPassword } from '../security/password.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
@@ -182,7 +183,8 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       // reference documents. `issueOtp` stores the hashed code; nothing
       // sends it. This is an unimplemented integration point, not a
       // silently-decided one — see PROGRESS.md.
-      await issueOtp(app.prisma, body.phone);
+      const issued = await issueOtp(app.prisma, body.phone);
+      echoOtpForDevelopment(app.log, env, body.phone, issued.code);
     }
 
     // Identical response whether or not the number is registered — on a

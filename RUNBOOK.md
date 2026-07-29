@@ -28,8 +28,28 @@ Give it about 20 seconds. The API and three Vite servers start together and
 compete for CPU on first boot; an earlier check at 15 s reported the API down
 when it was simply still starting. Ctrl-C stops all four together.
 
-Seeded logins, both with password `privilege-guest-dev-only`:
-`admin@pgp.test` (owner) and `fatima.a@pgp.test` (outlet staff).
+Seeded logins:
+
+| Who | Where | Sign in with |
+|---|---|---|
+| Owner | :5175 | `admin@pgp.test` / `privilege-guest-dev-only` |
+| Outlet staff | :5174 | `fatima.a@pgp.test` / `privilege-guest-dev-only` |
+| Member | :5173 | phone `+97455550001` or `+97455550003`, then the code |
+
+**Signing in as a member.** There is no SMS provider (PROGRESS.md Q6), so the
+one-time passcode is printed to the terminal running `npm run dev`:
+
+```
+  ┌────────────────────────────────────────────────┐
+  │  DEVELOPMENT ONLY — verification code          │
+  │  +97455550001                                  │
+  │  code: 799501                                  │
+  └────────────────────────────────────────────────┘
+```
+
+Type that into the app. It only prints when `DEV_OTP_ECHO=true` **and**
+`NODE_ENV=development`; both gates must pass, and only the exact string `true`
+counts. `dev-otp.test.ts` fixes that behaviour.
 
 **First run only**, if there is no database yet:
 
