@@ -11,15 +11,21 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @pgp/api",
+    "dev": "concurrently --names api,member,verify,admin --prefix-colors cyan,green,yellow,magenta --kill-others-on-fail \"npm:dev:api\" \"npm:dev:member\" \"npm:dev:verify\" \"npm:dev:admin\"",
+    "dev:api": "npm run dev --workspace @pgp/api",
+    "dev:member": "npm run dev --workspace @pgp/web-member",
+    "dev:verify": "npm run dev --workspace @pgp/web-verify",
+    "dev:admin": "npm run dev --workspace @pgp/web-admin",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "db": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-db.ps1",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "migrate": "npm run migrate --workspace @pgp/api",
     "seed": "npm run seed --workspace @pgp/api"
   },
   "devDependencies": {
+    "concurrently": "^9.2.4",
     "typescript": "^5.9.3"
   }
 }
