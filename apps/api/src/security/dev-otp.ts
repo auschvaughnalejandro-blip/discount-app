@@ -76,11 +76,25 @@ function maskPhone(phone: string): string {
  */
 export const DEV_OTP_FILE = 'VERIFICATION-CODE.txt';
 
+export interface EchoOptions {
+  /**
+   * Directory the code file is written to. `null` disables the write.
+   *
+   * Exists because the first version always wrote to `process.cwd()`, which
+   * meant running the test suite overwrote the developer's real
+   * VERIFICATION-CODE.txt with test fixtures — a file that then confidently
+   * showed a code which had never been issued. A test must not write into the
+   * working tree it is testing.
+   */
+  fileDir?: string | null;
+}
+
 export function echoOtpForDevelopment(
   _logger: FastifyBaseLogger,
   env: Pick<Env, 'NODE_ENV' | 'DEV_OTP_ECHO'>,
   phone: string,
   code: string,
+  options: EchoOptions = {},
 ): void {
   if (!isDevOtpEchoEnabled(env)) {
     return;
@@ -100,11 +114,16 @@ export function echoOtpForDevelopment(
 
   process.stdout.write(`${box}\n`);
 
+  const fileDir = options.fileDir === undefined ? process.cwd() : options.fileDir;
+  if (fileDir === null) {
+    return;
+  }
+
   // Best effort. A failure here must never break a sign-in — this is a
   // convenience, and the code has already been printed above.
   try {
     writeFileSync(
-      resolve(process.cwd(), DEV_OTP_FILE),
+      resolve(fileDir, DEV_OTP_FILE),
       `${code}\n\n` +
         `phone ending ${maskPhone(phone)}\n` +
         `issued ${new Date().toISOString()}\n` +

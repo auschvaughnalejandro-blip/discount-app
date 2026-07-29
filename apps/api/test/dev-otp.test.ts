@@ -97,6 +97,7 @@ describe('what it prints', () => {
         { NODE_ENV: 'development', DEV_OTP_ECHO: true },
         '+97455550001',
         '246813',
+        { fileDir: null },
       ),
     );
 
@@ -120,6 +121,7 @@ describe('what it prints', () => {
         { NODE_ENV: 'development', DEV_OTP_ECHO: true },
         '+97455550001',
         '246813',
+        { fileDir: null },
       ),
     );
 
@@ -134,6 +136,7 @@ describe('what it prints', () => {
         { NODE_ENV: 'production', DEV_OTP_ECHO: true },
         '+97455550001',
         '246813',
+        { fileDir: null },
       ),
     );
 
@@ -156,5 +159,53 @@ describe('the code never reaches an HTTP response', () => {
       });
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('the tests do not write into the working tree', () => {
+  it('leaves VERIFICATION-CODE.txt alone when fileDir is null', async () => {
+    const { existsSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+
+    const target = resolve(import.meta.dirname, '..', 'VERIFICATION-CODE.txt');
+    const existed = existsSync(target);
+    const before = existed ? readFileSync(target, 'utf8') : null;
+
+    // A regression test with teeth: the first version of this feature always
+    // wrote to process.cwd(), so running the suite clobbered the developer's
+    // real code file with a fixture. The file then showed a code that had
+    // never been issued, and every sign-in attempt failed for reasons that
+    // looked like the app being broken.
+    echoOtpForDevelopment(
+      { warn() {} } as unknown as Parameters<typeof echoOtpForDevelopment>[0],
+      { NODE_ENV: 'development', DEV_OTP_ECHO: true },
+      '+97455550001',
+      '999999',
+      { fileDir: null },
+    );
+
+    if (existed) {
+      expect(readFileSync(target, 'utf8')).toBe(before);
+    } else {
+      expect(existsSync(target)).toBe(false);
+    }
+
+    // And prove the write still works when a directory is given.
+    const tmp = resolve(import.meta.dirname, '..', 'node_modules', '.tmp-dev-otp');
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(tmp, { recursive: true });
+    try {
+      echoOtpForDevelopment(
+        { warn() {} } as unknown as Parameters<typeof echoOtpForDevelopment>[0],
+        { NODE_ENV: 'development', DEV_OTP_ECHO: true },
+        '+97455550001',
+        '999999',
+        { fileDir: tmp },
+      );
+      expect(readFileSync(resolve(tmp, 'VERIFICATION-CODE.txt'), 'utf8')).toContain('999999');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+    void writeFileSync;
   });
 });
