@@ -1,0 +1,140 @@
+# Production stack. See DEPLOYMENT.md.
+#
+# Deliberately separate from docker-compose.yml, which is a development
+# database and nothing else. Keeping them apart means no production value has a
+# convenient local default to inherit — every secret below has to be supplied,
+# and a missing one stops the stack rather than silently using a known password.
+
+name: pgp
+
+services:
+  # ── Database ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # Schema owner. Migrations run as this role; the API does not.
+      POSTGRES_USER: pgp_owner
+      # `:?` fails the whole stack if unset. No default, deliberately — a
+      # committed default is a password in git history.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: pgp
+      # Consumed by docker/postgres/init/01-app-role.sh on first init only.
+      PGP_APP_PASSWORD: ${PGP_APP_PASSWORD:?Set PGP_APP_PASSWORD in .env}
+    volumes:
+      - pgp-db-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    # No `ports:`. The database is reachable only on the compose network — never
+    # from the host, never from the internet. This is the single most common way
+    # a system like this leaks.
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pgp_owner -d pgp']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API ───────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Two roles, two URLs. The API connects as pgp_app, which is denied
+      # UPDATE and DELETE on Redemption at the database level (R7). Connecting
+      # as the owner would silently remove that guarantee — see DEPLOYMENT.md §3.
+      DATABASE_URL: postgresql://pgp_app:${PGP_APP_PASSWORD:?}@db:5432/pgp?schema=public
+      DATABASE_MIGRATION_URL: postgresql://pgp_owner:${POSTGRES_PASSWORD:?}@db:5432/pgp?schema=public
+
+      PASSWORD_PEPPER: ${PASSWORD_PEPPER:?Set PASSWORD_PEPPER in .env}
+      OTP_CODE_HMAC_SECRET: ${OTP_CODE_HMAC_SECRET:?Set OTP_CODE_HMAC_SECRET in .env}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
+      IDENTITY_CODE_HMAC_SECRET: ${IDENTITY_CODE_HMAC_SECRET:?Set IDENTITY_CODE_HMAC_SECRET in .env}
+      MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY:?Set MFA_SECRET_ENCRYPTION_KEY in .env}
+
+      JWT_ISSUER: https://api.${DOMAIN:?Set DOMAIN in .env}
+      JWT_AUDIENCE_MEMBER: pgp-member
+      JWT_AUDIENCE_STAFF: pgp-staff
+
+      # Behind Caddy, so X-Forwarded-For is trustworthy. Without this every
+      # per-IP rate limit shares one bucket and every audited address is the
+      # proxy's — both controls appear present and do nothing.
+      TRUST_PROXY: 'true'
+
+      # Passcode delivery. Email is interim; see DECISIONS.md.
+      OTP_DELIVERY_CHANNEL: ${OTP_DELIVERY_CHANNEL:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURE: ${SMTP_SECURE:-true}
+      SMTP_USER: ${SMTP_USER:?Set SMTP_USER in .env}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP_PASSWORD in .env}
+      SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM in .env}
+
+      MFA_ISSUER_LABEL: ${MFA_ISSUER_LABEL:-Privilege Guest}
+
+      # Must stay false outside development. The dev echo prints passcodes to
+      # the log, which is exactly the risk an OTP exists to avoid; the code also
+      # gates it on NODE_ENV, so this is the second of two locks.
+      DEV_OTP_ECHO: 'false'
+    networks: [internal, edge]
+    # Nothing is written to disk at runtime. tmpfs covers anything that needs a
+    # scratch path so the image itself stays immutable.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+
+  # ── Edge ──────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    depends_on: [api]
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+      # Space-separated CIDRs allowed to reach the dashboard, the verification
+      # page and /admin/*. See DEPLOYMENT.md §5 — and note §5.3, where this
+      # value is what makes the outlet-staff MFA exemption proportionate.
+      INTERNAL_CIDR: ${INTERNAL_CIDR:?Set INTERNAL_CIDR in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      # Certificates survive a rebuild. Losing these means re-issuing on every
+      # deploy, which Let's Encrypt rate-limits.
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [internal, edge]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '5' }
+
+networks:
+  # The database and API talk here. Not routable from outside the host.
+  internal:
+    internal: true
+  # Only Caddy is published; the API joins this so Caddy can proxy to it.
+  edge:
+
+volumes:
+  pgp-db-data:
+  caddy-data:
+  caddy-config:

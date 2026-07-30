@@ -1,0 +1,37 @@
+/**
+ * The admin dashboard's palette — Stage 17.
+ *
+ * Follows the reference dashboard the client supplied: teal primary, light grey
+ * canvas, white panels with a grey header strip, and the four status hues
+ * (teal / yellow / orange / red) carrying meaning consistently.
+ *
+ * The teal is inherited from @pgp/ui's defaults rather than overridden, because
+ * the shared tokens were built around exactly this reading — the dashboard is
+ * the surface the token defaults describe. What this file does is tighten the
+ * canvas and borders for a dense, desktop, data-first screen, and follow the
+ * OS for dark mode.
+ */
+
+:root {
+  /* A touch cooler and flatter than the default canvas — panels need to lift
+     off it, and a warm grey behind white cards reads as dirty. */
+  --c-canvas: #f4f6f8;
+  --c-panel-header: #eceff3;
+
+  /* Dense tables want a visible but quiet grid. */
+  --c-border: #e2e6ec;
+  --c-border-strong: #cbd2dc;
+
+  /* Long sittings in front of a spreadsheet-like screen. Slightly softer than
+     pure near-black. */
+  --c-text: #1a1f27;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --c-canvas: #0f1216;
+    --c-panel-header: #1a1f27;
+    --c-border: #252b34;
+    --c-border-strong: #333b47;
+  }
+}

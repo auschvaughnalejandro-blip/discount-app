@@ -1,14 +1,32 @@
+import type { Role } from '@prisma/client';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import type { Env } from '../config/env.js';
 import { writeAudit } from '../security/audit.js';
+import { logDeliveryOutcome } from '../notifications/code-sender.js';
 import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
 import { normalizePhone } from '../security/phone.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { verifyAgainstDummy, verifyPassword } from '../security/password.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
-import { issueAccessToken } from '../security/tokens.js';
+import {
+  decryptMfaSecret,
+  encryptMfaSecret,
+  generateMfaSecret,
+  generateRecoveryCodes,
+  hashRecoveryCode,
+  mfaEnrollmentUri,
+  roleRequiresMfa,
+  verifyRecoveryCode,
+  verifyTotp,
+} from '../security/mfa.js';
+import {
+  issueMfaChallenge,
+  verifyMfaChallenge,
+  type MfaChallengeStage,
+} from '../security/mfa-challenge.js';
+import { issueAccessToken, TokenVerificationError } from '../security/tokens.js';
 import {
   identifyRefreshToken,
   issueRefreshToken,
@@ -46,6 +64,29 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1),
 }).strict();
 
+/** Stage 19. A TOTP code, or a recovery code in place of one. */
+const mfaVerifySchema = z
+  .object({
+    challengeToken: z.string().min(1),
+    code: z.string().min(1).optional(),
+    recoveryCode: z.string().min(1).optional(),
+  })
+  .strict()
+  // Exactly one. Accepting both would invite a caller that sends a guessed
+  // TOTP alongside a real recovery code and burns the latter on a typo.
+  .refine((value) => (value.code === undefined) !== (value.recoveryCode === undefined), {
+    message: 'Provide either code or recoveryCode.',
+  });
+
+const mfaEnrollStartSchema = z.object({
+  challengeToken: z.string().min(1),
+}).strict();
+
+const mfaEnrollConfirmSchema = z.object({
+  challengeToken: z.string().min(1),
+  code: z.string().min(1),
+}).strict();
+
 const logoutSchema = z.object({
   refreshToken: z.string().min(1),
 }).strict();
@@ -65,6 +106,50 @@ function staffAccessTokenTtlSeconds(role: string, env: Env): number {
 function sendTooManyRequests(reply: FastifyReply, retryAfterSeconds: number): void {
   reply.header('Retry-After', String(retryAfterSeconds));
   reply.code(429).send({ error: 'rate_limited', message: 'Too many requests.' });
+}
+
+/**
+ * The tokens a completed staff sign-in yields.
+ *
+ * Extracted in Stage 19 so the password-only path (outlet staff) and the
+ * post-second-factor path (dashboard accounts) cannot drift apart. If one grew
+ * a shorter TTL or forgot an audit entry, the other would silently keep the old
+ * behaviour, and the difference would be invisible until someone compared them.
+ */
+async function completeStaffSignIn(
+  app: Parameters<FastifyPluginAsync>[0],
+  env: Env,
+  staff: { id: string; role: Role; outletId: string | null; tokenVersion: number },
+  ipAddress: string,
+): Promise<{ accessToken: string; accessTokenExpiresIn: number; refreshToken: string }> {
+  const ttlSeconds = staffAccessTokenTtlSeconds(staff.role, env);
+
+  const accessToken = await issueAccessToken({
+    issuer: env.JWT_ISSUER,
+    audience: env.JWT_AUDIENCE_STAFF,
+    subject: staff.id,
+    subjectType: 'STAFF',
+    role: staff.role,
+    ...(staff.outletId ? { outletId: staff.outletId } : {}),
+    tokenVersion: staff.tokenVersion,
+    ttlSeconds,
+  });
+
+  const refresh = await issueRefreshToken(app.prisma, {
+    subjectId: staff.id,
+    subjectType: 'STAFF',
+    ttlSeconds: env.REFRESH_TOKEN_TTL_STAFF_SECONDS,
+  });
+
+  await writeAudit(app.prisma, {
+    action: 'auth.login.success',
+    principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
+    subjectType: 'StaffUser',
+    subjectId: staff.id,
+    ipAddress,
+  });
+
+  return { accessToken, accessTokenExpiresIn: ttlSeconds, refreshToken: refresh.token };
 }
 
 const authRoutes: FastifyPluginAsync = async (app) => {
@@ -113,46 +198,323 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ error: 'invalid_credentials', message: 'Invalid credentials.' });
     }
 
-    // TODO(open-question): security-implementation.md §3 makes MFA mandatory
-    // on every dashboard account "without exception". The Stage 2 endpoint
-    // list in BUILD-PLAN.md has no MFA challenge endpoint, and no MFA
-    // library, enrollment flow or challenge shape is specified anywhere.
-    // `StaffUser.mfaSecret` exists as the extension point; login does not yet
-    // gate on it. Recorded in PROGRESS.md open questions — flagged to the
-    // user directly, since this is a real gap against an authoritative
-    // security document, not a minor omission.
+    /**
+     * Stage 19 (Q5). §3: MFA on every account that reaches more than the
+     * verification page. The password alone gets no tokens for those accounts —
+     * only a challenge, which authorises nothing but the attempt to present a
+     * second factor.
+     *
+     * `enroll` when the account has never completed enrollment, so "without
+     * exception" cannot be satisfied by simply never enrolling. There is no
+     * path from an un-enrolled dashboard account to an access token.
+     */
+    if (roleRequiresMfa(staff.role)) {
+      const stage: MfaChallengeStage = staff.mfaEnrolledAt === null ? 'enroll' : 'verify';
 
-    const ttlSeconds = staffAccessTokenTtlSeconds(staff.role, env);
+      const challengeToken = await issueMfaChallenge({
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE_STAFF,
+        staffUserId: staff.id,
+        stage,
+        ttlSeconds: env.MFA_CHALLENGE_TTL_SECONDS,
+      });
 
-    const accessToken = await issueAccessToken({
-      issuer: env.JWT_ISSUER,
-      audience: env.JWT_AUDIENCE_STAFF,
-      subject: staff.id,
-      subjectType: 'STAFF',
-      role: staff.role,
-      ...(staff.outletId ? { outletId: staff.outletId } : {}),
-      tokenVersion: staff.tokenVersion,
-      ttlSeconds,
+      await writeAudit(app.prisma, {
+        action: 'auth.mfa.challenged',
+        principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
+        subjectType: 'StaffUser',
+        subjectId: staff.id,
+        ipAddress: request.ip,
+      });
+
+      return reply.code(200).send({
+        mfaRequired: true,
+        stage,
+        challengeToken,
+        challengeExpiresIn: env.MFA_CHALLENGE_TTL_SECONDS,
+      });
+    }
+
+    // OUTLET_STAFF only, by the branch above: the verification page is not a
+    // dashboard, and §3 covers it with named accounts and shift-length expiry.
+    return reply.code(200).send(await completeStaffSignIn(app, env, staff, request.ip));
+  });
+
+  // ── MFA (Stage 19) ────────────────────────────────────────────────────
+
+  /**
+   * Resolves a challenge token to a live, active staff account.
+   *
+   * Re-reads the account on every step rather than trusting the challenge: an
+   * account suspended in the seconds between password and second factor must
+   * not complete sign-in, and §3 requires instant revocation to mean instant.
+   */
+  async function resolveChallenge(
+    token: string,
+    expectedStage: MfaChallengeStage,
+  ): Promise<
+    | { ok: false }
+    | {
+        ok: true;
+        staff: {
+          id: string;
+          role: Role;
+          email: string;
+          outletId: string | null;
+          tokenVersion: number;
+          mfaSecret: string | null;
+          mfaEnrolledAt: Date | null;
+          mfaLastUsedEpoch: number | null;
+        };
+      }
+  > {
+    let claims;
+    try {
+      claims = await verifyMfaChallenge(token, {
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE_STAFF,
+      });
+    } catch (cause) {
+      if (cause instanceof TokenVerificationError) {
+        return { ok: false };
+      }
+      throw cause;
+    }
+
+    if (claims.stage !== expectedStage) {
+      return { ok: false };
+    }
+
+    const staff = await app.prisma.staffUser.findUnique({
+      where: { id: claims.staffUserId },
+      select: {
+        id: true,
+        role: true,
+        email: true,
+        outletId: true,
+        tokenVersion: true,
+        status: true,
+        mfaSecret: true,
+        mfaEnrolledAt: true,
+        mfaLastUsedEpoch: true,
+      },
     });
 
-    const refresh = await issueRefreshToken(app.prisma, {
-      subjectId: staff.id,
-      subjectType: 'STAFF',
-      ttlSeconds: env.REFRESH_TOKEN_TTL_STAFF_SECONDS,
-    });
+    // Suspended between password and second factor: no tokens. §3's "instant
+    // revocation from the dashboard" has to hold inside this window too.
+    if (!staff || staff.status !== 'ACTIVE' || !roleRequiresMfa(staff.role)) {
+      return { ok: false };
+    }
 
-    await writeAudit(app.prisma, {
-      action: 'auth.login.success',
-      principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
-      subjectType: 'StaffUser',
-      subjectId: staff.id,
-      ipAddress: request.ip,
+    return { ok: true, staff };
+  }
+
+  /** One shape for every MFA rejection — never "wrong code" versus "expired". */
+  function rejectMfa(reply: FastifyReply): void {
+    reply.code(401).send({ error: 'mfa_failed', message: 'That code was not accepted.' });
+  }
+
+  // ── POST /auth/staff/mfa/enroll ───────────────────────────────────────
+  // Issues a secret and the URI an authenticator app scans. Nothing is
+  // considered enrolled until /confirm proves the member of staff can produce a
+  // code from it, so calling this repeatedly is harmless and simply supersedes
+  // the previous unconfirmed secret.
+  app.post('/auth/staff/mfa/enroll', PUBLIC_ROUTE, async (request, reply) => {
+    const body = mfaEnrollStartSchema.parse(request.body);
+
+    const resolved = await resolveChallenge(body.challengeToken, 'enroll');
+    if (!resolved.ok) {
+      return rejectMfa(reply);
+    }
+
+    const secret = generateMfaSecret();
+    await app.prisma.staffUser.update({
+      where: { id: resolved.staff.id },
+      // mfaEnrolledAt deliberately untouched: a secret without a confirmation
+      // is not enrollment.
+      data: { mfaSecret: encryptMfaSecret(secret) },
     });
 
     return reply.code(200).send({
-      accessToken,
-      accessTokenExpiresIn: ttlSeconds,
-      refreshToken: refresh.token,
+      // Both forms: the URI for a QR, the secret for manual entry on a device
+      // that cannot scan.
+      otpauthUri: mfaEnrollmentUri({
+        email: resolved.staff.email,
+        secret,
+        issuerLabel: env.MFA_ISSUER_LABEL,
+      }),
+      secret,
+    });
+  });
+
+  // ── POST /auth/staff/mfa/enroll/confirm ───────────────────────────────
+  app.post('/auth/staff/mfa/enroll/confirm', PUBLIC_ROUTE, async (request, reply) => {
+    const body = mfaEnrollConfirmSchema.parse(request.body);
+
+    const resolved = await resolveChallenge(body.challengeToken, 'enroll');
+    if (!resolved.ok || !resolved.staff.mfaSecret) {
+      return rejectMfa(reply);
+    }
+
+    const limit = checkRateLimit(`mfa:enroll:${resolved.staff.id}`, {
+      windowSeconds: env.RATE_LIMIT_MFA_VERIFY_WINDOW_SECONDS,
+      max: env.RATE_LIMIT_MFA_VERIFY_PER_USER_MAX,
+    });
+    if (!limit.allowed) {
+      return sendTooManyRequests(reply, limit.retryAfterSeconds);
+    }
+
+    const enrollCheck = await verifyTotp({
+      token: body.code,
+      secret: decryptMfaSecret(resolved.staff.mfaSecret),
+      afterEpoch: resolved.staff.mfaLastUsedEpoch,
+    });
+    if (!enrollCheck.valid) {
+      await writeAudit(app.prisma, {
+        action: 'auth.mfa.failure',
+        subjectType: 'StaffUser',
+        subjectId: resolved.staff.id,
+        ipAddress: request.ip,
+      });
+      return rejectMfa(reply);
+    }
+
+    // Recovery codes are shown exactly once, here. Only their hashes are kept,
+    // so a lost printout cannot be recovered — it has to be regenerated.
+    const recoveryCodes = generateRecoveryCodes();
+    const hashes = await Promise.all(recoveryCodes.map((code) => hashRecoveryCode(code)));
+
+    await app.prisma.$transaction([
+      app.prisma.staffUser.update({
+        where: { id: resolved.staff.id },
+        // The confirming code is spent too — it must not also work as a login.
+        data: { mfaEnrolledAt: new Date(), mfaLastUsedEpoch: enrollCheck.epoch },
+      }),
+      app.prisma.mfaRecoveryCode.createMany({
+        data: hashes.map((codeHash) => ({ staffUserId: resolved.staff.id, codeHash })),
+      }),
+    ]);
+
+    await writeAudit(app.prisma, {
+      action: 'auth.mfa.enrolled',
+      principal: { subjectId: resolved.staff.id, subjectType: 'STAFF', role: resolved.staff.role },
+      subjectType: 'StaffUser',
+      subjectId: resolved.staff.id,
+      ipAddress: request.ip,
+    });
+
+    const tokens = await completeStaffSignIn(app, env, resolved.staff, request.ip);
+    return reply.code(200).send({ ...tokens, recoveryCodes });
+  });
+
+  // ── POST /auth/staff/mfa/verify ───────────────────────────────────────
+  app.post('/auth/staff/mfa/verify', PUBLIC_ROUTE, async (request, reply) => {
+    const body = mfaVerifySchema.parse(request.body);
+
+    const resolved = await resolveChallenge(body.challengeToken, 'verify');
+    if (!resolved.ok || !resolved.staff.mfaSecret || resolved.staff.mfaEnrolledAt === null) {
+      return rejectMfa(reply);
+    }
+
+    // Per account rather than per IP: the challenge already names the account,
+    // and an attacker rotating IPs must not get a fresh budget of guesses
+    // against six digits.
+    const limit = checkRateLimit(`mfa:verify:${resolved.staff.id}`, {
+      windowSeconds: env.RATE_LIMIT_MFA_VERIFY_WINDOW_SECONDS,
+      max: env.RATE_LIMIT_MFA_VERIFY_PER_USER_MAX,
+    });
+    if (!limit.allowed) {
+      return sendTooManyRequests(reply, limit.retryAfterSeconds);
+    }
+
+    let usedRecovery = false;
+
+    if (body.recoveryCode !== undefined) {
+      const candidates = await app.prisma.mfaRecoveryCode.findMany({
+        where: { staffUserId: resolved.staff.id, usedAt: null },
+        select: { id: true, codeHash: true },
+      });
+
+      // Argon2 verify against each unused hash. Ten of them, once in a while,
+      // by a member of staff who has lost their phone — the cost is acceptable
+      // and there is no way to index a hash by its plaintext.
+      let matchedId: string | null = null;
+      for (const candidate of candidates) {
+        if (await verifyRecoveryCode(body.recoveryCode, candidate.codeHash)) {
+          matchedId = candidate.id;
+          break;
+        }
+      }
+
+      if (matchedId === null) {
+        await writeAudit(app.prisma, {
+          action: 'auth.mfa.failure',
+          subjectType: 'StaffUser',
+          subjectId: resolved.staff.id,
+          ipAddress: request.ip,
+        });
+        return rejectMfa(reply);
+      }
+
+      // Consumed atomically: `usedAt: null` in the where clause means two
+      // concurrent requests presenting the same code cannot both succeed.
+      const consumed = await app.prisma.mfaRecoveryCode.updateMany({
+        where: { id: matchedId, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      if (consumed.count === 0) {
+        return rejectMfa(reply);
+      }
+
+      usedRecovery = true;
+    } else {
+      const check = await verifyTotp({
+        token: body.code!,
+        secret: decryptMfaSecret(resolved.staff.mfaSecret),
+        // Refuses a code from a period already spent, so one read over a
+        // shoulder cannot be reused inside its ~90-second validity window.
+        afterEpoch: resolved.staff.mfaLastUsedEpoch,
+      });
+      if (!check.valid) {
+        await writeAudit(app.prisma, {
+          action: 'auth.mfa.failure',
+          subjectType: 'StaffUser',
+          subjectId: resolved.staff.id,
+          ipAddress: request.ip,
+        });
+        return rejectMfa(reply);
+      }
+
+      // Marked spent before any token is issued: a concurrent request
+      // presenting the same code must lose the race, not double-succeed.
+      const spent = await app.prisma.staffUser.updateMany({
+        where: {
+          id: resolved.staff.id,
+          OR: [{ mfaLastUsedEpoch: null }, { mfaLastUsedEpoch: { lt: check.epoch } }],
+        },
+        data: { mfaLastUsedEpoch: check.epoch },
+      });
+      if (spent.count === 0) {
+        return rejectMfa(reply);
+      }
+    }
+
+    await writeAudit(app.prisma, {
+      action: usedRecovery ? 'auth.mfa.recovery_used' : 'auth.mfa.success',
+      principal: { subjectId: resolved.staff.id, subjectType: 'STAFF', role: resolved.staff.role },
+      subjectType: 'StaffUser',
+      subjectId: resolved.staff.id,
+      ipAddress: request.ip,
+    });
+
+    const tokens = await completeStaffSignIn(app, env, resolved.staff, request.ip);
+    const remaining = await app.prisma.mfaRecoveryCode.count({
+      where: { staffUserId: resolved.staff.id, usedAt: null },
+    });
+
+    return reply.code(200).send({
+      ...tokens,
+      ...(usedRecovery ? { recoveryCodesRemaining: remaining } : {}),
     });
   });
 
@@ -187,12 +549,22 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       : null;
 
     if (phone && member && member.claimedAt !== null && member.status === 'ACTIVE') {
-      // TODO(open-question): no SMS provider is named anywhere in the
-      // reference documents. `issueOtp` stores the hashed code; nothing
-      // sends it. This is an unimplemented integration point, not a
-      // silently-decided one — see PROGRESS.md.
       const issued = await issueOtp(app.prisma, phone);
       echoOtpForDevelopment(app.log, env, phone, issued.code);
+
+      // Stage 18 (Q6). Delivered to the member's email, because the chosen
+      // provider is SMTP — see notifications/code-sender.ts. The outcome is
+      // logged and then deliberately discarded: §3 requires the response below
+      // to be identical whether or not the number belongs to a member, and a
+      // delivery failure that changed it would leak exactly that.
+      const delivery = {
+        email: member.email,
+        phone,
+        code: issued.code,
+        purpose: 'sign-in' as const,
+      };
+      const outcome = await app.codeSender.send(delivery);
+      logDeliveryOutcome(app.log, app.codeSender, delivery, outcome);
     } else {
       // The HTTP response below is identical either way; this line exists so
       // the terminal is never silent when a code was asked for.

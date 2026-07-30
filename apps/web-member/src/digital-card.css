@@ -1,0 +1,39 @@
+/**
+ * The digital card's QR, and nothing else.
+ *
+ * The first stylesheet in this repository. It exists for function, not
+ * appearance: `react-qr-code` renders modules edge to edge, and the QR
+ * specification requires a quiet zone of at least four modules for a scanner to
+ * locate the symbol. Without the margin below, the code renders perfectly and
+ * scans unreliably — the worst kind of bug, because it looks fine.
+ *
+ * Stage 17 brings the design system (`packages/ui`, tokens, all three clients).
+ * This file is not the start of it and should not grow. Written with logical
+ * properties so it survives Stage 22's RTL mirroring unchanged.
+ */
+
+.qr {
+  /* Four modules at the rendered module size, per ISO/IEC 18004. */
+  --qr-quiet-zone: 1.25rem;
+
+  /* Never tinted, whatever the brand does elsewhere. Scanners need luminance
+     contrast, not brand contrast, and a "tasteful" cream background here is a
+     support call from a restaurant. */
+  background: #ffffff;
+  padding: var(--qr-quiet-zone);
+
+  /* Centre without a flex parent, so this rule stands alone. */
+  margin-inline: auto;
+  inline-size: fit-content;
+
+  /* The SVG is authored at `size` and scaled by the box; crisp edges matter
+     more than smoothing for a bitmap-like symbol. */
+  line-height: 0;
+}
+
+/* On a narrow phone the QR should use the width available rather than a fixed
+   240px, since a physically larger symbol is easier to scan. */
+.qr > svg {
+  block-size: auto;
+  inline-size: min(240px, 70vw);
+}

@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { loadEnv, type Env } from '../src/config/env.js';
 import { resetRateLimits } from '../src/security/rate-limit.js';
+import { signInStaff } from './helpers/staff-sign-in.js';
 
 const ownerUrl = process.env['DATABASE_MIGRATION_URL'];
 if (!ownerUrl) {
@@ -95,11 +96,13 @@ async function setKnownOtp(phone: string): Promise<string> {
 
 describe('the primary acceptance journey', () => {
   it('1. an administrator creates a member and a claim code is issued', async () => {
-    const login = await request(app.server)
-      .post('/auth/staff/login')
-      .send({ email: 'admin@pgp.test', password: 'privilege-guest-dev-only' });
-    expect(login.status).toBe(200);
-    journey.adminToken = login.body.accessToken;
+    // Stage 19: a dashboard account reaches tokens only through a second
+    // factor, so the journey now includes enrollment — as it does in reality.
+    const session = await signInStaff(app, {
+      email: 'admin@pgp.test',
+      password: 'privilege-guest-dev-only',
+    });
+    journey.adminToken = session.accessToken;
 
     const created = await request(app.server)
       .post('/admin/members')
@@ -360,7 +363,7 @@ describe('every business rule has a test', () => {
     R13: { rule: 'Reporting suppresses any cohort smaller than 5', where: ['reporting.test.ts'] },
     R14: {
       rule: 'Benefit values are database rows, never constants in code',
-      where: ['benefits.test.ts', 'no-styling.test.ts'],
+      where: ['benefits.test.ts', 'client-invariants.test.ts'],
     },
     R15: {
       rule: 'Consent is recorded per channel with timestamp; withdrawal is immediate',

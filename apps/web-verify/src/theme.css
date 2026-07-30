@@ -1,0 +1,34 @@
+/**
+ * The verification page's palette — Stage 17.
+ *
+ * Light, high-contrast, and follows the operating system rather than committing
+ * to one scheme like the member app does. Staff use whatever device is behind
+ * the counter (§6) and it may be a bright tablet at a spa reception or a dim
+ * back-office PC; fighting the platform here helps nobody.
+ *
+ * Blue primary rather than the member app's brass and the dashboard's teal, so
+ * a member of staff who has both this page and the dashboard open can tell them
+ * apart at a glance. Confusing "record a redemption" with "edit a benefit" is a
+ * mistake worth designing against.
+ */
+
+:root {
+  --c-primary: #1d5fbf;
+  --c-primary-hover: #17509f;
+  --c-primary-ink: #ffffff;
+  --c-primary-soft: #e8f0fc;
+
+  /* Slightly tighter than the default ramp: this page is read quickly, and
+     muted greys cost legibility under a reception desk's poor lighting. */
+  --c-text-muted: var(--n-600);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --c-primary: #5c9ee8;
+    --c-primary-hover: #7bb2ee;
+    --c-primary-ink: #06182e;
+    --c-primary-soft: #12253c;
+    --c-text-muted: var(--n-300);
+  }
+}

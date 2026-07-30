@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { NotFoundError, RateLimitedError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
+import { logDeliveryOutcome } from '../notifications/code-sender.js';
 import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
 import { normalizePhone } from '../security/phone.js';
 import { issueOtp, verifyOtp } from '../security/otp.js';
@@ -109,7 +110,16 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
         expiresAt: true,
         usedAt: true,
         member: {
-          select: { id: true, phone: true, status: true, claimedAt: true, tokenVersion: true },
+          // `email` is needed by Stage 18's delivery. See the note at phase 1
+          // below for why it may well be null at exactly this moment.
+          select: {
+            id: true,
+            phone: true,
+            email: true,
+            status: true,
+            claimedAt: true,
+            tokenVersion: true,
+          },
         },
       },
     });
@@ -148,10 +158,38 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
 
     // ── Phase 1: issue the OTP ──────────────────────────────────────────
     if (!phaseTwo.success) {
-      // TODO(open-question): no SMS provider is specified anywhere in the
-      // reference documents, so nothing delivers this. See PROGRESS.md Q6.
       const issued = await issueOtp(app.prisma, body.phone);
       echoOtpForDevelopment(app.log, env, body.phone, issued.code);
+
+      /**
+       * Stage 18 (Q6), and the awkward part of delivering activation codes by
+       * email rather than SMS.
+       *
+       * The member supplies their email in **phase 2** — screen 2 asks for it
+       * alongside the code. So at this moment the only address available is
+       * whatever the administrator recorded when creating the member. If that
+       * is null, the code is generated, stored, never delivered, and the member
+       * cannot activate.
+       *
+       * **Operational consequence: while the delivery channel is email, the
+       * administrator must record a member's email address at creation time.**
+       * Recorded in DECISIONS.md rather than worked around here, because the
+       * alternative — asking for the email before the claim code is verified —
+       * would let anyone holding a discarded invitation letter probe for valid
+       * codes while supplying their own address.
+       *
+       * Real SMS removes the problem entirely: the phone number is already in
+       * hand at phase 1. This is the clearest argument for treating SMTP as the
+       * interim measure it is.
+       */
+      const delivery = {
+        email: claimCode.member.email,
+        phone: body.phone,
+        code: issued.code,
+        purpose: 'activation' as const,
+      };
+      const outcome = await app.codeSender.send(delivery);
+      logDeliveryOutcome(app.log, app.codeSender, delivery, outcome);
 
       return reply.code(200).send({
         message: 'A verification code has been sent to that number.',

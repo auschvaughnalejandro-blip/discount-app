@@ -11,8 +11,10 @@
     "predev": "powershell -ExecutionPolicy Bypass -File ../../scripts/stop.ps1 -Ports 5174"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.1",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@pgp/ui": "*"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

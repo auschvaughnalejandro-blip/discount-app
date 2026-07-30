@@ -1,0 +1,10 @@
+/**
+ * The single import every client uses.
+ *
+ * Order matters: tokens define the variables, reset clears defaults, base
+ * styles the semantic elements using those variables. An app then imports its
+ * own theme.css (palette overrides) and layout.css (structure) after this.
+ */
+@import './tokens.css';
+@import './reset.css';
+@import './base.css';

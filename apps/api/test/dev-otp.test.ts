@@ -51,6 +51,9 @@ describe('the flag defaults off and fails closed on a typo', () => {
     JWT_AUDIENCE_STAFF: 's',
     JWT_SIGNING_KEY: 'x'.repeat(32),
     IDENTITY_CODE_HMAC_SECRET: 'x'.repeat(32),
+    // Stage 19: required, and validated as 32 bytes of hex, so that a
+    // deployment missing it fails at boot rather than at someone's login.
+    MFA_SECRET_ENCRYPTION_KEY: 'a'.repeat(64),
   };
 
   it('is false when the variable is absent', () => {

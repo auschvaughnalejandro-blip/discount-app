@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 
 import type { Env } from './config/env.js';
 import { REDACTED, REDACT_PATHS, redact } from './logging/redaction.js';
+import { createCodeSender, type CodeSender } from './notifications/code-sender.js';
 import { warnIfDevOtpEchoEnabled } from './security/dev-otp.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
@@ -19,6 +20,8 @@ import verifyRoutes from './routes/verify.js';
 declare module 'fastify' {
   interface FastifyInstance {
     env: Env;
+    /** Stage 18. Delivers one-time passcodes; see notifications/code-sender.ts. */
+    codeSender: CodeSender;
   }
 }
 
@@ -59,6 +62,18 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(errorHandlerPlugin);
   await app.register(prismaPlugin);
+
+  // Built once, before routes. `createCodeSender` throws on a channel that is
+  // configured but incomplete, so a deployment meaning to send mail and unable
+  // to fails at startup rather than at a member's first sign-in attempt.
+  await app.register(
+    fp(
+      async (instance) => {
+        instance.decorate('codeSender', await createCodeSender(env, instance.log));
+      },
+      { name: 'code-sender' },
+    ),
+  );
 
   // Registered before any routes: its onRoute hook only sees routes added
   // after it, so every route file below is covered and none can opt out by

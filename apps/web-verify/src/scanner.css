@@ -1,0 +1,24 @@
+/**
+ * The camera preview, and nothing else.
+ *
+ * Function rather than appearance, like digital-card.css in the member app: a
+ * `<video>` element with no size renders at its intrinsic stream dimensions,
+ * which on a tablet means a 1920px-wide preview overflowing the page. Stage 17
+ * brings the real design system; this file should not grow.
+ */
+
+.scanner-preview {
+  /* Bounded so the preview never pushes the membership-number fallback off
+     screen — staff must always be able to reach it. */
+  inline-size: min(360px, 100%);
+  block-size: auto;
+  aspect-ratio: 4 / 3;
+
+  /* Fill the box rather than letterboxing; a cropped preview is fine, since the
+     decoder reads the full frame regardless of what is displayed. */
+  object-fit: cover;
+
+  /* A visible edge while the camera warms up, so a black frame reads as
+     "starting" rather than "broken". */
+  background: #000000;
+}

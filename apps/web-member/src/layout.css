@@ -1,0 +1,472 @@
+/**
+ * Member app structure — Stage 17. Wireframes screens 1–8.
+ *
+ * Phone-first: every rule below is written for a 360px viewport and widened at
+ * breakpoints, not the reverse. A member standing in a restaurant is the design
+ * target; a member on a laptop is a nice-to-have that gets a centred column.
+ *
+ * Styling leans on the semantic markup already in App.tsx. Where a class was
+ * needed, it names a thing (`.card`, `.tabbar`) rather than an appearance.
+ */
+
+/* ── Page shell ─────────────────────────────────────────────────────────── */
+
+main {
+  --shell-inline: var(--s-5);
+  /* Room for the fixed tab bar plus the phone's home indicator. */
+  --shell-block-end: calc(var(--tap-min) + var(--s-8) + env(safe-area-inset-bottom, 0px));
+
+  display: flow-root;
+  max-inline-size: 34rem;
+  margin-inline: auto;
+  padding-inline: var(--shell-inline);
+  padding-block-start: var(--s-8);
+  padding-block-end: var(--shell-block-end);
+}
+
+@media (min-width: 48rem) {
+  main {
+    --shell-inline: var(--s-8);
+    padding-block-start: var(--s-12);
+  }
+}
+
+/* ── Headings ───────────────────────────────────────────────────────────── */
+
+main > section > h1,
+main > h1 {
+  font-family: var(--font-serif);
+  font-size: var(--f-3xl);
+  font-weight: var(--fw-normal);
+  letter-spacing: -0.015em;
+  margin-block-end: var(--s-2);
+}
+
+h2 {
+  font-size: var(--f-sm);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--c-text-muted);
+  margin-block: var(--s-8) var(--s-4);
+}
+
+/* ── The membership line (screen 3 note 1) ──────────────────────────────
+   The number is the member's identity and the thing staff ask for, so it is
+   set large and tabular rather than folded into a sentence. */
+
+.identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2) var(--s-4);
+  color: var(--c-text-muted);
+  font-size: var(--f-sm);
+  margin-block-end: var(--s-6);
+}
+
+.identity strong {
+  font-family: var(--font-mono);
+  font-size: var(--f-lg);
+  font-variant-numeric: var(--fv-tabular);
+  letter-spacing: 0.08em;
+  color: var(--c-primary);
+}
+
+/* ── Benefit lists ──────────────────────────────────────────────────────
+   The wireframes call for "visual cards" (§4). Each is a full-width button, so
+   the whole card is the tap target rather than a link buried inside it. */
+
+.card-list {
+  display: grid;
+  gap: var(--s-3);
+}
+
+.card-list > li > button,
+button.card {
+  inline-size: 100%;
+  min-height: 0;
+  padding: var(--s-5);
+  text-align: start;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  font-weight: var(--fw-normal);
+}
+
+.card-list > li > button:hover:not(:disabled),
+button.card:hover:not(:disabled) {
+  background: var(--c-surface-raised);
+  border-color: var(--c-primary);
+}
+
+/* A chevron, so a card reads as "leads somewhere" without extra markup. */
+.card-list > li > button::after,
+button.card::after {
+  content: '›';
+  flex: none;
+  font-size: var(--f-xl);
+  line-height: 1;
+  color: var(--c-primary);
+}
+
+.card-title {
+  display: block;
+  font-size: var(--f-lg);
+  font-weight: var(--fw-medium);
+  color: var(--c-text);
+}
+
+.card-discount {
+  display: block;
+  margin-block-start: var(--s-1);
+  font-size: var(--f-sm);
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--c-primary);
+  letter-spacing: 0.02em;
+}
+
+/* ── Offers list (screen 4): everything visible without tapping ─────────── */
+
+.offer-list {
+  display: grid;
+  gap: var(--s-4);
+}
+
+.offer {
+  padding: var(--s-5);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+}
+
+.offer > h2 {
+  margin-block: 0 var(--s-2);
+  font-family: var(--font-serif);
+  font-size: var(--f-xl);
+  font-weight: var(--fw-normal);
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--c-text);
+}
+
+.offer-pct {
+  color: var(--c-primary);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+.offer p {
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+  margin-block: var(--s-1);
+}
+
+/* Party-size limits are the detail that causes an awkward conversation at the
+   counter (screen 4 note 2), so they are marked rather than left as prose. */
+.offer-limit {
+  display: inline-block;
+  margin-block-start: var(--s-2);
+  padding-inline: var(--s-2);
+  padding-block: 2px;
+  font-size: var(--f-xs);
+  font-weight: var(--fw-medium);
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border: 1px solid var(--c-warn);
+  border-radius: var(--r-full);
+}
+
+.offer > button {
+  margin-block-start: var(--s-4);
+}
+
+/* ── Benefit detail (screen 5) ──────────────────────────────────────────── */
+
+.detail-pct {
+  font-family: var(--font-serif);
+  font-size: var(--f-4xl);
+  font-weight: var(--fw-normal);
+  line-height: var(--lh-tight);
+  color: var(--c-primary);
+  font-variant-numeric: var(--fv-tabular);
+  margin-block: var(--s-2) var(--s-1);
+}
+
+.detail-terms {
+  color: var(--c-text-muted);
+  line-height: var(--lh-relaxed);
+  max-inline-size: var(--measure);
+}
+
+/* Tap-to-call — §3 calls this the highest-value small addition in the build.
+   Made unmistakably a phone number you can press. */
+.call-link {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--tap-min);
+  margin-block: var(--s-6);
+  padding: var(--s-4);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--r-md);
+}
+
+.call-link::before {
+  content: '✆';
+  font-size: var(--f-xl);
+  line-height: 1;
+}
+
+.call-link:hover {
+  background: var(--c-surface-raised);
+}
+
+/* A back link should not compete with the screen's real action. */
+.back {
+  min-height: 0;
+  padding: var(--s-2) 0;
+  border: none;
+  background: none;
+  color: var(--c-text-muted);
+  font-size: var(--f-sm);
+}
+
+.back:hover:not(:disabled) {
+  background: none;
+  color: var(--c-primary);
+}
+
+.back::before {
+  content: '‹';
+  margin-inline-end: var(--s-1);
+  font-size: var(--f-lg);
+}
+
+/* ── Digital card (screen 7) ────────────────────────────────────────────
+   Should read as an object, recognisable across a reception desk, so that it
+   and the plastic card are interchangeable. */
+
+.card-screen {
+  display: grid;
+  gap: var(--s-6);
+  justify-items: center;
+  text-align: center;
+}
+
+.pass {
+  inline-size: 100%;
+  padding: var(--s-8) var(--s-6);
+  background: linear-gradient(160deg, #1b2637 0%, #0d1420 100%);
+  border: 1px solid var(--c-primary);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-lg);
+}
+
+.pass-brand {
+  font-family: var(--font-serif);
+  font-size: var(--f-xs);
+  font-weight: var(--fw-normal);
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+  color: var(--c-primary);
+  margin-block-end: var(--s-6);
+}
+
+.pass-name {
+  font-family: var(--font-serif);
+  font-size: var(--f-xl);
+  color: var(--c-text);
+}
+
+.pass-number {
+  margin-block-start: var(--s-1);
+  font-family: var(--font-mono);
+  font-size: var(--f-md);
+  font-variant-numeric: var(--fv-tabular);
+  letter-spacing: 0.18em;
+  color: var(--c-primary);
+}
+
+.pass-hint {
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+  max-inline-size: 24rem;
+}
+
+/* The rotating payload, kept as a fallback for a broken camera but demoted so
+   it never competes with the QR. */
+.pass-payload {
+  font-size: var(--f-xs);
+  color: var(--c-text-faint);
+  word-break: break-all;
+  max-inline-size: 20rem;
+}
+
+/* ── Profile (screen 8) ─────────────────────────────────────────────────── */
+
+.history {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.history > li {
+  display: grid;
+  gap: var(--s-1);
+  padding: var(--s-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  font-size: var(--f-sm);
+}
+
+.history-benefit {
+  font-size: var(--f-md);
+  font-weight: var(--fw-medium);
+  color: var(--c-text);
+}
+
+.history-meta {
+  color: var(--c-text-muted);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+/* ── Activation (screens 1–2) ───────────────────────────────────────────── */
+
+.activate-lede {
+  color: var(--c-text-muted);
+  max-inline-size: var(--measure);
+  margin-block-end: var(--s-6);
+}
+
+.field {
+  margin-block: var(--s-5);
+}
+
+.field > label {
+  display: block;
+}
+
+/* "Membership is by invitation only" (screen 1 note 4) — stated plainly, and
+   set apart so it reads as a fact about the programme, not fine print. */
+.exclusivity {
+  margin-block-start: var(--s-8);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--c-border);
+  font-size: var(--f-sm);
+  color: var(--c-text-faint);
+  font-style: italic;
+}
+
+/* A secondary route ("Already activated? Sign in") is a link, not a button. */
+.text-button {
+  min-height: 0;
+  padding: var(--s-2) 0;
+  border: none;
+  background: none;
+  color: var(--c-primary);
+  font-size: var(--f-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-button:hover:not(:disabled) {
+  background: none;
+  color: var(--c-primary-hover);
+}
+
+/* ── Tab bar ────────────────────────────────────────────────────────────
+   Fixed to the bottom on a phone — the four sections are the app's spine, and
+   reaching them should never require scrolling. */
+
+nav[aria-label='Sections'] {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border-block-start: 1px solid var(--c-border);
+  padding-block-end: env(safe-area-inset-bottom, 0px);
+}
+
+nav[aria-label='Sections'] > ul {
+  display: flex;
+  max-inline-size: 34rem;
+  margin-inline: auto;
+}
+
+nav[aria-label='Sections'] li {
+  flex: 1;
+}
+
+nav[aria-label='Sections'] button {
+  inline-size: 100%;
+  min-height: calc(var(--tap-min) + var(--s-2));
+  padding: var(--s-2);
+  border: none;
+  border-radius: 0;
+  background: none;
+  font-size: var(--f-xs);
+  font-weight: var(--fw-medium);
+  text-transform: capitalize;
+  letter-spacing: 0.04em;
+  color: var(--c-text-faint);
+}
+
+nav[aria-label='Sections'] button:hover:not(:disabled) {
+  background: none;
+  color: var(--c-text-muted);
+}
+
+/* Driven off `aria-current`, which App.tsx already sets — the accessible state
+   and the visible state cannot drift apart. */
+nav[aria-label='Sections'] button[aria-current='true'] {
+  color: var(--c-primary);
+}
+
+nav[aria-label='Sections'] button[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 0;
+  inline-size: var(--s-8);
+  block-size: 2px;
+  background: var(--c-primary);
+  border-radius: var(--r-full);
+}
+
+nav[aria-label='Sections'] button {
+  position: relative;
+}
+
+/* On a wide screen the bar stops being a phone dock and becomes a row of
+   tabs under the heading. */
+@media (min-width: 48rem) {
+  nav[aria-label='Sections'] {
+    position: static;
+    margin-block-start: var(--s-12);
+    background: none;
+    backdrop-filter: none;
+    border-block-start: 1px solid var(--c-border);
+  }
+
+  nav[aria-label='Sections'] > ul {
+    justify-content: flex-start;
+    gap: var(--s-2);
+  }
+
+  nav[aria-label='Sections'] li {
+    flex: 0 0 auto;
+  }
+
+  nav[aria-label='Sections'] button {
+    padding-inline: var(--s-5);
+    font-size: var(--f-sm);
+  }
+}

@@ -32,12 +32,142 @@ Seeded logins:
 
 | Who | Where | Sign in with |
 |---|---|---|
-| Owner | :5175 | `admin@pgp.test` / `privilege-guest-dev-only` |
+| Owner | :5175 | `admin@pgp.test` / `privilege-guest-dev-only`, then an authenticator code (no app? `npm run mfa:code`) |
 | Outlet staff | :5174 | `fatima.a@pgp.test` / `privilege-guest-dev-only` |
 | Member | :5173 | phone `+97455550001` or `+97455550003`, then the code |
 
-**Signing in as a member.** There is no SMS provider (PROGRESS.md Q6), so the
-one-time passcode is printed to the terminal running `npm run dev`:
+## Testing a real QR scan
+
+The obstacle is `getUserMedia`: **the camera only works in a secure context.**
+`http://127.0.0.1` counts as secure; `http://192.168.x.x` does not. So the
+verification page has to stay on localhost, or be behind real HTTPS.
+
+That rules out the obvious setup (both apps on a phone) and leaves three that
+work, cheapest first.
+
+### 1. No camera — paste the payload (30 seconds, zero setup)
+
+Tests the whole credential path: signing, freshness, resolution, entitlements,
+guest caps. Everything except the lens.
+
+1. Member app on :5173 → **Show card**. The payload is the small grey text under
+   the QR (`v1.<uuid>.<unix>.<signature>`). Copy it.
+2. Verification page on :5174 → **Or paste the code** → **Look up scanned code**.
+
+The server treats a pasted payload and a scanned one identically, so if this
+works the scanner has nothing left to prove but optics.
+
+### 2. Laptop webcam pointed at a phone (the real scan)
+
+The member app does **not** need a camera, so it can live on a plain-HTTP LAN
+address. Only the verification page needs the secure context, and it keeps
+localhost.
+
+1. Start the stack with the dev servers open to the network:
+   ```
+   npm run dev:lan
+   ```
+   **Use the script, not `DEV_HOST=0.0.0.0 npm run dev`.** That form is bash
+   syntax; in PowerShell — the default shell here — it does not set the variable
+   and the stack comes up loopback-only, with no error to tell you so. The phone
+   then simply cannot connect and the cause is invisible.
+
+   `DEV_HOST` is opt-in and defaults to loopback (see the note in each
+   `vite.config.ts`). It serves seeded member data, so don't leave it running on
+   a network you don't trust.
+
+   To confirm it worked, look for a `Network:` line in the Vite output — if you
+   only see `Local:`, the variable didn't take.
+2. Find this machine's address: `Get-NetIPAddress -AddressFamily IPv4`
+3. **On the phone**, open `http://<that-address>:5173`, sign in, open the card.
+4. **On the laptop**, open `http://127.0.0.1:5174`, sign in as outlet staff, press
+   **Scan with camera**, and hold the phone up to the webcam.
+
+If the camera button is missing, the page decided it is not in a secure context —
+check you used `127.0.0.1` and not the LAN address.
+
+### 3. A real tablet at a counter (needs HTTPS)
+
+The only way to run the verification page on the device staff will actually use.
+`DEV_HOST` alone is not enough — the tablet needs a valid certificate.
+
+Quickest route is a tunnel, which supplies a real certificate and avoids the
+self-signed warnings iOS makes painful:
+
+```
+cloudflared tunnel --url http://127.0.0.1:5174
+```
+
+Open the `https://…trycloudflare.com` URL it prints on the tablet. `mkcert` plus
+Vite's `server.https` also works if you can install a local CA on the device.
+
+This is worth doing once before launch: it is the only test that exercises a real
+rear camera, real reception lighting, and a real member's screen brightness — the
+three things that actually make scans fail.
+
+### When a scan will not read
+
+- **Phone dimmed.** The most common cause by a distance. The card requests a
+  screen wake lock, but brightness itself is not something a web page can set.
+- **Phone in dark mode with a tinted QR.** Cannot happen here — `digital-card.css`
+  pins the quiet zone to `#ffffff` and a test enforces it — but it is the first
+  thing to check if the styling is ever changed.
+- **Glossy screen protector** throwing the webcam's own reflection back.
+- **Payload older than `IDENTITY_CODE_WINDOW_HOURS`.** The card regenerates every
+  60 seconds while open; a screenshot from yesterday is *meant* to fail.
+
+**Signing in to the dashboard (Stage 19).** The password is step one of two.
+`admin@pgp.test` reaches more than the verification page, so §3 requires a second
+factor and the password alone returns a challenge, not tokens.
+
+First time: the dashboard shows a QR. Scan it with any authenticator app (Google
+Authenticator, 1Password, Aegis), enter the six-digit code, and **save the ten
+recovery codes it then shows** — only their hashes are stored, so that screen is
+the only time they exist. After that, sign-in asks for a code each time.
+
+A code works once. Presenting the same one twice inside its 30-second window is
+refused, so if you fat-finger a login, wait for the next code rather than
+retrying the same one.
+
+**No authenticator app? Print the codes instead.** In a second terminal:
+
+```
+npm run mfa:code                     # admin@pgp.test
+npm run mfa:code -- manager@pgp.test
+```
+
+It reads the account's stored secret, decrypts it and prints a fresh code every
+30 seconds until you stop it — the same thing an authenticator app does, in a
+terminal. Leave it running while you sign in and use the newest code shown.
+
+If it says **NO SECRET STORED YET**, enrollment has not started: sign in with the
+password first, and the screen that shows the QR is what stores the secret. Codes
+start printing within a second of that happening, so the order you do these in
+does not matter.
+
+Two things it is deliberately not. It is **not** a `DEV_OTP_ECHO` for staff —
+nothing was added to the sign-in path, because a TOTP code is a function of the
+clock rather than something a request issues, so a code printed at sign-in would
+expire while you read it, and the replay check would then refuse it on the retry.
+And it is **not** available outside development: the script exits unless
+`NODE_ENV=development`, and being a script nobody invokes, it cannot be left
+switched on by accident the way a flag can.
+
+Outlet staff on :5174 are unaffected — `fatima.a@pgp.test` still signs in with a
+password alone, because the verification page is not a dashboard.
+
+If you get locked out in development, clear the enrollment and start over:
+
+```
+psql "$DATABASE_MIGRATION_URL" -c   'UPDATE "StaffUser" SET "mfaSecret"=NULL, "mfaEnrolledAt"=NULL, "mfaLastUsedEpoch"=NULL;'
+```
+
+There is deliberately no such path in the product — see SECURITY-REVIEW.md.
+
+**Signing in as a member.** The default `OTP_DELIVERY_CHANNEL=none`
+means nothing is mailed, so the one-time passcode is printed to the terminal
+running `npm run dev`. (Set it to `smtp` with the `SMTP_*` values to deliver by
+email instead — Stage 18; see DECISIONS.md for why email and not SMS.)
 
 It appears between the JSON log lines, as real text:
 

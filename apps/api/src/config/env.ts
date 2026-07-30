@@ -100,6 +100,51 @@ const envSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
 
+  // -- Stage 18 -- one-time passcode delivery (PROGRESS.md Q6) ------------
+  // 'none' generates codes and delivers nothing, which is stages 0-17's
+  // behaviour and stays the default so an existing deployment does not start
+  // mailing members because it was upgraded. 'smtp' delivers by email -- see
+  // src/notifications/code-sender.ts for why email and not SMS, and why that
+  // is an interim arrangement rather than the destination.
+  OTP_DELIVERY_CHANNEL: z.enum(['none', 'smtp']).default('none'),
+
+  // Optional individually, required together when the channel is 'smtp';
+  // createSmtpSender throws at startup if any is missing. Kept optional here
+  // so a deployment on 'none' needs none of them present.
+  SMTP_HOST: z.string().min(1).optional(),
+  // 465 is implicit TLS, 587 is STARTTLS. Both are fine for Gmail.
+  SMTP_PORT: z.coerce.number().int().positive().default(465),
+  SMTP_SECURE: z
+    .string()
+    .default('true')
+    .transform((value) => value === 'true'),
+  SMTP_USER: z.string().min(1).optional(),
+  // A Google App Password, not the account password -- Gmail rejects the
+  // latter. Never logged; loadEnv below deliberately echoes no values.
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  SMTP_FROM: z.string().min(1).optional(),
+
+  // -- Stage 19 -- staff MFA (PROGRESS.md Q5) -----------------------------
+  // Encrypts the TOTP secret at rest (AES-256-GCM), so a stolen dump alone
+  // yields no working second factors. Validated here rather than read from
+  // process.env inside mfa.ts, so a missing or wrong-length key fails at boot
+  // like every other secret in this file -- not on the first MFA attempt, which
+  // in production means during someone's login.
+  MFA_SECRET_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, 'must be 32 bytes, hex-encoded (64 characters)'),
+  // Shown as the account issuer in the authenticator app, so staff with
+  // accounts on several systems can tell them apart.
+  MFA_ISSUER_LABEL: z.string().min(1).default('Privilege Guest'),
+  // How long the post-password challenge token is valid. Long enough to open
+  // an authenticator app and read a code, short enough that a challenge left
+  // on a counter screen expires. Deliberately not a full session.
+  MFA_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+  // Six digits is brute-forceable, so verification is rate limited on the same
+  // pattern as the OTP path -- per challenge and per IP.
+  RATE_LIMIT_MFA_VERIFY_PER_USER_MAX: z.coerce.number().int().positive().default(5),
+  RATE_LIMIT_MFA_VERIFY_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
+
   // -- Stage 8 -- reporting ----------------------------------------------
   // R13: "Enforce a minimum cohort size of 5 below which the endpoint returns
   // 'insufficient data' rather than a number." The figure is given explicitly

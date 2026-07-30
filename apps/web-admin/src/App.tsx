@@ -1,24 +1,87 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, clearToken, setToken, type AdminBenefit, type MemberRow } from './api.js';
+import { formatDate, formatTimestamp } from '@pgp/ui/format';
 
+import {
+  api,
+  clearToken,
+  setToken,
+  type AdminBenefit,
+  type BenefitGroup,
+  type MemberRow,
+  type ReportMember,
+  type ReportSummary,
+} from './api.js';
+import { FigureValue, formatMinor, StatTile } from './Charts.js';
+
+
+import '@pgp/ui/foundation.css';
+import MfaSignIn from './MfaSignIn.js';
+import Overview from './Overview.js';
+import './theme.css';
+import './layout.css';
 /**
  * The admin dashboard (wireframes screens 11–14, D3–D5).
  *
- * Plain semantic HTML, no styling. The screen that matters is Benefits: the
- * test of whether this project delivered is that changing the F&B discount
- * from 25% to 20% is a form field, not a developer and a release
- * (screen 14 note 1).
+ * Semantic HTML, styled since Stage 17 — this comment said "no styling" until
+ * then, which was BUILD-PLAN §0 rule 1 and stopped being true two stages ago.
+ *
+ * The screen that matters is Benefits: the test of whether this project
+ * delivered is that changing the F&B discount from 25% to 20% is a form field,
+ * not a developer and a release (screen 14 note 1). `Overview` is where it
+ * opens, and is the only screen here that measures rather than edits.
  */
 
-type Section = 'members' | 'redemptions' | 'reports' | 'benefits';
+type Section = 'overview' | 'members' | 'redemptions' | 'reports' | 'benefits';
+
+/**
+ * The rail, in the order these get looked at.
+ *
+ * Overview is first and is where the dashboard opens. It used to open on
+ * `members` — a hundred-row table — which put the densest view in the product
+ * ahead of the figures that say whether the programme is working.
+ *
+ * Labels are written out rather than derived from the id by CSS
+ * `text-transform`, so a section can be named something other than its route
+ * without the two drifting apart.
+ */
+const SECTIONS: { id: Section; label: string; hint: string }[] = [
+  { id: 'overview', label: 'Overview', hint: 'Headline figures and what needs attention' },
+  { id: 'members', label: 'Members', hint: 'Create, suspend and reinstate memberships' },
+  { id: 'redemptions', label: 'Redemptions', hint: 'The immutable log' },
+  { id: 'reports', label: 'Reports', hint: 'Programme activity in detail' },
+  { id: 'benefits', label: 'Benefits', hint: 'Discounts, caps and terms' },
+];
 
 export default function App() {
   const [signedIn, setSignedIn] = useState(false);
-  const [section, setSection] = useState<Section>('members');
+  const [section, setSection] = useState<Section>('overview');
+  /**
+   * Stage 19. A correct password no longer signs anyone in — it yields a
+   * challenge, held here until a second factor is presented. §3 makes MFA
+   * mandatory on every dashboard account "without exception", so there is no
+   * branch from this state to the dashboard that skips MfaSignIn.
+   */
+  const [challenge, setChallenge] = useState<{
+    challengeToken: string;
+    stage: 'enroll' | 'verify';
+  } | null>(null);
 
   if (!signedIn) {
-    return <SignIn onSignedIn={() => setSignedIn(true)} />;
+    if (challenge) {
+      return (
+        <MfaSignIn
+          challengeToken={challenge.challengeToken}
+          stage={challenge.stage}
+          onSignedIn={(accessToken) => {
+            setToken(accessToken);
+            setChallenge(null);
+            setSignedIn(true);
+          }}
+        />
+      );
+    }
+    return <SignIn onChallenge={setChallenge} onSignedIn={() => setSignedIn(true)} />;
   }
 
   return (
@@ -27,10 +90,15 @@ export default function App() {
         <h1>Privilege Guest — Admin</h1>
         <nav aria-label="Sections">
           <ul>
-            {(['members', 'redemptions', 'reports', 'benefits'] as Section[]).map((name) => (
-              <li key={name}>
-                <button type="button" onClick={() => setSection(name)} aria-current={section === name}>
-                  {name}
+            {SECTIONS.map(({ id, label, hint }) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  onClick={() => setSection(id)}
+                  aria-current={section === id}
+                  title={hint}
+                >
+                  {label}
                 </button>
               </li>
             ))}
@@ -40,6 +108,7 @@ export default function App() {
           type="button"
           onClick={() => {
             clearToken();
+            setChallenge(null);
             setSignedIn(false);
           }}
         >
@@ -47,6 +116,7 @@ export default function App() {
         </button>
       </header>
 
+      {section === 'overview' ? <Overview onNavigate={setSection} /> : null}
       {section === 'members' ? <Members /> : null}
       {section === 'redemptions' ? <Redemptions /> : null}
       {section === 'reports' ? <Reports /> : null}
@@ -55,7 +125,13 @@ export default function App() {
   );
 }
 
-function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+function SignIn({
+  onChallenge,
+  onSignedIn,
+}: {
+  onChallenge: (challenge: { challengeToken: string; stage: 'enroll' | 'verify' }) => void;
+  onSignedIn: () => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -64,8 +140,17 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
     event.preventDefault();
     setError(null);
     try {
-      const tokens = await api.login(email, password);
-      setToken(tokens.accessToken);
+      const result = await api.login(email, password);
+
+      if (result.mfaRequired) {
+        onChallenge({ challengeToken: result.challengeToken, stage: result.stage });
+        return;
+      }
+
+      // Only reachable for a role that does not require a second factor. No
+      // dashboard role qualifies, so in practice this is the defensive branch
+      // rather than the normal one.
+      setToken(result.accessToken);
       onSignedIn();
     } catch {
       setError('Those details were not accepted.');
@@ -73,15 +158,16 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   }
 
   return (
-    <main>
+    <main className="signin">
+      <section className="signin-card">
       <h1>Privilege Guest — Admin</h1>
       <form onSubmit={submit}>
-        <p>
+        <p className="field">
           <label htmlFor="email">Email</label>
           <br />
           <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
         </p>
-        <p>
+        <p className="field">
           <label htmlFor="password">Password</label>
           <br />
           <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
@@ -90,10 +176,10 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           <button type="submit">Sign in</button>
         </p>
       </form>
-      {/* TODO(open-question): §3 makes MFA mandatory on every dashboard
-          account "without exception". No MFA challenge endpoint exists — see
-          PROGRESS.md Q5. This form is password-only until that is resolved. */}
+      {/* Stage 19 closed Q5: the password is step one of two. The second
+          factor is handled by MfaSignIn, which this hands off to. */}
       {error ? <p role="alert">{error}</p> : null}
+      </section>
     </main>
   );
 }
@@ -186,12 +272,14 @@ function Members() {
         </p>
       ) : null}
 
+      <div className="table-scroll">
       <table>
         <caption>Membership</caption>
         <thead>
           <tr>
             <th scope="col">Member</th>
             <th scope="col">Number</th>
+            <th scope="col">Phone</th>
             <th scope="col">Joined</th>
             <th scope="col">Last used</th>
             <th scope="col">Total uses</th>
@@ -204,16 +292,37 @@ function Members() {
           {members.map((member) => (
             <tr key={member.id}>
               <td>{member.fullName}</td>
-              <td>{member.memberNumber}</td>
-              <td>{new Date(member.joinedAt).toLocaleDateString()}</td>
-              <td>{member.lastUsedAt ? new Date(member.lastUsedAt).toLocaleDateString() : 'never'}</td>
+              {/* Both of these are identifiers read digit by digit, so both get
+                  the tabular monospace treatment the Overview already used for
+                  membership numbers. */}
+              <td className="member-number">{member.memberNumber}</td>
+              <td className="member-number">
+                {/* Tap-to-call: on a tablet behind the desk this is the point.
+                    "Not given" rather than a dash, because the distinction
+                    between no number and an unrenderable one matters when the
+                    next step is following someone up. */}
+                {member.phone ? (
+                  <a href={`tel:${member.phone.replace(/\s/g, '')}`}>{member.phone}</a>
+                ) : (
+                  'Not given'
+                )}
+              </td>
+              <td>{formatDate(member.joinedAt)}</td>
+              {/* Last use is an event, so it carries its clock time. */}
+              <td>{member.lastUsedAt ? formatTimestamp(member.lastUsedAt) : 'never'}</td>
               <td>{member.totalUses}</td>
               {/* D3 note 3: "not claimed" is its own signal, different from
                   claimed-but-never-visited, and needs different follow-up. */}
               <td>{member.appClaimed ? 'Active' : 'Not claimed'}</td>
               <td>{member.status}</td>
               <td>
-                <button type="button" onClick={() => void setStatus(member.id, member.status === 'ACTIVE')}>
+                <button
+                  type="button"
+                  // R16: a membership is suspended, never deleted. Suspension
+                  // is the consequential direction, so only it is marked.
+                  data-destructive={member.status === 'ACTIVE'}
+                  onClick={() => void setStatus(member.id, member.status === 'ACTIVE')}
+                >
                   {member.status === 'ACTIVE' ? 'Suspend' : 'Reinstate'}
                 </button>
                 {!member.appClaimed ? (
@@ -226,6 +335,7 @@ function Members() {
           ))}
         </tbody>
       </table>
+      </div>
 
       {error ? <p role="alert">{error}</p> : null}
     </section>
@@ -319,7 +429,10 @@ function BenefitEditor({
         {/* Screen 14 note 3: "who changed the spa discount, and when" is a
             question that will be asked. */}
         {benefit.updatedBy ? ` · last changed by ${benefit.updatedBy.fullName}` : ''} ·{' '}
-        {new Date(benefit.updatedAt).toLocaleString()}
+        {/* Was `toLocaleString`, which stops at the minute. A percentage
+            changed twice while getting it right needs the second to tell the
+            two versions apart. */}
+        {formatTimestamp(benefit.updatedAt)}
       </p>
 
       <form onSubmit={save}>
@@ -387,11 +500,11 @@ function BenefitEditor({
 // ── Screen D5: reports ───────────────────────────────────────────────────
 
 function Reports() {
-  const [summary, setSummary] = useState<Record<string, unknown> | null>(null);
-  const [byBenefit, setByBenefit] = useState<Record<string, unknown>[]>([]);
+  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [byBenefit, setByBenefit] = useState<BenefitGroup[]>([]);
   const [minCohort, setMinCohort] = useState(0);
-  const [dormant, setDormant] = useState<MemberRow[]>([]);
-  const [unclaimed, setUnclaimed] = useState<MemberRow[]>([]);
+  const [dormant, setDormant] = useState<ReportMember[]>([]);
+  const [unclaimed, setUnclaimed] = useState<ReportMember[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -413,11 +526,28 @@ function Reports() {
       <h2>Programme activity</h2>
 
       {summary ? (
-        <ul>
-          <li>Redemptions: {String(summary['redemptions'])}</li>
-          <li>Active members: {String(summary['activeMembers'])}</li>
-          <li>Never used: {String(summary['neverUsed'])}</li>
-          <li>Estimated value given (fils): {String(summary['estValueMinor'])}</li>
+        <ul className="kpi-row">
+          {/* Tone carries emphasis, never meaning on its own — each label says
+              what it is. "Never used" is the figure the programme exists to
+              move, so it is flagged rather than reported flat.
+
+              Every value goes through StatTile, which renders a withheld figure
+              as "insufficient data". These four were previously rendered with
+              `String(...)`, which printed the raw `insufficient_data` sentinel
+              into the page whenever the cohort was under the minimum — which on
+              a pilot-sized database is most of the time. */}
+          <StatTile label="Redemptions" value={summary.redemptions} tone="ok" />
+          <StatTile label="Members redeeming" value={summary.activeMembers} tone="ok" />
+          <StatTile
+            label="Never used a benefit"
+            value={summary.neverUsed}
+            tone={summary.neverUsed > 0 ? 'warn' : 'ok'}
+          />
+          <StatTile
+            label="Est. value given"
+            value={summary.estValueMinor}
+            format={formatMinor}
+          />
         </ul>
       ) : (
         <p>Loading…</p>
@@ -427,7 +557,8 @@ function Reports() {
       {/* D5 note 5: groups below the minimum cohort return "insufficient
           data" rather than a number, because a narrow enough filter could
           describe exactly one person. */}
-      <p>Groups of fewer than {minCohort} members are suppressed.</p>
+      <p className="note">Groups of fewer than {minCohort} members are suppressed.</p>
+      <div className="table-scroll">
       <table>
         <caption>Redemptions by benefit</caption>
         <thead>
@@ -438,15 +569,19 @@ function Reports() {
         </thead>
         <tbody>
           {byBenefit.map((group) => (
-            <tr key={String(group['label'])}>
-              <td>{String(group['label'])}</td>
+            <tr key={group.label}>
+              <td>{group.label}</td>
+              {/* FigureValue reads the sentinel off the value itself rather
+                  than trusting the sibling `suppressed` flag, so the two can
+                  never disagree on screen. */}
               <td>
-                {group['suppressed'] ? 'insufficient data' : String(group['redemptions'])}
+                <FigureValue value={group.redemptions} />
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      </div>
 
       <h3>Needs attention</h3>
       {/* D5 note 3: six personally invited guests who have never used
@@ -506,11 +641,15 @@ function Redemptions() {
   return (
     <section>
       <h2>Redemptions</h2>
+      <div className="table-scroll">
       <table>
         <caption>Every recorded redemption</caption>
         <thead>
           <tr>
-            <th scope="col">Date</th>
+            {/* To the second. This table is where a reversal gets authorised,
+                and identifying *which* of two entries to reverse needs more
+                resolution than the day they share. */}
+            <th scope="col">Date and time</th>
             <th scope="col">Member</th>
             <th scope="col">Benefit</th>
             <th scope="col">Outlet</th>
@@ -522,7 +661,7 @@ function Redemptions() {
         <tbody>
           {rows.map((row) => (
             <tr key={row.id}>
-              <td>{new Date(row.occurredAt).toLocaleDateString()}</td>
+              <td>{formatTimestamp(row.occurredAt)}</td>
               <td>{row.member.memberNumber}</td>
               <td>
                 {row.benefit.title} · {row.benefit.discountPct}%
@@ -536,7 +675,7 @@ function Redemptions() {
                 {row.reversesId ? (
                   'reversal'
                 ) : (
-                  <button type="button" onClick={() => void reverse(row.id)}>
+                  <button type="button" data-destructive="true" onClick={() => void reverse(row.id)}>
                     Reverse
                   </button>
                 )}
@@ -545,6 +684,7 @@ function Redemptions() {
           ))}
         </tbody>
       </table>
+      </div>
       {/* D4 note 2 again: a correction is a new reversing entry, never an
           edit that erases what happened. */}
       <p>Records are immutable. A correction adds a reversing entry; it never edits the original.</p>

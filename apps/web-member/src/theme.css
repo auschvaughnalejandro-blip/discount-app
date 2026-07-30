@@ -1,0 +1,64 @@
+/**
+ * The member app's palette — Stage 17.
+ *
+ * Deep navy and brass. This is the only surface a member ever sees, and the
+ * thing it replaces is a printed letter from the Cluster General Manager and an
+ * engraved numbered card. It should feel closer to that than to a loyalty app:
+ * quiet, dark, warm metal rather than bright accent colours.
+ *
+ * Only semantic tokens are overridden. The spacing scale, type scale and status
+ * meanings come from @pgp/ui unchanged, which is why the verify page and the
+ * dashboard still agree with this app about what "suspended" looks like.
+ */
+
+:root {
+  --c-canvas: #0d1420;
+  --c-surface: #141d2c;
+  --c-surface-sunken: #0a1017;
+  --c-surface-raised: #1b2637;
+  --c-panel-header: #1b2637;
+
+  --c-text: #f2f4f8;
+  --c-text-muted: #9aa7bd;
+  --c-text-faint: #6b7893;
+  --c-text-inverse: #0d1420;
+
+  --c-border: #24314a;
+  --c-border-strong: #33425f;
+
+  /* Brass, not gold — a gold that bright on a dark navy reads as a casino.
+     Passes AA against both --c-canvas and --c-surface. */
+  --c-primary: #c9a86a;
+  --c-primary-hover: #d9bc85;
+  --c-primary-ink: #17110a;
+  --c-primary-soft: #241d10;
+
+  --c-focus: #8fb4e8;
+
+  /* Status hues lifted for a dark canvas, matching the dark-mode ramp in
+     tokens.css — a member reading "suspended" needs it legible here too. */
+  --c-ok: #35b899;
+  --c-ok-soft: #0d2f28;
+  --c-ok-ink: #8fdcc9;
+  --c-critical: #f26060;
+  --c-critical-soft: #391414;
+  --c-critical-ink: #f8a4a4;
+  --c-warn: #e8c53d;
+  --c-warn-soft: #322a08;
+  --c-warn-ink: #f2dd8b;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
+  --shadow-md: 0 2px 10px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 10px 34px rgb(0 0 0 / 0.6);
+}
+
+/**
+ * The member app commits to dark. It does not follow the OS.
+ *
+ * Unusual, and deliberate: the palette *is* the product's character here, and a
+ * light variant would be a second design rather than a tint. `color-scheme`
+ * tells the browser so form controls, scrollbars and the address bar match.
+ */
+:root {
+  color-scheme: dark;
+}

@@ -123,7 +123,11 @@ export const api = {
     partySize?: number;
     billAmountMinor?: number;
     idempotencyKey: string;
-  }) => call<{ id: string; idempotent: boolean }>('/verify/redemptions', {
+    // `occurredAt` is the server's clock, not the tablet's. A counter device
+    // with a wrong time must not be able to misdate the record staff are shown
+    // — and on an idempotent retry this is the *original* moment, which is the
+    // only correct answer to "when was this recorded".
+  }) => call<{ id: string; idempotent: boolean; occurredAt: string }>('/verify/redemptions', {
     method: 'POST',
     body: input,
   }),

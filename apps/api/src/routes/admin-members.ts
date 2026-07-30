@@ -162,6 +162,18 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
           id: true,
           memberNumber: true,
           fullName: true,
+          // The contact number, so the dashboard can show who to actually ring.
+          // Every role holding `members:list` — ADMINISTRATOR and MANAGER, and
+          // no others — also holds `members:read`, whose detail route has
+          // always returned `phone`. So this discloses nothing a caller could
+          // not already retrieve one member at a time; it saves them a click per
+          // member, which is the whole point of a list.
+          //
+          // It stops at the dashboard. The export path deliberately carries
+          // membership numbers and no contact details at all (§12, asserted by
+          // `reporting.test.ts`), because a spreadsheet leaves the building and
+          // a screen behind an admin login does not.
+          phone: true,
           status: true,
           joinedAt: true,
           claimedAt: true,
@@ -191,6 +203,10 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
         id: member.id,
         memberNumber: member.memberNumber,
         fullName: member.fullName,
+        // Nullable in the schema: a member issued a card at the desk may not
+        // have given a number yet, and that is a real state rather than missing
+        // data. The dashboard says so rather than rendering an empty cell.
+        phone: member.phone,
         status: member.status,
         joinedAt: member.joinedAt,
         // "Not claimed" is its own signal, distinct from "claimed but never

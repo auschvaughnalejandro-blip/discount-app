@@ -1,0 +1,107 @@
+/**
+ * The MFA sign-in screens — Stage 19.
+ *
+ * Shares `.signin` / `.signin-card` with the password step in layout.css, so
+ * the three steps of dashboard sign-in look like one flow rather than three
+ * pages.
+ */
+
+.mfa-card {
+  inline-size: min(28rem, 100%);
+  text-align: start;
+}
+
+.mfa-lede {
+  color: var(--c-text-muted);
+  font-size: var(--f-sm);
+  margin-block-end: var(--s-6);
+}
+
+/* The enrollment QR. Same requirement as the member card: a white quiet zone,
+   never tinted, because a scanner needs luminance contrast. Duplicated rather
+   than shared because the member app's copy carries a comment about the member
+   card specifically, and these two will not change together. */
+.qr {
+  --qr-quiet-zone: 1rem;
+  background: #ffffff;
+  padding: var(--qr-quiet-zone);
+  margin-inline: auto;
+  margin-block-end: var(--s-5);
+  inline-size: fit-content;
+  border-radius: var(--r-md);
+  line-height: 0;
+}
+
+.manual-entry {
+  margin-block-end: var(--s-5);
+  font-size: var(--f-sm);
+}
+
+.manual-entry summary {
+  cursor: pointer;
+  color: var(--c-primary);
+  min-height: var(--tap-min);
+  display: flex;
+  align-items: center;
+}
+
+.manual-entry output {
+  display: block;
+  padding: var(--s-3);
+  margin-block-start: var(--s-2);
+  background: var(--c-surface-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  letter-spacing: 0.12em;
+  word-break: break-all;
+}
+
+/* ── Recovery codes ─────────────────────────────────────────────────────
+   Shown exactly once. Set as data to be transcribed or printed: monospaced,
+   spaced out, two columns, high contrast. */
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--s-2);
+  padding: var(--s-4);
+  margin-block: var(--s-4) var(--s-6);
+  background: var(--c-surface-sunken);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+}
+
+.recovery-codes > li {
+  font-family: var(--font-mono);
+  font-size: var(--f-md);
+  letter-spacing: 0.08em;
+  color: var(--c-text);
+}
+
+/* Print cleanly — someone will, and should. */
+@media print {
+  .recovery-codes {
+    background: none;
+    border-color: #000000;
+  }
+}
+
+.mfa-card button[type='submit'] {
+  inline-size: 100%;
+}
+
+.text-button {
+  min-height: var(--tap-min);
+  padding-inline: 0;
+  border: none;
+  background: none;
+  color: var(--c-primary);
+  font-size: var(--f-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-button:hover:not(:disabled) {
+  background: none;
+  color: var(--c-primary-hover);
+}

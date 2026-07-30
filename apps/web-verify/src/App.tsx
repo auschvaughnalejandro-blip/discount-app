@@ -1,6 +1,13 @@
 import { useState } from 'react';
 
+import { formatDate, formatTimeOfDay, formatTimestamp } from '@pgp/ui/format';
+
 import { api, clearToken, setToken, type Entitlement, type ResolvedMember } from './api.js';
+import Scanner from './Scanner.js';
+
+import '@pgp/ui/foundation.css';
+import './theme.css';
+import './layout.css';
 
 /**
  * The staff verification page (wireframes screens 9, 10, D6).
@@ -77,10 +84,10 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       {/* Screen 9 note 3: staff sign in individually. Every redemption is
           attributed to a named person — without that, an incorrectly applied
           40% discount is untraceable. */}
-      <p>Sign in with your own account.</p>
+      <p className="signin-lede">Sign in with your own account.</p>
 
       <form onSubmit={submit}>
-        <p>
+        <p className="field">
           <label htmlFor="email">Email</label>
           <br />
           <input
@@ -92,7 +99,7 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
             autoComplete="username"
           />
         </p>
-        <p>
+        <p className="field">
           <label htmlFor="password">Password</label>
           <br />
           <input
@@ -142,18 +149,21 @@ function Lookup({ onResolved }: { onResolved: (resolved: ResolvedMember) => void
 
   return (
     <section>
+      <div className="lookup-section">
       <h2>Scan member code</h2>
-      {/* A camera-based scanner is presentation work, out of scope at this
-          stage. The payload a scanner would read is pasted instead; the
-          server treats both identically. */}
+      {/* The camera path. The server treats a scanned payload and a pasted one
+          identically, so this is a convenience over the box below rather than a
+          separate mechanism — which is why a failed camera is never a blocker. */}
+      <Scanner onScan={(scanned) => void lookup({ payload: scanned })} />
+
       <form
         onSubmit={(e) => {
           e.preventDefault();
           void lookup({ payload });
         }}
       >
-        <p>
-          <label htmlFor="payload">Scanned code</label>
+        <p className="field">
+          <label htmlFor="payload">Or paste the code</label>
           <br />
           <input id="payload" value={payload} onChange={(e) => setPayload(e.target.value)} />
         </p>
@@ -164,6 +174,9 @@ function Lookup({ onResolved }: { onResolved: (resolved: ResolvedMember) => void
         </p>
       </form>
 
+      </div>
+
+      <div className="lookup-section">
       <h2>Or enter membership number</h2>
       {/* Screen 9 note 2: many members present the printed card rather than
           the app, so typing the number must work as well as scanning. */}
@@ -173,7 +186,7 @@ function Lookup({ onResolved }: { onResolved: (resolved: ResolvedMember) => void
           void lookup({ membershipNumber });
         }}
       >
-        <p>
+        <p className="field">
           <label htmlFor="number">Membership number</label>
           <br />
           <input
@@ -188,8 +201,9 @@ function Lookup({ onResolved }: { onResolved: (resolved: ResolvedMember) => void
             Look up
           </button>
         </p>
-        <p>Use this if the member has the printed card.</p>
+        <p className="lookup-hint">Use this if the member has the printed card.</p>
       </form>
+      </div>
 
       {error ? <p role="alert">{error}</p> : null}
     </section>
@@ -229,7 +243,17 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
         idempotencyKey,
       });
 
-      setMessage(result.idempotent ? 'Already recorded.' : 'Recorded.');
+      // The confirmation states the exact second the server recorded it. Staff
+      // read this back to the guest, and it is the same value the member sees
+      // in their own history and the administrator sees in the export — one
+      // moment, quoted identically in three places, so a later dispute has a
+      // single fact to turn on.
+      //
+      // On a retry this deliberately shows the original time rather than now:
+      // the second submission created nothing, and dating it to the retry would
+      // be a lie about when the discount was given.
+      const at = formatTimeOfDay(result.occurredAt);
+      setMessage(result.idempotent ? `Already recorded at ${at}.` : `Recorded at ${at}.`);
       setIdempotencyKey(crypto.randomUUID());
     } catch (cause) {
       // The server's message carries the actual limit, read from the benefit
@@ -245,21 +269,25 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
       {/* Screen 10 note 1: validity is stated before anything else. A
           suspended membership must be obvious at a glance, before staff begin
           applying a discount. */}
-      <h2>
-        {resolved.member.fullName} — {resolved.member.valid ? 'Valid' : 'NOT VALID'}
-      </h2>
-      <p>
-        {resolved.member.memberNumber} · {resolved.member.status} · Member since{' '}
-        {new Date(resolved.member.joinedAt).toLocaleDateString()}
-      </p>
+      <div className="verdict" data-valid={resolved.member.valid}>
+        <span className="verdict-name">{resolved.member.fullName}</span>
+        {/* The word, a glyph and the border weight all carry the state, so it
+            survives greyscale and colour-blindness. */}
+        <span className="verdict-state">{resolved.member.valid ? 'Valid' : 'Not valid'}</span>
+        <span className="verdict-meta">
+          {resolved.member.memberNumber} · {resolved.member.status} · Member since{' '}
+          {/* A join date, not an event — the clock time would be noise. */}
+          {formatDate(resolved.member.joinedAt)}
+        </span>
+      </div>
 
       {!resolved.member.valid ? (
         <p role="alert">
           This membership is not active. Do not apply a discount. No benefit can be recorded.
         </p>
       ) : (
-        <form onSubmit={submit}>
-          <p>
+        <form className="record-form" onSubmit={submit}>
+          <p className="field">
             <label htmlFor="benefit">Benefit being used</label>
             <br />
             <select id="benefit" value={benefitId} onChange={(e) => setBenefitId(e.target.value)} required>
@@ -274,7 +302,7 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
 
           {benefit ? (
             <>
-              <p>
+              <p className="field">
                 <label htmlFor="party">Number of guests</label>
                 <br />
                 <input
@@ -289,18 +317,26 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
                   required={benefit.maxGuests !== null || benefit.minGuests !== null}
                 />
               </p>
-              {/* The limits come from the benefit row the server returned. */}
-              {benefit.maxGuests !== null ? (
-                <p>Maximum {benefit.maxGuests} guests for this benefit.</p>
-              ) : null}
-              {benefit.minGuests !== null ? (
-                <p>Minimum {benefit.minGuests} guests for this benefit.</p>
-              ) : null}
-              <p>{benefit.terms}</p>
+              {/* The limits come from the benefit row the server returned.
+                  Shown before the party-size field is filled in, so the cap is
+                  known rather than discovered by being rejected. */}
+              <div className="benefit-rules">
+                {benefit.maxGuests !== null ? (
+                  <p>
+                    Maximum <strong>{benefit.maxGuests}</strong> guests for this benefit.
+                  </p>
+                ) : null}
+                {benefit.minGuests !== null ? (
+                  <p>
+                    Minimum <strong>{benefit.minGuests}</strong> guests for this benefit.
+                  </p>
+                ) : null}
+                <p>{benefit.terms}</p>
+              </div>
             </>
           ) : null}
 
-          <p>
+          <p className="field">
             <label htmlFor="bill">Bill amount before discount (optional)</label>
             <br />
             <input
@@ -328,12 +364,14 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
       {resolved.recentUse.length === 0 ? (
         <p>Nothing recorded here yet.</p>
       ) : (
-        <ul>
+        <ul className="recent">
           {resolved.recentUse.map((row) => (
             <li key={row.id}>
               {row.benefit.title} · {row.outlet.name}
               {row.partySize !== null ? ` · ${row.partySize} guests` : ''} ·{' '}
-              {new Date(row.occurredAt).toLocaleDateString()}
+              {/* To the second: "twice today" is the pattern staff are watching
+                  for here, and two entries showing only a date look identical. */}
+              {formatTimestamp(row.occurredAt)}
             </li>
           ))}
         </ul>
@@ -342,14 +380,14 @@ function MemberFound({ resolved, onDone }: { resolved: ResolvedMember; onDone: (
       {message ? <p role="status">{message}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
 
-      <p>
+      <p className="till-note">
         {/* Screen 10 note 4: the system records; it does not discount. The
             discount is applied on the hotel's existing till exactly as today. */}
         The discount is applied on the till as usual. This records that it happened.
       </p>
 
       <p>
-        <button type="button" onClick={onDone}>
+        <button type="button" className="next-guest" onClick={onDone}>
           Done — next guest
         </button>
       </p>

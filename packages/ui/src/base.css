@@ -1,0 +1,433 @@
+/**
+ * Shared element styling — Stage 17.
+ *
+ * Styles the semantic HTML the three clients already contain: forms, buttons,
+ * tables, alerts, links. Because that markup was written correctly during
+ * stages 10–12, almost all of the visual work lands here rather than in JSX.
+ *
+ * Each app then adds a `theme.css` (its palette) and a `layout.css` (its
+ * structure). Nothing app-specific belongs in this file.
+ */
+
+/* ── Headings and text ──────────────────────────────────────────────────── */
+
+h1 {
+  font-size: var(--f-2xl);
+}
+h2 {
+  font-size: var(--f-xl);
+}
+h3 {
+  font-size: var(--f-lg);
+}
+
+small {
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+}
+
+strong {
+  font-weight: var(--fw-semibold);
+}
+
+a {
+  color: var(--c-primary);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+a:hover {
+  color: var(--c-primary-hover);
+}
+
+/* Membership numbers, codes and money read as data, not prose. */
+output,
+code,
+kbd {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--fv-tabular);
+  font-size: 0.95em;
+  overflow-wrap: anywhere;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────
+   Every `<button>` in all three apps gets this. Buttons that are really
+   navigation (the member app's tab bar, benefit rows) are re-styled in their
+   own app's layout.css — this is the default, not the only case. */
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: var(--tap-min);
+  padding-inline: var(--s-5);
+  padding-block: var(--s-2);
+  font-size: var(--f-md);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--c-surface-sunken);
+  border-color: var(--c-text-faint);
+}
+
+button:active:not(:disabled) {
+  /* A 1px nudge reads as a press without a transform that blurs text. */
+  padding-block-start: calc(var(--s-2) + 1px);
+  padding-block-end: calc(var(--s-2) - 1px);
+}
+
+button:disabled {
+  opacity: 0.5;
+}
+
+/**
+ * The primary action on a screen.
+ *
+ * `[type='submit']` rather than a class, so the member app's "Activate
+ * membership" and the verify page's "Confirm and record" are emphatic without
+ * any JSX change. Both are the one action their screen exists for.
+ */
+button[type='submit'] {
+  color: var(--c-primary-ink);
+  background: var(--c-primary);
+  border-color: var(--c-primary);
+  font-weight: var(--fw-semibold);
+}
+
+button[type='submit']:hover:not(:disabled) {
+  background: var(--c-primary-hover);
+  border-color: var(--c-primary-hover);
+}
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+
+label {
+  display: inline-block;
+  font-size: var(--f-sm);
+  font-weight: var(--fw-medium);
+  color: var(--c-text-muted);
+  margin-block-end: var(--s-1);
+}
+
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input[type='tel'],
+input[type='number'],
+input:not([type]),
+select,
+textarea {
+  inline-size: 100%;
+  max-inline-size: 26rem;
+  min-height: var(--tap-min);
+  padding-inline: var(--s-3);
+  padding-block: var(--s-2);
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+/* Codes and numbers: monospaced and spaced out, so a member reading a six-digit
+   passcode off another device does not lose their place. */
+input[inputmode='numeric'],
+input[autocomplete='one-time-code'] {
+  font-family: var(--font-mono);
+  font-size: var(--f-xl);
+  letter-spacing: 0.25em;
+  max-inline-size: 12rem;
+}
+
+input:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--c-text-faint);
+}
+
+input::placeholder {
+  color: var(--c-text-faint);
+}
+
+input[type='checkbox'] {
+  inline-size: 1.15rem;
+  block-size: 1.15rem;
+  min-height: 0;
+  accent-color: var(--c-primary);
+  vertical-align: middle;
+}
+
+/* A checkbox's label is the tap target, so it gets the size, not the box. */
+label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: var(--tap-min);
+  font-size: var(--f-md);
+  font-weight: var(--fw-normal);
+  color: var(--c-text);
+  cursor: pointer;
+  margin-block-end: 0;
+}
+
+fieldset {
+  padding: var(--s-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  margin-block: var(--s-5);
+}
+
+legend {
+  padding-inline: var(--s-2);
+  font-size: var(--f-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Alerts and status ──────────────────────────────────────────────────
+   Driven off the ARIA roles the apps already set. `role="alert"` is what the
+   member app uses for a failed sign-in and the verify page for a rejected
+   redemption, so styling the role means every one of them is covered — and a
+   new one added later is covered automatically. */
+
+[role='alert'],
+[role='status'] {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-md);
+  border: 1px solid;
+  /* The weight on the leading edge is a second, non-colour signal — it
+     survives greyscale and colour-blindness. */
+  border-inline-start-width: 4px;
+  font-size: var(--f-sm);
+  line-height: var(--lh-snug);
+  margin-block: var(--s-4);
+}
+
+[role='alert'] {
+  color: var(--c-critical-ink);
+  background: var(--c-critical-soft);
+  border-color: var(--c-critical);
+}
+
+[role='status'] {
+  color: var(--c-ok-ink);
+  background: var(--c-ok-soft);
+  border-color: var(--c-ok);
+}
+
+/* A leading glyph, so the two are distinguishable with colour removed
+   entirely. Content, not decoration — hence not `aria-hidden` guesswork: the
+   role already tells a screen reader what this is. */
+[role='alert']::before {
+  content: '!';
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 1.15rem;
+  block-size: 1.15rem;
+  border-radius: var(--r-full);
+  background: var(--c-critical);
+  color: var(--n-0);
+  font-size: var(--f-xs);
+  font-weight: var(--fw-bold);
+}
+
+[role='status']::before {
+  content: '✓';
+  flex: none;
+  font-weight: var(--fw-bold);
+  color: var(--c-ok);
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────
+   The admin dashboard's substance. Wide tables scroll inside their own
+   container rather than making the page scroll sideways. */
+
+.table-scroll {
+  overflow-x: auto;
+  /* Momentum scrolling on a tablet without trapping vertical swipes. */
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  inline-size: 100%;
+  font-size: var(--f-sm);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+caption {
+  text-align: start;
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+  padding-block-end: var(--s-2);
+}
+
+th {
+  text-align: start;
+  font-size: var(--f-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text-muted);
+  background: var(--c-panel-header);
+  padding: var(--s-2) var(--s-3);
+  border-block-end: 1px solid var(--c-border-strong);
+  white-space: nowrap;
+  position: sticky;
+  inset-block-start: 0;
+}
+
+td {
+  padding: var(--s-3);
+  border-block-end: 1px solid var(--c-border);
+  vertical-align: top;
+}
+
+tbody tr:hover {
+  background: var(--c-surface-sunken);
+}
+
+/* Money and counts right-align so magnitudes are comparable down a column. */
+td:has(> [data-numeric]),
+th[data-numeric],
+td[data-numeric] {
+  text-align: end;
+}
+
+/* ── Shared utility pieces ─────────────────────────────────────────────── */
+
+/** A panel: white body, grey header strip. The dashboard reference's basic unit. */
+.panel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel > h2,
+.panel > h3,
+.panel-title {
+  padding: var(--s-3) var(--s-4);
+  font-size: var(--f-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--c-text-muted);
+  background: var(--c-panel-header);
+  border-block-end: 1px solid var(--c-border);
+}
+
+.panel-body {
+  padding: var(--s-4);
+}
+
+/** A badge. Status is set with data-tone, never colour alone — the text inside
+    always says what it means. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding-inline: var(--s-2);
+  padding-block: 2px;
+  font-size: var(--f-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: var(--r-full);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.badge[data-tone='ok'] {
+  color: var(--c-ok-ink);
+  background: var(--c-ok-soft);
+}
+.badge[data-tone='warn'] {
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+}
+.badge[data-tone='error'] {
+  color: var(--c-error-ink);
+  background: var(--c-error-soft);
+}
+.badge[data-tone='critical'] {
+  color: var(--c-critical-ink);
+  background: var(--c-critical-soft);
+}
+.badge[data-tone='neutral'] {
+  color: var(--c-text-muted);
+  background: var(--c-surface-sunken);
+}
+
+/** Stat tile — the dashboard reference's coloured-border KPI box. The border
+    colour is the tone; the label and value are always spelled out. */
+.stat {
+  padding: var(--s-4);
+  background: var(--c-surface);
+  border: 2px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+}
+
+.stat[data-tone='ok'] {
+  border-color: var(--c-ok);
+}
+.stat[data-tone='warn'] {
+  border-color: var(--c-warn);
+}
+.stat[data-tone='error'] {
+  border-color: var(--c-error);
+}
+.stat[data-tone='critical'] {
+  border-color: var(--c-critical);
+}
+
+.stat-label {
+  display: block;
+  font-size: var(--f-xs);
+  font-weight: var(--fw-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text-muted);
+}
+
+.stat-value {
+  display: block;
+  margin-block-start: var(--s-1);
+  font-size: var(--f-2xl);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: var(--fv-tabular);
+  line-height: var(--lh-tight);
+  color: var(--c-text);
+}
+
+/** Skip link — first focusable element, invisible until focused. */
+.skip-link {
+  position: absolute;
+  inset-inline-start: var(--s-4);
+  inset-block-start: calc(-1 * var(--s-16));
+  z-index: 100;
+  padding: var(--s-2) var(--s-4);
+  background: var(--c-primary);
+  color: var(--c-primary-ink);
+  border-radius: var(--r-md);
+  transition: inset-block-start var(--t-base) var(--ease);
+}
+
+.skip-link:focus {
+  inset-block-start: var(--s-4);
+}

@@ -1,0 +1,241 @@
+/**
+ * Verification page structure — Stage 17. Wireframes screens 9, 10, D6.
+ *
+ * A tool, not a product. It is operated one-handed, in seconds, with a member
+ * waiting — so everything here optimises for glanceability and large targets
+ * over refinement. Works from a 360px phone up to a desk monitor because the
+ * device behind a counter could be any of them.
+ */
+
+main {
+  max-inline-size: 44rem;
+  margin-inline: auto;
+  padding: var(--s-5);
+}
+
+@media (min-width: 48rem) {
+  main {
+    padding: var(--s-8);
+  }
+}
+
+main > header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: center;
+  justify-content: space-between;
+  padding-block-end: var(--s-4);
+  margin-block-end: var(--s-6);
+  border-block-end: 1px solid var(--c-border);
+}
+
+main > header h1 {
+  font-size: var(--f-lg);
+}
+
+h2 {
+  font-size: var(--f-sm);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-text-muted);
+  margin-block: var(--s-6) var(--s-3);
+}
+
+/* ── The verdict (screen 10 note 1) ─────────────────────────────────────
+   Validity is stated before anything else, and a suspended membership must be
+   obvious *before* staff begin applying a discount.
+
+   Read at arm's length, and never by colour alone — the word itself says which
+   it is, the border weight differs, and a glyph is prepended. A colour-blind
+   member of staff applying 40% off to a suspended membership is precisely the
+   failure this screen exists to prevent. */
+
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-2) var(--s-4);
+  padding: var(--s-5);
+  border-radius: var(--r-lg);
+  border: 2px solid;
+  border-inline-start-width: 8px;
+  margin-block-end: var(--s-4);
+}
+
+.verdict-name {
+  font-size: var(--f-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.verdict-state {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--f-2xl);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.02em;
+  line-height: var(--lh-tight);
+}
+
+.verdict[data-valid='true'] {
+  color: var(--c-ok-ink);
+  background: var(--c-ok-soft);
+  border-color: var(--c-ok);
+}
+
+.verdict[data-valid='true'] .verdict-state::before {
+  content: '✓';
+}
+
+.verdict[data-valid='false'] {
+  color: var(--c-critical-ink);
+  background: var(--c-critical-soft);
+  border-color: var(--c-critical);
+}
+
+.verdict[data-valid='false'] .verdict-state {
+  /* Bigger than the valid case. An invalid membership is the exception and
+     needs to stop someone mid-motion. */
+  font-size: var(--f-3xl);
+  text-transform: uppercase;
+}
+
+.verdict[data-valid='false'] .verdict-state::before {
+  content: '✕';
+}
+
+.verdict-meta {
+  flex-basis: 100%;
+  font-size: var(--f-sm);
+  font-variant-numeric: var(--fv-tabular);
+  opacity: 0.85;
+}
+
+/* ── Lookup (screen 9) ──────────────────────────────────────────────────── */
+
+.lookup-section {
+  padding: var(--s-5);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  margin-block-end: var(--s-4);
+}
+
+.lookup-section > h2 {
+  margin-block-start: 0;
+}
+
+/* "Or enter membership number" is not a lesser path — many members present the
+   printed card (screen 9 note 2). Both routes get equal visual weight. */
+.lookup-hint {
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+  margin-block-start: var(--s-2);
+}
+
+.field {
+  margin-block: var(--s-4);
+}
+
+.field > label {
+  display: block;
+}
+
+/* A membership number is read off a card digit by digit. */
+#number,
+#payload {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--fv-tabular);
+  letter-spacing: 0.08em;
+}
+
+/* ── The redemption form (screen 10) ────────────────────────────────────── */
+
+.record-form {
+  padding: var(--s-5);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+}
+
+select {
+  /* The benefit picker is the first real decision on this screen. */
+  font-size: var(--f-md);
+  max-inline-size: 100%;
+}
+
+/* The limits and terms the server returned for the chosen benefit. Set apart so
+   staff see the cap before typing a party size, not after being rejected. */
+.benefit-rules {
+  padding: var(--s-4);
+  margin-block: var(--s-4);
+  background: var(--c-warn-soft);
+  color: var(--c-warn-ink);
+  border: 1px solid var(--c-warn);
+  border-inline-start-width: 4px;
+  border-radius: var(--r-md);
+  font-size: var(--f-sm);
+}
+
+.benefit-rules p {
+  margin-block: var(--s-1);
+}
+
+.benefit-rules strong {
+  font-variant-numeric: var(--fv-tabular);
+}
+
+/* The one action the screen exists for. Full width so it cannot be missed, and
+   generously tall so it is not hit by accident either. */
+.record-form button[type='submit'] {
+  inline-size: 100%;
+  min-height: calc(var(--tap-min) + var(--s-3));
+  margin-block-start: var(--s-5);
+  font-size: var(--f-lg);
+}
+
+/* ── Recent use (screen 10 note 5) ──────────────────────────────────────── */
+
+.recent {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.recent > li {
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  font-size: var(--f-sm);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+/* ── The till reminder (screen 10 note 4) ───────────────────────────────
+   "The system records; it does not discount." Staff must not think pressing
+   Confirm applied anything to the bill. */
+.till-note {
+  margin-block: var(--s-6) var(--s-4);
+  padding: var(--s-4);
+  background: var(--c-info-soft);
+  color: var(--c-info-ink);
+  border: 1px solid var(--c-info);
+  border-inline-start-width: 4px;
+  border-radius: var(--r-md);
+  font-size: var(--f-sm);
+  font-weight: var(--fw-medium);
+}
+
+/* ── Sign-in ────────────────────────────────────────────────────────────── */
+
+.signin-lede {
+  color: var(--c-text-muted);
+  margin-block-end: var(--s-6);
+}
+
+.next-guest {
+  inline-size: 100%;
+  min-height: calc(var(--tap-min) + var(--s-2));
+  margin-block-start: var(--s-6);
+}

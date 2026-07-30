@@ -64,11 +64,77 @@ export interface MemberRow {
   id: string;
   memberNumber: string;
   fullName: string;
+  /** Null where no contact number was captured — a real state, not missing data. */
+  phone: string | null;
   status: string;
   joinedAt: string;
   appClaimed: boolean;
   totalUses: number;
   lastUsedAt: string | null;
+}
+
+/**
+ * A figure the server withheld because fewer than `minCohortSize` distinct
+ * members stand behind it (R13, security-implementation.md §6).
+ *
+ * It arrives as this sentinel *string*, not a number and not `null` — so any
+ * code rendering a report figure is forced to decide what to display. The
+ * previous typing here was `Record<string, unknown>`, and the dashboard did
+ * `String(summary['redemptions'])`, which printed the raw sentinel
+ * `insufficient_data` into the page. Typing it is what makes that unwritable.
+ */
+export const INSUFFICIENT_DATA = 'insufficient_data';
+
+export type Figure = number | typeof INSUFFICIENT_DATA;
+
+export function isWithheld(value: Figure): value is typeof INSUFFICIENT_DATA {
+  return value === INSUFFICIENT_DATA;
+}
+
+/** `GET /admin/reports/summary`. */
+export interface ReportSummary {
+  /** True when the four cohort figures below were withheld as a group. */
+  suppressed: boolean;
+  redemptions: Figure;
+  guests: Figure;
+  activeMembers: Figure;
+  estValueMinor: Figure;
+  /**
+   * Membership totals describe the programme rather than a filtered slice of
+   * member behaviour, so they are never withheld — see the comment in
+   * `routes/reports.ts`. That makes them the figures the overview can always
+   * lead with, even on a database too small to report on.
+   */
+  totalMembers: number;
+  neverUsed: number;
+  minCohortSize: number;
+}
+
+/**
+ * A member as the *report* endpoints return one — narrower than `MemberRow`.
+ *
+ * `dormant-members` and `unclaimed` were typed as returning `MemberRow`, which
+ * declares `appClaimed`, `totalUses` and `lastUsedAt` as required. The server
+ * sends none of the three (verified against a live response), so anything
+ * rendering `member.totalUses` from one of those lists would have printed
+ * `undefined` with nothing failing to warn it. These lists exist to name people
+ * to follow up, so the identifying fields are all they carry.
+ */
+export interface ReportMember {
+  id: string;
+  memberNumber: string;
+  fullName: string;
+  status: string;
+  joinedAt: string;
+  /** Returned by `dormant-members`; absent from `unclaimed`. */
+  claimedAt?: string | null;
+}
+
+/** One row of `GET /admin/reports/by-benefit`, at the default metric. */
+export interface BenefitGroup {
+  label: string;
+  suppressed: boolean;
+  redemptions: Figure;
 }
 
 export interface AdminBenefit {
@@ -89,13 +155,46 @@ export interface AdminBenefit {
   updatedBy: { id: string; fullName: string } | null;
 }
 
+/**
+ * What `POST /auth/staff/login` returns since Stage 19.
+ *
+ * A dashboard account never gets tokens from a password — §3 requires a second
+ * factor, so the password yields a challenge and nothing else. `stage` says
+ * whether the account still has to enrol.
+ */
+export type StaffLoginResult =
+  | { mfaRequired: true; stage: 'enroll' | 'verify'; challengeToken: string }
+  | { mfaRequired?: false; accessToken: string; refreshToken: string };
+
 export const api = {
   login: (email: string, password: string) =>
-    call<{ accessToken: string; refreshToken: string }>('/auth/staff/login', {
+    call<StaffLoginResult>('/auth/staff/login', {
       method: 'POST',
       body: { email, password },
       auth: false,
     }),
+
+  /** Issues a fresh secret and the URI an authenticator app scans. */
+  mfaEnrollStart: (challengeToken: string) =>
+    call<{ otpauthUri: string; secret: string }>('/auth/staff/mfa/enroll', {
+      method: 'POST',
+      body: { challengeToken },
+      auth: false,
+    }),
+
+  /** Confirms enrollment and returns tokens plus the one-time recovery codes. */
+  mfaEnrollConfirm: (challengeToken: string, code: string) =>
+    call<{ accessToken: string; refreshToken: string; recoveryCodes: string[] }>(
+      '/auth/staff/mfa/enroll/confirm',
+      { method: 'POST', body: { challengeToken, code }, auth: false },
+    ),
+
+  /** A TOTP code, or a recovery code in place of one. */
+  mfaVerify: (challengeToken: string, input: { code?: string; recoveryCode?: string }) =>
+    call<{ accessToken: string; refreshToken: string; recoveryCodesRemaining?: number }>(
+      '/auth/staff/mfa/verify',
+      { method: 'POST', body: { challengeToken, ...input }, auth: false },
+    ),
 
   members: (query = '') =>
     call<{ total: number; limit: number; offset: number; members: MemberRow[] }>(
@@ -130,11 +229,12 @@ export const api = {
       body: { published },
     }),
 
-  summary: () => call<Record<string, unknown>>('/admin/reports/summary'),
+  summary: () => call<ReportSummary>('/admin/reports/summary'),
   byBenefit: () =>
-    call<{ minCohortSize: number; groups: Record<string, unknown>[] }>('/admin/reports/by-benefit'),
-  dormant: () => call<{ members: MemberRow[]; total: number }>('/admin/reports/dormant-members'),
-  unclaimed: () => call<{ members: MemberRow[]; total: number }>('/admin/reports/unclaimed'),
+    call<{ minCohortSize: number; groups: BenefitGroup[] }>('/admin/reports/by-benefit'),
+  dormant: () =>
+    call<{ members: ReportMember[]; total: number }>('/admin/reports/dormant-members'),
+  unclaimed: () => call<{ members: ReportMember[]; total: number }>('/admin/reports/unclaimed'),
 
   redemptions: () =>
     call<{

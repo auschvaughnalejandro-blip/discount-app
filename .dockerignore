@@ -1,0 +1,29 @@
+# Keep secrets and local state out of the build context entirely — anything
+# copied in is recoverable from the image, even if a later layer deletes it.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+node_modules
+**/node_modules
+**/dist
+**/.vite
+
+.git
+.github
+*.md
+!DEPLOYMENT.md
+
+# Development-only tooling and fixtures.
+scripts/
+docker-compose.yml
+**/test/
+**/*.test.ts
+**/vitest.config.ts
+
+.vscode
+.idea
+**/.DS_Store

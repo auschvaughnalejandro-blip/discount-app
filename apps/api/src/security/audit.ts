@@ -50,6 +50,15 @@ export type AuditAction =
   | 'member.consent_changed'
   | 'auth.login.success'
   | 'auth.login.failure'
+  // Stage 19. A password accepted but a second factor still outstanding is not
+  // a successful login, and recording it as one would misreport who was in the
+  // dashboard. §9 wants "every authentication event", and these are events.
+  | 'auth.mfa.challenged'
+  | 'auth.mfa.success'
+  | 'auth.mfa.failure'
+  | 'auth.mfa.enrolled'
+  // A recovery code spends a credential and should stand out in the trail.
+  | 'auth.mfa.recovery_used'
   | 'auth.logout'
   | 'auth.logout_all'
   | 'auth.refresh.reuse_detected'

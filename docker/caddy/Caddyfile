@@ -1,0 +1,189 @@
+# Privilege Guest Program — edge configuration.
+#
+# Caddy does four jobs here: terminate TLS, serve the three static clients,
+# proxy the API, and enforce who may reach what.
+#
+# That last one is the whole point. §9 of the product definition treats the
+# membership list as a record of named, prominent individuals; the member app
+# must be reachable from anywhere, and the dashboard must not be.
+#
+# Placeholders come from the environment (docker-compose.prod.yml passes them):
+#   DOMAIN         apex, e.g. privilegeguest.qa
+#   INTERNAL_CIDR  space-separated ranges allowed to reach staff surfaces
+#   ACME_EMAIL     for Let's Encrypt expiry notices
+
+{
+	email {$ACME_EMAIL}
+	# Certificates renew themselves; there is no cron job to forget.
+
+	servers {
+		# Caddy is the only thing clients talk to, so it is the only place that
+		# can know a real client address. Fastify reads X-Forwarded-For because
+		# TRUST_PROXY is on — without this both ends would be guessing, and
+		# every per-IP rate limit would collapse into a single bucket.
+		trusted_proxies static private_ranges
+	}
+}
+
+# ── Shared snippets ─────────────────────────────────────────────────────────
+
+# Headers for the three single-page apps.
+#
+# These matter more than the API's own headers: the API returns JSON and is a
+# defence-in-depth case, whereas these three documents are the actual XSS
+# surface. Stage 20's helmet configuration covers the API separately; neither
+# substitutes for the other.
+(static_security) {
+	header {
+		# Two years, and preload-eligible. §8.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# Vite emits no inline script; styles are bundled to files. If a build
+		# ever needs 'unsafe-inline' here, that is a signal to fix the build
+		# rather than to widen the policy.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.{$DOMAIN}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+		# Nothing here uses a microphone, geolocation or payment. The camera is
+		# granted only on the verification host, which overrides this.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# Server banners tell an attacker what to look up.
+		-Server
+	}
+}
+
+# Static single-page app hosting.
+#
+# `try_files` sends unknown paths to index.html so client-side routing works,
+# while real files (the hashed bundles, the icons, the service worker) are
+# served directly.
+(spa) {
+	encode zstd gzip
+	try_files {path} /index.html
+	file_server
+
+	# Hashed filenames are safe to cache forever.
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# The entry document and the service worker must not be, or a release never
+	# reaches anyone.
+	@volatile path / /index.html /sw.js /registerSW.js /manifest.webmanifest
+	header @volatile Cache-Control "no-cache"
+}
+
+# Staff surfaces: hotel network and VPN only.
+#
+# §9 — outlet staff can retrieve only the member in front of them, and no one
+# outside the building has business reaching either of these at all. Returns 403
+# rather than dropping the connection, so a legitimate user on the wrong network
+# gets an answer instead of a hang.
+(internal_only) {
+	@external not remote_ip {$INTERNAL_CIDR}
+	respond @external "Not available from this network." 403 {
+		close
+	}
+}
+
+# ── my.<domain> — the member app ────────────────────────────────────────────
+# Public. Members are not at the hotel.
+my.{$DOMAIN} {
+	root * /srv/member
+	import static_security
+	import spa
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ── verify.<domain> — the staff verification page ───────────────────────────
+# Internal only. See DEPLOYMENT.md §5.3: this restriction is what makes the
+# outlet-staff MFA exemption proportionate. Publish this host and MFA must be
+# extended to OUTLET_STAFF.
+verify.{$DOMAIN} {
+	import internal_only
+
+	root * /srv/verify
+	import static_security
+	import spa
+
+	# The scanner needs getUserMedia, which the shared Permissions-Policy denies.
+	# Granted for this host only, and only to itself.
+	header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ── admin.<domain> — the dashboard ──────────────────────────────────────────
+# Internal only. This is the surface that reaches the whole membership list.
+admin.{$DOMAIN} {
+	import internal_only
+
+	root * /srv/admin
+	import static_security
+	import spa
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ── api.<domain> — the API ──────────────────────────────────────────────────
+# Public, because members need it. But not uniformly public.
+api.{$DOMAIN} {
+	# Restricting the dashboard's hostname while leaving its endpoints open to
+	# the internet would make the restriction decorative. The UI is not the
+	# control; this is.
+	#
+	# Everything under /admin/* — member list, member detail, benefit editing,
+	# reports, exports — is refused from outside. Member and verification routes
+	# are unaffected.
+	@admin_external {
+		path /admin/*
+		not remote_ip {$INTERNAL_CIDR}
+	}
+	respond @admin_external "Not available from this network." 403 {
+		close
+	}
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# The API returns JSON only. If a browser is ever induced to render a
+		# response as a document, this leaves it with nothing to run.
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+		-Server
+	}
+
+	encode zstd gzip
+	reverse_proxy api:3000 {
+		# Fastify uses these to recover the real client address for rate
+		# limiting and the audit log. Caddy sets them; TRUST_PROXY tells the API
+		# it may believe them.
+		header_up X-Real-IP {remote_host}
+
+		# The API's own /health is the liveness probe. A failing backend should
+		# surface as 502 rather than Caddy holding connections open.
+		health_uri /health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ── Apex ────────────────────────────────────────────────────────────────────
+# Nothing is served here. Members are sent to their app; everything else is
+# refused rather than being told which hostnames exist.
+{$DOMAIN} {
+	redir https://my.{$DOMAIN}{uri} permanent
+}

@@ -12,18 +12,22 @@ Reviewed: 2026-07-29 · against commit `c40c41c` · 239 tests passing
 
 | | Count |
 |---|---|
-| Confirmed | 22 |
+| Confirmed | 23 |
 | Partial | 3 |
-| Deferred | 5 |
+| Deferred | 4 |
 | **Total** | **30** |
+
+Revised 2026-07-30: **MFA moved from deferred to confirmed** in Stage 19. The
+count of deferred items is now four — httpOnly cookies + CSRF, KMS, alerting,
+and security headers/CORS. All four are Stage 20 in ROADMAP.md.
 
 Nothing here is marked confirmed on the strength of code alone. Where a test
 proves it, the test is named; where the proof is a database privilege, the
 privilege was exercised against a real database.
 
-**The five deferred items are not oversights.** Each is either an integration
-that no reference document specifies (SMS, email, KMS, alerting) or a conflict
-between two authoritative documents that needs a human decision (MFA). They are
+**The remaining deferred items are not oversights.** Each is an integration that
+no reference document specifies (KMS, alerting) or deployment-shaped work that
+Stage 21 settles (cookies/CSRF, headers/CORS). They are
 listed with the same prominence as the confirmed ones because a review that
 buries them is worth nothing.
 
@@ -42,11 +46,63 @@ Deliberately **not** configurable by environment variable: a knob that can
 weaken password hashing is a knob that eventually will.
 
 ### ☑ MFA enforced on every dashboard account
-**DEFERRED — the most significant open item in this review.**
+**CONFIRMED — Stage 19, 2026-07-30.** Was the most significant open item in
+this review.
 
-§3 says MFA is mandatory "without exception". It is not implemented.
-`StaffUser.mfaSecret` exists as the schema extension point; `POST
-/auth/staff/login` currently succeeds on password alone.
+`POST /auth/staff/login` no longer returns tokens for an account that reaches
+more than the verification page. It returns a challenge, signed for a **separate
+JWT audience** (`src/security/mfa-challenge.ts`) so the existing audience check
+rejects it anywhere an access token is expected — the separation is enforced by a
+control that already existed rather than by a new rule someone has to remember.
+
+**Scope.** §3 states both "mandatory on every dashboard account, without
+exception" and "MFA for any staff account that can reach more than the
+verification page". The second is the specific sentence and resolves the first:
+ADMINISTRATOR, MANAGER and SUPPORT require it; OUTLET_STAFF, which reaches only
+the verification page, does not — and §3 covers those accounts separately with
+named individual logins, no shared accounts, shift-length expiry and instant
+revocation. Recorded in DECISIONS.md rather than decided silently.
+
+Enforced where:
+- `src/security/mfa.ts` — TOTP (`otplib`), AES-256-GCM encryption of the secret
+  at rest, recovery-code generation and Argon2id hashing, role scoping
+- `src/security/mfa-challenge.ts` — the challenge token and its audience
+- `src/routes/auth.ts` — the login gate and the three MFA endpoints
+
+Properties verified by `test/mfa.test.ts` (24 tests) and the acceptance journey,
+which now completes enrollment the way a real client must:
+- A password alone reaches nothing on a dashboard account
+- An un-enrolled account cannot skip enrollment — there is no branch to a token
+- The stored secret is unreadable from a database dump alone, and a tampered
+  ciphertext fails GCM authentication rather than decrypting to garbage
+- A fresh IV per encryption, so two accounts sharing a secret is not visible
+- Recovery codes are single-use, consumed atomically (`usedAt: null` in the
+  where clause, so two concurrent presentations cannot both succeed)
+- Verification is rate-limited per account, not per IP, so rotating source
+  addresses does not buy a fresh budget against six digits
+- **A TOTP code cannot be replayed.** A code stays cryptographically valid for
+  its period plus skew tolerance — about 90 seconds — so the period a code was
+  accepted in is recorded (`StaffUser.mfaLastUsedEpoch`) and anything at or
+  before it is refused. §3 requires the member OTP to be single use and there is
+  no principled reason a staff second factor should be weaker. Marked spent
+  before any token is issued, so a concurrent replay loses the race.
+- A suspended account cannot complete sign-in in the window between password and
+  second factor — the account is re-read at every step, because §3's "instant
+  revocation" has to hold inside that window too.
+- Every MFA event is audited: challenged, success, failure, enrolled, and
+  recovery-code used as its own action, since spending a recovery code should
+  stand out in the trail.
+
+**Two things deliberately not built, and worth naming:**
+1. **No MFA reset path for an account that has lost both its authenticator and
+   its recovery codes.** That account is locked out permanently today. A reset is
+   itself a security-sensitive operation — whoever can reset MFA can take over an
+   administrator account — so it needs a deliberate design (dual control, or an
+   out-of-band identity check) rather than a convenient endpoint.
+2. **No step-up re-authentication for sensitive actions.** Export and benefit
+   editing sit behind role permissions and the audit log, but not behind a fresh
+   second factor. §3 does not require it; for a membership list of this
+   sensitivity it is worth considering.
 
 This is a genuine conflict between two authoritative documents rather than an
 omission. `BUILD-PLAN.md` Stage 2 lists a closed set of six auth endpoints with

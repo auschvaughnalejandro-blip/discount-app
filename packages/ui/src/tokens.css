@@ -1,0 +1,240 @@
+/**
+ * Design tokens — Stage 17.
+ *
+ * One file drives all three clients. Everything below is either structural
+ * (spacing, type scale, radii, motion) and identical everywhere, or *semantic*
+ * (--c-surface, --c-primary) and overridden per app in its own theme.css.
+ *
+ * That split is the point. The three surfaces have genuinely different jobs —
+ * a phone-first member app, a glanceable counter tool, a dense desktop
+ * dashboard — so they get different palettes, but they share one spacing scale,
+ * one type scale and one set of status meanings. Changing the rhythm of the
+ * system happens here, once.
+ *
+ * Logical properties are used throughout the system (margin-inline, not
+ * margin-left) so Stage 22's Arabic RTL mirrors the layout with a single `dir`
+ * attribute rather than a second stylesheet.
+ */
+
+:root {
+  /* ── Type ──────────────────────────────────────────────────────────────
+     System stacks. No webfont: a hotel network behind a captive portal is a
+     bad place to discover a font CDN is blocked, and Stage 21's CSP forbids
+     external hosts anyway. Arabic (Stage 22) falls through to the platform's
+     own Arabic face, which is what a native reader expects. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans Arabic', sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
+
+  /* A 1.2 scale from 0.75rem. Tight enough that adjacent sizes read as
+     deliberate rather than accidental. */
+  --f-xs: 0.75rem;
+  --f-sm: 0.875rem;
+  --f-md: 1rem;
+  --f-lg: 1.125rem;
+  --f-xl: 1.375rem;
+  --f-2xl: 1.75rem;
+  --f-3xl: 2.25rem;
+  --f-4xl: 3rem;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --lh-tight: 1.15;
+  --lh-snug: 1.35;
+  --lh-normal: 1.55;
+  --lh-relaxed: 1.7;
+
+  /* Numerals that line up in a column. Essential for the admin tables and the
+     membership number, which is read digit by digit off a card. */
+  --fv-tabular: tabular-nums;
+
+  /* ── Space ─────────────────────────────────────────────────────────────
+     4px base. Named by step, not by intent, so a component can pick the step
+     that looks right without arguing about whether it is "cozy". */
+  --s-0: 0;
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.25rem;
+  --s-6: 1.5rem;
+  --s-8: 2rem;
+  --s-10: 2.5rem;
+  --s-12: 3rem;
+  --s-16: 4rem;
+  --s-20: 5rem;
+
+  /* ── Radius ────────────────────────────────────────────────────────────── */
+  --r-none: 0;
+  --r-sm: 3px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  /* ── Elevation ─────────────────────────────────────────────────────────
+     Cheap shadows. Two layers each: a tight contact shadow plus a broad
+     ambient one, which reads as depth rather than as a grey blur. */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 2px 4px rgb(0 0 0 / 0.06), 0 4px 12px rgb(0 0 0 / 0.06);
+  --shadow-lg: 0 4px 8px rgb(0 0 0 / 0.07), 0 12px 32px rgb(0 0 0 / 0.10);
+
+  /* ── Motion ────────────────────────────────────────────────────────────
+     Short. Anything longer than 200ms on a counter tool feels like lag. */
+  --t-fast: 90ms;
+  --t-base: 150ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Layout ────────────────────────────────────────────────────────────── */
+  --measure: 68ch;
+  --tap-min: 44px;
+
+  /* ── Neutrals ──────────────────────────────────────────────────────────
+     A single ramp, referenced by the semantic tokens below. Overriding a
+     semantic token in an app theme is expected; overriding the ramp is not. */
+  --n-0: #ffffff;
+  --n-25: #fcfcfd;
+  --n-50: #f7f8fa;
+  --n-100: #eef0f4;
+  --n-200: #dfe3e9;
+  --n-300: #c6ccd6;
+  --n-400: #98a1b0;
+  --n-500: #6c7684;
+  --n-600: #505864;
+  --n-700: #3b424c;
+  --n-800: #262b33;
+  --n-850: #1c2027;
+  --n-900: #14171c;
+  --n-950: #0c0e12;
+
+  /* ── Status ────────────────────────────────────────────────────────────
+     Four levels, and their meanings are fixed across all three apps: a
+     redemption recorded is `ok` everywhere, a suspended membership is
+     `critical` everywhere. Hues follow the dashboard reference — teal, yellow,
+     orange, red — so the admin charts and the verify page agree.
+
+     Every status is also carried by an icon, a border weight or a word in the
+     markup. Colour is never the only signal; see base.css. */
+  --c-ok: #0f8a72;
+  --c-ok-soft: #e5f5f1;
+  --c-ok-ink: #06503f;
+
+  --c-warn: #c8a200;
+  --c-warn-soft: #fdf7dd;
+  --c-warn-ink: #6b5600;
+
+  --c-error: #d97316;
+  --c-error-soft: #fdf0e4;
+  --c-error-ink: #7a3d05;
+
+  --c-critical: #cf2e2e;
+  --c-critical-soft: #fdebeb;
+  --c-critical-ink: #7d1414;
+
+  --c-info: #1d6fd0;
+  --c-info-soft: #e8f1fd;
+  --c-info-ink: #10406f;
+
+  /* ── Semantic surface + text (light) ──────────────────────────────────
+     Overridden per app. These defaults are the neutral dashboard reading. */
+  --c-canvas: var(--n-50);
+  --c-surface: var(--n-0);
+  --c-surface-sunken: var(--n-100);
+  --c-surface-raised: var(--n-0);
+  /* The grey strip above each panel in the dashboard reference. */
+  --c-panel-header: var(--n-100);
+
+  --c-text: var(--n-900);
+  --c-text-muted: var(--n-500);
+  --c-text-faint: var(--n-400);
+  --c-text-inverse: var(--n-0);
+
+  --c-border: var(--n-200);
+  --c-border-strong: var(--n-300);
+
+  --c-primary: #0f8a72;
+  --c-primary-hover: #0c7360;
+  --c-primary-ink: #ffffff;
+  --c-primary-soft: #e5f5f1;
+
+  /* Focus ring. One token, so it cannot drift between apps — a keyboard user
+     on the verify page needs the same affordance as on the dashboard. */
+  --c-focus: #1d6fd0;
+  --ring: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-focus);
+}
+
+/**
+ * Dark mode.
+ *
+ * `prefers-color-scheme` is the signal; `[data-theme]` overrides it in both
+ * directions so an explicit choice always wins over the OS. The member app is
+ * the one that matters most here — a phone in a dim restaurant is the common
+ * case, and a full-brightness white screen at dinner is antisocial.
+ *
+ * The digital card's QR stays white regardless. That is enforced in the member
+ * app's own stylesheet and asserted by a test, because a dark-mode QR is
+ * unscannable and the failure is invisible on screen.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --c-canvas: var(--n-950);
+    --c-surface: var(--n-900);
+    --c-surface-sunken: var(--n-950);
+    --c-surface-raised: var(--n-850);
+    --c-panel-header: var(--n-850);
+
+    --c-text: var(--n-50);
+    --c-text-muted: var(--n-400);
+    --c-text-faint: var(--n-500);
+    --c-text-inverse: var(--n-950);
+
+    --c-border: var(--n-800);
+    --c-border-strong: var(--n-700);
+
+    /* Lifted for contrast against a dark canvas — the light-mode teal fails
+       AA on near-black. */
+    --c-ok: #35b899;
+    --c-ok-soft: #0d2f28;
+    --c-ok-ink: #8fdcc9;
+
+    --c-warn: #e8c53d;
+    --c-warn-soft: #322a08;
+    --c-warn-ink: #f2dd8b;
+
+    --c-error: #f0954a;
+    --c-error-soft: #34200c;
+    --c-error-ink: #f8c393;
+
+    --c-critical: #f26060;
+    --c-critical-soft: #391414;
+    --c-critical-ink: #f8a4a4;
+
+    --c-info: #5c9ee8;
+    --c-info-soft: #12253c;
+    --c-info-ink: #a6c9f2;
+
+    --c-primary: #35b899;
+    --c-primary-hover: #4ac5a8;
+    --c-primary-ink: #04231c;
+    --c-primary-soft: #0d2f28;
+
+    --c-focus: #6aa9ec;
+
+    /* Shadows do almost nothing on a dark canvas; borders carry the depth. */
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 2px 8px rgb(0 0 0 / 0.45);
+    --shadow-lg: 0 8px 28px rgb(0 0 0 / 0.55);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}

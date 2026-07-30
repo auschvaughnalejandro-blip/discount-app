@@ -1,0 +1,398 @@
+/**
+ * Admin dashboard structure — Stage 17. Wireframes screens 11–14, D3–D5.
+ *
+ * Desktop-first, and the only one of the three that is: this is the surface
+ * where information density beats whitespace. It still has to work on a tablet,
+ * because a manager checking figures on the floor is a real case — so the
+ * sidebar collapses to a horizontal tab strip below 60rem rather than becoming
+ * a hamburger nobody finds.
+ *
+ * Built to the reference dashboard: a fixed left nav, a top bar, and content as
+ * white panels with grey header strips.
+ */
+
+/* ── Shell ──────────────────────────────────────────────────────────────
+   A two-column grid: nav rail, then content. On narrow screens the rail
+   becomes row one and the content row two. */
+
+main {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+}
+
+@media (min-width: 60rem) {
+  main {
+    grid-template-columns: 15rem 1fr;
+    grid-template-rows: 1fr;
+  }
+}
+
+/* ── Header, which doubles as the nav rail ──────────────────────────────── */
+
+main > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  background: var(--c-surface);
+  border-block-end: 1px solid var(--c-border);
+}
+
+main > header h1 {
+  font-size: var(--f-md);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+}
+
+/* The brand mark gets the primary colour so the rail has an anchor. */
+main > header h1::first-line {
+  color: var(--c-primary);
+}
+
+@media (min-width: 60rem) {
+  main > header {
+    /* Full height, own scroll, so a long content column does not drag the nav
+       out of view. */
+    position: sticky;
+    inset-block-start: 0;
+    block-size: 100dvh;
+    overflow-y: auto;
+    padding: var(--s-5) var(--s-4);
+    border-block-end: none;
+    border-inline-end: 1px solid var(--c-border);
+  }
+
+  /* Sign out sits at the bottom of the rail rather than beside the title. */
+  main > header > button:last-child {
+    margin-block-start: auto;
+  }
+}
+
+/* ── Section navigation ─────────────────────────────────────────────────
+   A horizontal strip on narrow screens, a vertical list in the rail on wide
+   ones. Driven off `aria-current`, which App.tsx already sets. */
+
+nav[aria-label='Sections'] > ul {
+  display: flex;
+  gap: var(--s-1);
+  overflow-x: auto;
+}
+
+nav[aria-label='Sections'] button {
+  inline-size: 100%;
+  justify-content: flex-start;
+  min-height: var(--tap-min);
+  padding-inline: var(--s-3);
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  font-size: var(--f-sm);
+  font-weight: var(--fw-medium);
+  text-transform: capitalize;
+  color: var(--c-text-muted);
+  white-space: nowrap;
+}
+
+nav[aria-label='Sections'] button:hover:not(:disabled) {
+  background: var(--c-surface-sunken);
+  color: var(--c-text);
+}
+
+nav[aria-label='Sections'] button[aria-current='true'] {
+  color: var(--c-primary);
+  background: var(--c-primary-soft);
+  font-weight: var(--fw-semibold);
+}
+
+@media (min-width: 60rem) {
+  nav[aria-label='Sections'] > ul {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+}
+
+/* ── Content column ────────────────────────────────────────────────────── */
+
+main > section {
+  min-inline-size: 0; /* Lets wide tables scroll instead of stretching the grid. */
+  padding: var(--s-5);
+  overflow-x: hidden;
+}
+
+@media (min-width: 60rem) {
+  main > section {
+    padding: var(--s-8);
+  }
+}
+
+main > section > h2 {
+  font-size: var(--f-2xl);
+  margin-block-end: var(--s-6);
+}
+
+main > section > h3 {
+  font-size: var(--f-md);
+  font-weight: var(--fw-semibold);
+  margin-block: var(--s-8) var(--s-3);
+}
+
+/* ── Panels ────────────────────────────────────────────────────────────
+   The reference's basic unit: white body, grey header strip. `.panel` and
+   `.panel-body` come from @pgp/ui; this adds the dashboard's spacing. */
+
+.panel {
+  margin-block-end: var(--s-5);
+}
+
+/* Tables sit flush inside a panel — the panel already provides the frame. */
+.panel > .table-scroll {
+  margin: 0;
+}
+
+.panel > .table-scroll table {
+  border-radius: 0;
+}
+
+/* ── KPI row ────────────────────────────────────────────────────────────
+   The coloured-border stat tiles from the reference. `auto-fit` means four
+   tiles on a desktop, two on a tablet and one on a phone with no breakpoints
+   of its own. */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--s-4);
+  margin-block-end: var(--s-6);
+}
+
+/* ── Overview band ──────────────────────────────────────────────────────
+   The chart and the two decision panels beside it. One column until there is
+   genuinely room for two, because a 300px-wide bar chart is worse than a
+   stacked one — the bars stop being comparable. */
+
+.dash-band {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s-5);
+  margin-block-end: var(--s-5);
+  align-items: start;
+}
+
+@media (min-width: 75rem) {
+  .dash-band {
+    /* The chart takes the slack; the rail is fixed so the meter and the
+       attention lists keep a predictable measure. */
+    grid-template-columns: minmax(0, 1fr) 22rem;
+  }
+}
+
+/**
+ * The band's two columns, each a stack of panels.
+ *
+ * Both are grids rather than the main column being a single panel, because the
+ * rail (meter + two attention lists) is naturally taller than the chart. With
+ * one panel on the left, the difference showed as ~240px of empty canvas under
+ * the chart. Stacking the redemption log beneath it fills that column instead of
+ * leaving a hole, and puts the two "what happened" panels together.
+ */
+.dash-main,
+.dash-rail {
+  display: grid;
+  gap: var(--s-5);
+  min-inline-size: 0;
+  /* Panels size to their content; the column does not stretch them to match
+     its neighbour, which would leave dead space *inside* a panel instead. */
+  align-content: start;
+}
+
+/* Panels inside the band manage their own spacing via the grid gap. */
+.dash-band .panel {
+  margin-block-end: 0;
+}
+
+/* A lede under a section heading. The h2 already has the margin, so this
+   pulls up under it rather than adding a second gap. */
+.section-lede {
+  margin-block: calc(var(--s-6) * -1) var(--s-6);
+  color: var(--c-text-muted);
+  font-size: var(--f-sm);
+  max-inline-size: 60ch;
+}
+
+/* ── Attention lists ────────────────────────────────────────────────────
+   Two short named lists. Deliberately not a table: this is a prompt to act on
+   four people, not a report to read. */
+
+.attention + .attention {
+  margin-block-start: var(--s-5);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--c-border);
+}
+
+.attention-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-block-end: var(--s-3);
+  font-size: var(--f-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.attention-list {
+  display: grid;
+  gap: var(--s-2);
+  margin-block-end: var(--s-2);
+}
+
+.attention-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  font-size: var(--f-sm);
+}
+
+/* An empty state is good news here, so it reads as a statement rather than as
+   an absence of data. */
+.empty {
+  font-size: var(--f-sm);
+  color: var(--c-text-muted);
+}
+
+/* A footer action strip on a panel — sits on the header's grey so it reads as
+   part of the frame rather than as another row of the table. */
+.panel-footer {
+  padding: var(--s-3) var(--s-4);
+  background: var(--c-panel-header);
+  border-block-start: 1px solid var(--c-border);
+}
+
+/* A button that is really a link: used for "View all", where a full button
+   would out-weigh the list it sits under. */
+.text-button {
+  padding: 0;
+  border: none;
+  background: none;
+  min-height: 0;
+  font-size: var(--f-sm);
+  font-weight: var(--fw-medium);
+  color: var(--c-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.text-button:hover:not(:disabled) {
+  color: var(--c-primary-hover);
+}
+
+/* ── Forms inside the dashboard ─────────────────────────────────────────
+   Member creation and benefit editing. Laid out as a wrapping row of fields so
+   a wide screen is used rather than producing a single tall column. */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--s-4);
+  align-items: end;
+}
+
+.field > label {
+  display: block;
+}
+
+.field input,
+.field select {
+  max-inline-size: 100%;
+}
+
+/* Percentages and caps are narrow by nature; a full-width box invites a wrong
+   value. */
+.field--narrow input {
+  max-inline-size: 8rem;
+}
+
+/* ── Member and redemption tables ───────────────────────────────────────── */
+
+/* Actions column: buttons small enough not to dominate a dense row. */
+td button {
+  min-height: 2rem;
+  padding-inline: var(--s-3);
+  font-size: var(--f-xs);
+}
+
+/* A destructive or state-changing action reads as one. Suspend and reverse are
+   both hard to undo — reversal is a new immutable row, never an edit. */
+td button[data-destructive='true'] {
+  color: var(--c-critical-ink);
+  background: var(--c-critical-soft);
+  border-color: var(--c-critical);
+}
+
+td button[data-destructive='true']:hover:not(:disabled) {
+  color: var(--n-0);
+  background: var(--c-critical);
+  border-color: var(--c-critical);
+}
+
+/* A membership number is an identifier, read digit by digit — and so is a phone
+   number, which is why both wear this. Tabular figures keep the columns aligned
+   so a number can be scanned down rather than read row by row. */
+.member-number {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--fv-tabular);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ── Notes and suppression warnings ─────────────────────────────────────
+   D5 note 5: cohorts below the minimum return "insufficient data" rather than a
+   number, because a narrow enough filter describes one person. That is a
+   privacy control, not a limitation, so it is stated rather than hidden. */
+
+.note {
+  padding: var(--s-3) var(--s-4);
+  margin-block: var(--s-3);
+  background: var(--c-info-soft);
+  color: var(--c-info-ink);
+  border: 1px solid var(--c-info);
+  border-inline-start-width: 4px;
+  border-radius: var(--r-md);
+  font-size: var(--f-sm);
+}
+
+/* Suppressed cells should read as deliberately withheld, not as missing data. */
+.suppressed {
+  color: var(--c-text-faint);
+  font-style: italic;
+}
+
+/* ── Sign-in ────────────────────────────────────────────────────────────── */
+
+.signin {
+  display: grid;
+  place-content: center;
+  min-height: 100dvh;
+  padding: var(--s-5);
+}
+
+.signin-card {
+  inline-size: min(24rem, 100%);
+  padding: var(--s-8);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.signin-card h1 {
+  font-size: var(--f-xl);
+  margin-block-end: var(--s-6);
+}
+
+.signin-card button[type='submit'] {
+  inline-size: 100%;
+  margin-block-start: var(--s-2);
+}

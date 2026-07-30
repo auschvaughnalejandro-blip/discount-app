@@ -2,8 +2,28 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- viewport-fit=cover lets the fixed tab bar sit under the home indicator
+         and use env(safe-area-inset-bottom), which layout.css accounts for. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Privilege Guest</title>
+
+    <!-- Matches theme.css and the manifest. Tints the Android status bar and
+         the iOS scroll overscroll area; a mismatch flashes on every launch. -->
+    <meta name="theme-color" content="#0d1420" />
+    <meta name="description" content="Your Privilege Guest membership, benefits and digital card." />
+
+    <!-- iOS ignores the web app manifest and reads these instead. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Privilege" />
+    <!-- black-translucent so the navy canvas runs under the status bar rather
+         than leaving a white band above it. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- §9: a membership list is a record of named prominent individuals.
+         Keeping the app out of search indexes costs nothing and removes one
+         way its existence and structure become public. -->
+    <meta name="robots" content="noindex, nofollow" />
   </head>
   <body>
     <div id="root"></div>

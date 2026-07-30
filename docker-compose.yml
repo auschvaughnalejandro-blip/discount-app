@@ -6,11 +6,15 @@ services:
     environment:
       # Schema owner. Migrations run as this role.
       POSTGRES_USER: pgp_owner
-      POSTGRES_PASSWORD: pgp_local_dev
+      # Local development only. This file is never used in production —
+      # docker-compose.prod.yml is, and it requires every secret to be supplied
+      # with no default. Keeping the two apart is what stops a committed
+      # development password becoming a production one.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pgp_local_dev}
       POSTGRES_DB: pgp
       # The application role, created by docker/postgres/init/01-app-role.sh.
       # It is deliberately not the owner, so the REVOKE that enforces R7 bites.
-      PGP_APP_PASSWORD: pgp_local_app
+      PGP_APP_PASSWORD: ${PGP_APP_PASSWORD:-pgp_local_app}
     ports:
       - "5433:5432"
     volumes:

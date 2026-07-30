@@ -117,7 +117,18 @@ model StaffUser {
   /// Incrementing this invalidates every outstanding access token for the user
   /// — the mechanism behind logout-everywhere, role change and offboarding.
   tokenVersion Int        @default(1)
+  /// AES-256-GCM ciphertext, never the raw TOTP secret — a stolen dump alone
+  /// must not yield working second factors. See src/security/mfa.ts.
   mfaSecret    String?
+  /// Set when enrollment is confirmed by a valid code. Null with a non-null
+  /// `mfaSecret` means enrollment was started and abandoned, which must not
+  /// count as enrolled.
+  mfaEnrolledAt DateTime?
+  /// Period start of the last TOTP code this account used. A code at or before
+  /// this is refused even when cryptographically valid, so one observed over a
+  /// shoulder cannot be replayed inside its ~90-second window. §3 requires the
+  /// member OTP to be single use; a staff second factor should not be weaker.
+  mfaLastUsedEpoch Int?
   status       UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
 
@@ -125,9 +136,27 @@ model StaffUser {
   membersCreated Member[]     @relation("MemberCreatedBy")
   redemptions    Redemption[]
   benefitsEdited Benefit[]
+  mfaRecoveryCodes MfaRecoveryCode[]
 
   @@index([role])
   @@index([outletId])
+}
+
+/// Single-use fallback for a staff member who has lost their authenticator.
+/// Hashed with the same Argon2id parameters as passwords — these are
+/// password-equivalent credentials regardless of being machine-generated.
+model MfaRecoveryCode {
+  id          String    @id @default(uuid())
+  staffUserId String
+  codeHash    String
+  /// Set on use rather than deleting the row, so "which code was used, and
+  /// when" stays answerable (§9).
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  staffUser StaffUser @relation(fields: [staffUserId], references: [id], onDelete: Cascade)
+
+  @@index([staffUserId, usedAt])
 }
 
 model Outlet {

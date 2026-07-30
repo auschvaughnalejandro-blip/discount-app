@@ -1,7 +1,11 @@
 # Progress
 
-Last updated: 2026-07-29
-Current stage: 14 (complete) — all stages built. 245 tests passing.
+Last updated: 2026-07-30
+Current stage: 19 (complete) — 309 tests passing.
+
+Stages 0–14 built the logic under BUILD-PLAN.md. Stages 15–24 are defined in
+ROADMAP.md, which continues the same numbering and rules. 16, 17, 18 and 19 are
+done; 15 (client decisions) is partly answered — see "Open questions" below.
 
 See SECURITY-REVIEW.md for the §12 checklist: 22 confirmed, 3 partial,
 5 deferred. The deferred items are listed there, not buried.
@@ -22,6 +26,16 @@ See SECURITY-REVIEW.md for the §12 checklist: 22 confirmed, 3 partial,
 - [x] 12 — Admin client
 - [x] 13 — Integration & acceptance
 - [x] 14 — Security review
+- [~] 15 — Decisions (Q1, Q5, Q6 answered; Q11 still open)
+- [x] 16 — QR rendering and camera scanning
+- [x] 17 — Design system and styling
+- [x] 18 — One-time passcode delivery
+- [x] 19 — Staff MFA
+- [ ] 20 — Hardening for a public network
+- [ ] 21 — Deployment
+- [ ] 22 — Arabic and RTL
+- [~] 23 — Install (done), push and wallet (not built)
+- [ ] 24 — Pre-launch
 
 ## Stage log
 
@@ -366,6 +380,92 @@ The five deferred items: MFA, httpOnly cookies + CSRF, KMS, alerting, and
 security headers/CORS. Each is either an integration no document specifies or a
 conflict needing a human decision.
 
+## Q11 answered 2026-07-30: members install, staff do not
+
+"A member installs it to get benefits and login based on their rewards identity,
+while the admins can watch from their PC... of course they wouldn't download it."
+
+Implemented as an installable web app for the member surface only. `web-member`
+now ships a manifest, icons and a service worker; `web-admin` and `web-verify`
+deliberately do not, because staff open a URL on a PC or a counter tablet.
+
+The one caching rule that matters is a refusal: the identity payload is
+`NetworkOnly`. It rotates every 60 seconds and the server checks freshness, so a
+cached credential would fail at a spa reception with no useful error — the member
+sees a QR, staff see a rejection, nothing explains why. Benefits and profile are
+`NetworkFirst`, so R14 still holds (an administrator's change reaches members
+without a deployment) while an offline member can still read their terms. Four
+assertions in `client-invariants.test.ts` guard all of this, because the service
+worker is disabled in development and none of these failures are visible there.
+
+**Still open: whether to also build a native iOS/Android client.** "Installs it"
+is now literally true without one. Native would add App Store presence and
+reliable iOS push, and costs a rebuild of the member client plus an Apple
+Developer account and review cycles. The API, admin and verify surfaces are
+unaffected either way.
+
+## Stage 17 refinement 2026-07-30: admin overview screen and charts
+
+ROADMAP §3's two open Stage 17 items were photography and "charts in the admin
+reports". The charts half is done: `apps/web-admin/src/Overview.tsx`,
+`Charts.tsx`, `charts.css`. The dashboard now opens on an Overview rather than on
+the member table, with the six D5 figures, a redemptions-by-benefit bar chart, a
+programme-reach meter, the two attention lists and the tail of the redemption log.
+
+Two silent defects were found and fixed on the way, both recorded in DECISIONS.md:
+
+1. **Suppressed report figures rendered as the raw `insufficient_data` sentinel**
+   in the KPI tiles, because `api.summary()` was typed `Record<string, unknown>`
+   and the tiles called `String()` on the value. Confirmed against the live
+   database, where all four cohort figures are suppressed today — so this was the
+   normal state rather than an edge case. The payloads are now typed with the
+   sentinel in the type, and one component renders every figure.
+2. **`dormant-members` and `unclaimed` were typed as returning `MemberRow`**,
+   which requires three fields the server does not send. Nothing rendered them, so
+   nothing failed; `ReportMember` now describes what actually arrives.
+
+Chart colours were chosen by measuring contrast, not by eye: `--c-primary-soft`
+measures 1.13:1 against a white panel and is unusable as a meter track, so
+`charts.css` defines measured track steps for both modes. Full suite still 317
+passing; admin typecheck and production build clean; rendered and inspected at
+1500px and 900px in both modes.
+
+Still open from Stage 17: real photography for the member benefit cards. Also not
+built: a monthly trend chart — `/admin/reports/by-month` exists and no client
+surfaces it, but that is new information rather than a reorganisation, and it
+would be fully suppressed at current data volume.
+
+## Gap found 2026-07-30: staff management was never built
+
+`build_plan.md` Stage 12 lists **"staff management"** among what the admin client
+must build. It does not exist — there are no `/admin/staff` routes, no staff UI in
+`apps/web-admin`, and no password-change endpoint anywhere. Stage 12 is marked
+complete above; against its own build instruction it is not. Recording it rather
+than quietly widening this session's scope.
+
+This is not cosmetic. Three consequences:
+
+1. **§3's "Instant revocation from the dashboard" cannot be performed.**
+   `StaffUser.tokenVersion` and `status` are the mechanism and both work, but no
+   endpoint reaches them. Offboarding a member of staff today means a manual
+   `UPDATE`. For a system whose §9 threat model is a leaked membership list, an
+   administrator being unable to cut off a departed employee is the most serious
+   item on this page.
+2. **§3's "screened against a breached-password list" is unimplemented**, and
+   cannot be implemented, because nothing sets a password — every account comes
+   from `prisma/seed.ts`. Argon2id hashing, the pepper and constant-time
+   comparison are all correct; there is simply no password *creation* path to
+   screen.
+3. **No MFA reset.** Combined with Stage 19, an administrator who loses both
+   their authenticator and their recovery codes is locked out permanently with no
+   in-product remedy. See SECURITY-REVIEW.md.
+
+Suggested as **Stage 25**, and it should come before launch rather than after:
+`/admin/staff` CRUD behind the existing `staff:manage` permission (already in the
+matrix, already ADMINISTRATOR-only, already covered by the authorization tests),
+password set/change with breach screening, staff suspend/reinstate wired to
+`tokenVersion`, and an MFA reset that requires more than one administrator.
+
 ## Open questions blocking work
 
 None blocking Stage 5. One new item from Stage 4:
@@ -394,8 +494,17 @@ Two items from Stage 2 are flagged directly below,
 not buried — they represent real gaps against `security-implementation.md`,
 not routine open questions.
 
-- [ ] **Q5 — MFA is not enforced on login, despite §3: "MFA is mandatory on
-  every dashboard account, without exception."** `StaffUser.mfaSecret` exists
+- [x] **Q5 — CLOSED in Stage 19. MFA is enforced on every dashboard account.**
+  Scope resolved from §3's own narrower sentence: ADMINISTRATOR, MANAGER and
+  SUPPORT require it; OUTLET_STAFF, which reaches only the verification page,
+  does not. TOTP via `otplib`, secret encrypted at rest with AES-256-GCM, ten
+  Argon2id-hashed single-use recovery codes, rate-limited verification, and a
+  challenge token on a separate JWT audience so it can never be used as an
+  access token. `src/security/mfa.ts`, `src/security/mfa-challenge.ts`,
+  `src/routes/auth.ts`. 21 tests in `test/mfa.test.ts`; the acceptance journey
+  now completes enrollment as a real client must. See DECISIONS.md.
+
+  The original gap, for the record: `StaffUser.mfaSecret` exists
   as the schema extension point (Stage 1), but BUILD-PLAN.md's Stage 2 endpoint
   list has no MFA challenge endpoint, and no MFA library, enrollment flow, or
   challenge/response shape is specified in any reference document. Building
@@ -409,7 +518,17 @@ not routine open questions.
   decision, not a silent resolution. Blocks full §3/§12 compliance; does not
   block Stage 3.
 
-- [ ] **Q6 — No SMS provider is named anywhere in the reference documents.**
+- [x] **Q6 — CLOSED in Stage 18, with a caveat that matters.** The client chose
+  "Gmail, over SMTP". Gmail cannot send SMS, so the code is delivered **by
+  email** to the member's stored address; the phone number remains the
+  identifier. This is weaker than SMS — a member has no password, so whoever
+  controls the mailbox controls the membership — and is explicitly interim. The
+  `CodeSender` seam makes Twilio or Unifonic one file. **While email is the
+  channel, an administrator must record a member's email at creation time**, or
+  activation cannot complete: the claim flow asks for it in phase 2, after the
+  code has already been sent. `src/notifications/`. See DECISIONS.md.
+
+  The original gap, for the record:
   `POST /auth/member/request-otp` generates and stores a hashed OTP
   (`src/security/otp.ts`) but nothing sends it anywhere. The plaintext code
   is never logged, persisted in the clear, or returned by the API — doing so

@@ -409,3 +409,162 @@ its assignment within a 25-line lookbehind — short on purpose, because a scope
 defined far from the query it guards is hard to review. Relaxing a security check is
 how it becomes a no-op, so the analyzer was split out and given eight tests fixing what
 it must still catch, including the exact fetch-then-check shape §5 warns about.
+
+---
+
+**2026-07-30 — Q1 confirmed as built: the QR identifies the member.**
+The client confirmed the code identifies the customer and is scanned by staff at an
+outlet offering the deal. That is the assumption `product_vision.md` §6 recorded and
+the one Stages 6, 7 and 11 were built against, so nothing changed. The alternative
+reading — a code displayed at each outlet and scanned by the member — would have made
+a 40% discount self-declared, and would have required rebuilding the verification page
+around a different trust model. Recorded because "no change needed" is itself a result
+worth being able to point at later.
+
+---
+
+**2026-07-30 — Q6 answered "Gmail over SMTP", implemented as email delivery, not SMS.**
+Alternative: an email-to-SMS carrier gateway, or refuse the answer and wait for a real
+SMS provider.
+Gmail cannot send SMS. No public email-to-SMS gateway exists for Ooredoo or Vodafone
+Qatar, and the US carrier gateways that once served this purpose have nothing to do with
+`+974` numbers — so the literal request was not implementable. The substance was, by
+treating email as the delivery channel: the phone number stays the identifier and the
+thing a member types, and the server looks up that member's stored address.
+
+**This is weaker than SMS and is interim.** §3 makes phone-plus-passcode the whole of a
+member's authentication — there is no password — so whoever controls the mailbox controls
+the membership. An SMS to a handset in the member's hand is a materially stronger channel.
+The `CodeSender` interface in `src/notifications/code-sender.ts` exists so Twilio or
+Unifonic is one new file and one environment variable.
+
+Two consequences worth stating plainly:
+- **An administrator must record a member's email at creation time** while this is the
+  channel. The activation flow asks for the email in *phase 2*, after the OTP, so at
+  phase 1 the only address available is whatever the hotel already had. Asking for it
+  earlier would let anyone holding a discarded invitation letter probe for valid claim
+  codes against their own address.
+- Gmail's ~500/day limit and its willingness to throttle a burst are a pilot-scale
+  arrangement, not a launch one.
+
+---
+
+**2026-07-30 — Q5: MFA required for ADMINISTRATOR, MANAGER and SUPPORT; not OUTLET_STAFF.**
+Alternative: MFA on every staff account without exception.
+`security-implementation.md` §3 says both "MFA is mandatory on every dashboard account,
+without exception" and "MFA for any staff account that can reach more than the
+verification page". The second is the specific statement and resolves the first: an
+`OUTLET_STAFF` account reaches only the verification page and is therefore not a
+dashboard account. §3 already covers those accounts separately — named individuals, no
+shared logins, shift-length session expiry, instant revocation.
+
+Taking the broader reading would have put a TOTP prompt on a shared counter tablet at
+the start of every shift, which is the kind of control that gets worked around rather
+than followed. The client's answer was "follow the security implementation guidelines",
+so this is a reading of the document rather than a decision made around it.
+
+Chosen shape: TOTP via `otplib`, not an SMS second factor — SMS would depend on Q6's
+delivery, which is currently email, and a code mailed to a mailbox is not a second
+*factor* when the first is also something-you-know. The TOTP secret is encrypted with
+AES-256-GCM before it reaches the database, so a stolen dump alone yields no working
+factors, matching the reasoning §3 applies to the password pepper. Ten single-use
+recovery codes are hashed with the same Argon2id parameters as passwords, because a
+manager locked out at 2am needs a route in that is not "telephone the developer".
+
+---
+
+**2026-07-30 — Stage 17: BUILD-PLAN §0 rule 1 retired, deliberately.**
+Rule 1 ("no styling; ugly is correct at this stage") was a staging discipline for the
+period when logic was being built, and it worked — the clients reached Stage 14 with
+correct semantic markup and no design debt. Stage 17 lifted it.
+
+`apps/api/test/no-styling.test.ts` was renamed to `client-invariants.test.ts` rather
+than deleted. Three of its four assertion groups were about styling and are gone; two
+were never about styling and are load-bearing, so they stay: R14 (the member client
+hardcodes no benefit value) and §4 (no `localStorage`, no tokens in URLs). Silently
+deleting the file would have dropped those with it, which is how a rule dies without
+anyone deciding.
+
+The immediate trigger was the QR quiet zone. `react-qr-code` renders modules edge to
+edge, and the QR specification needs a four-module white margin for a scanner to locate
+the symbol — so the first stylesheet was function, not decoration. Two new assertions
+now guard exactly that: the quiet zone exists and is white, and error correction stays
+at level M rather than the library's default of L. Both failures are invisible on screen
+— the code still renders, it just stops scanning reliably at arm's length.
+
+Approach: design tokens as CSS custom properties in `packages/ui`, consumed by all three
+clients, with each app overriding only the semantic colour tokens. Not Tailwind, mainly
+because of Stage 22: written with CSS logical properties throughout, Arabic RTL costs
+one `dir` attribute rather than a per-class audit across three apps.
+
+---
+
+**2026-07-30 — Q11 (native vs installable web app) left open, and why nothing waited on it.**
+The client's answer contained both options — "installable web app for the frontend of the
+users" and "Native please". Rather than guess, Stage 16–19 work was chosen so that none
+of it depends on the answer: the API, the verification page and the admin dashboard are
+web under every scenario, and the member app's credential, delivery and MFA behaviour are
+server-side. Only the member app's *presentation* forks, and even there the token layer
+and the QR behaviour carry over.
+
+---
+
+**2026-07-30 — Stage 17 refinement: the admin dashboard gets an overview screen, and its
+charts get built by measurement rather than by eye.**
+
+ROADMAP §3 left two items open under Stage 17: "real photography for the member benefit
+cards, and charts in the admin reports (load the `dataviz` skill before writing chart
+code)". This closes the second.
+
+**Why a new screen at all.** The dashboard opened on `members` — a hundred-row table —
+and the six headline figures lived behind a `reports` tab. The densest view in the product
+was the landing page, and the numbers that say whether the programme is working took a
+deliberate click. Wireframes D5 specifies the figures; nothing specified where they sit.
+`Overview` is now first in the rail and is where the app opens. It adds no new
+measurement: it is the existing report endpoints arranged by how often they are consulted,
+with each panel routing into the section that can act on it.
+
+**Two defects found while doing it, both silent.**
+
+1. *Suppressed figures were rendering as a raw sentinel.* `api.summary()` was typed
+   `Record<string, unknown>` and the tiles did `String(summary['redemptions'])`. When a
+   cohort falls under `REPORT_MIN_COHORT_SIZE` the server returns the string
+   `insufficient_data` (R13), so the dashboard printed `insufficient_data` into a KPI tile.
+   Verified against the live database, where all four cohort figures are currently
+   suppressed — so this was the normal state, not an edge case. The summary and group
+   payloads are now typed, with the sentinel in the type (`Figure = number |
+   'insufficient_data'`), which is what makes the old code unwritable rather than merely
+   wrong. Every figure renders through one component that cannot emit the sentinel.
+2. *`dormant-members` and `unclaimed` were typed as returning `MemberRow`*, which declares
+   `appClaimed`, `totalUses` and `lastUsedAt` as required. The server sends none of the
+   three. Nothing rendered them yet, so nothing failed; anything that did would have shown
+   `undefined`. Split out as `ReportMember`.
+
+**Chart decisions, and why they are decisions.** Benefit names are *nominal* — reordering
+Spa and Rooms changes nothing — so every bar wears the same hue and the chart carries no
+legend, because it plots one series that its caption names. Five hues would spend the
+identity channel restating what bar length already shows; shading darker-where-bigger
+would double-encode the value. Programme reach is a meter rather than a doughnut: two
+slices of a circle is the hardest way to read a proportion, and the percentage ends up
+printed in the middle regardless.
+
+The bar chart is a real `<table>`, so the accessible view and the visual one are the same
+object rather than two artefacts to keep in step: a row header carries the benefit, the
+cell carries the bar and the number as text.
+
+**Measured, not eyeballed.** `--c-primary-soft` was the obvious candidate for the
+unfilled track and measures **1.13:1** against a white panel — invisible. The track steps
+in `charts.css` (`#7bbfb1` light, `#21574e` dark) were picked by scanning candidates for
+the ≥2:1 the track needs while staying clearly subordinate to the 4.29:1 fill. Bar fill,
+axis text, gridlines and both warn inks were checked the same way; all pass.
+
+**No trend chart, deliberately.** `/admin/reports/by-month` exists and no client surfaces
+it, so a monthly chart is available cheaply — but it is *new* information rather than a
+reorganisation of what the dashboard already had, and it would be entirely suppressed at
+current data volume. Left as the obvious next addition rather than folded in here.
+
+**Not fixed, noted:** dark mode is reachable only through `prefers-color-scheme`.
+`[data-theme='light']` forces light, but there is no `[data-theme='dark']` that forces
+dark against a light OS. That is consistent with the app having no theme toggle, and it
+made the dark rendering awkward to verify — it needed the media block extracted and
+applied unconditionally. If a toggle is ever added, this asymmetry is the thing to fix.
