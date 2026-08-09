@@ -36,8 +36,19 @@ import type { FastifyBaseLogger } from 'fastify';
 
 import type { Env } from '../config/env.js';
 
-/** Why a code is being sent. Lets the template say something specific. */
-export type CodePurpose = 'sign-in' | 'activation';
+/**
+ * Why a code is being sent. Lets the template say something specific.
+ *
+ * `invitation` is the odd one out: it carries the single-use code that turns a
+ * record into a real membership, it is valid for weeks rather than minutes, and
+ * it is the only one an administrator has ever been able to see.
+ */
+export type CodePurpose = 'sign-in' | 'activation' | 'invitation';
+export type LifecyclePurpose =
+  | 'request-submitted'
+  | 'request-approved'
+  | 'request-declined'
+  | 'redemption-recorded';
 
 export interface CodeDelivery {
   /** The member's email, when one is on record. `null` is a real case. */
@@ -46,7 +57,28 @@ export interface CodeDelivery {
   phone: string;
   code: string;
   purpose: CodePurpose;
+  /**
+   * How long the code lasts, in words already ("30 days", "5 minutes").
+   * Formatted by the caller because only it knows which clock applies — a
+   * passcode expires in minutes and an invitation in weeks, and a template
+   * guessing between them would eventually tell a member the wrong thing.
+   */
+  validFor?: string;
 }
+
+/** A transactional update about a benefit request or recorded redemption. */
+export interface LifecycleDelivery {
+  email: string | null;
+  phone: string;
+  purpose: LifecyclePurpose;
+  benefitTitle: string;
+  reason?: string;
+  outletName?: string;
+  discountPct?: string;
+  savedMinor?: number | null;
+}
+
+export type MemberDelivery = CodeDelivery | LifecycleDelivery;
 
 export type DeliveryOutcome =
   | { delivered: true }
@@ -58,7 +90,7 @@ export type DeliveryOutcome =
 
 export interface CodeSender {
   readonly name: string;
-  send(delivery: CodeDelivery): Promise<DeliveryOutcome>;
+  send(delivery: MemberDelivery): Promise<DeliveryOutcome>;
 }
 
 /**
@@ -108,7 +140,7 @@ export function maskEmail(email: string): string {
 export function logDeliveryOutcome(
   log: FastifyBaseLogger,
   sender: CodeSender,
-  delivery: CodeDelivery,
+  delivery: MemberDelivery,
   outcome: DeliveryOutcome,
 ): void {
   const base = {
@@ -118,11 +150,14 @@ export function logDeliveryOutcome(
   };
 
   if (outcome.delivered) {
-    log.info({ ...base, recipient: delivery.email ? maskEmail(delivery.email) : null }, 'passcode delivered');
+    log.info(
+      { ...base, recipient: delivery.email ? maskEmail(delivery.email) : null },
+      'member message delivered',
+    );
     return;
   }
 
-  log.warn({ ...base, reason: outcome.reason }, 'passcode delivery failed');
+  log.warn({ ...base, reason: outcome.reason }, 'member message delivery failed');
 }
 
 /**

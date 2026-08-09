@@ -4,7 +4,7 @@
  * The four criteria from BUILD-PLAN.md:
  *   1. Registering a route without a `permission` field prevents the server starting
  *   2. An authorization matrix test covers every role against every endpoint
- *   3. Fetching another member's record by ID as `outlet_staff` returns 404
+ *   3. Fetching another member's record by ID returns the same 404 as a missing record
  *   4. No handler loads a record and then checks permission afterwards
  *
  * Criterion 4 is a property of source code rather than of a running server,
@@ -36,7 +36,8 @@ let app: FastifyInstance;
 let env: Env;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
-const ALL_ROLES: readonly Role[] = ['ADMINISTRATOR', 'MANAGER', 'OUTLET_STAFF', 'SUPPORT'];
+const RETIRED_ROLES = ['MANAGER', 'OUTLET_STAFF', 'SUPPORT'] as const satisfies readonly Role[];
+const ALL_ROLES = ['ADMINISTRATOR', ...RETIRED_ROLES] as const satisfies readonly Role[];
 
 beforeAll(async () => {
   env = loadEnv();
@@ -115,25 +116,34 @@ describe('R17 — an undeclared route prevents the server starting', () => {
  * catalogue and this table ever drift apart, so adding a permission without
  * deciding who holds it is a test failure rather than an accident.
  *
- * Derived from security-implementation.md §5's role matrix.
+ * There is one active staff role: every admin-panel permission belongs to an
+ * administrator, and the retired enum values hold nothing. They remain in the
+ * database only so historical records can still identify their original actor.
  */
 const EXPECTED_ROLE_ACCESS: Record<Permission, readonly Role[]> = {
-  'members:create': ['ADMINISTRATOR', 'MANAGER'],
-  'members:list': ['ADMINISTRATOR', 'MANAGER'],
-  'members:read': ['ADMINISTRATOR', 'MANAGER', 'SUPPORT'],
-  'members:update': ['ADMINISTRATOR', 'MANAGER'],
-  'members:suspend': ['ADMINISTRATOR', 'MANAGER'],
-  'members:issue-claim': ['ADMINISTRATOR', 'MANAGER'],
+  'members:create': ['ADMINISTRATOR'],
+  'members:list': ['ADMINISTRATOR'],
+  'members:read': ['ADMINISTRATOR'],
+  'members:update': ['ADMINISTRATOR'],
+  'members:suspend': ['ADMINISTRATOR'],
+  'members:issue-claim': ['ADMINISTRATOR'],
   'benefits:read-published': [],
-  'benefits:read-all': ['ADMINISTRATOR', 'MANAGER'],
+  'benefits:read-all': ['ADMINISTRATOR'],
   'benefits:manage': ['ADMINISTRATOR'],
-  'verify:resolve': ['ADMINISTRATOR', 'OUTLET_STAFF'],
-  'redemptions:record': ['ADMINISTRATOR', 'OUTLET_STAFF'],
-  'redemptions:list': ['ADMINISTRATOR', 'MANAGER'],
+  // Only a member asks for a benefit. No staff role holds this: an approval an
+  // administrator both raised and granted has nobody to answer for it.
+  'requests:create': [],
+  'requests:read': ['ADMINISTRATOR'],
+  'requests:decide': ['ADMINISTRATOR'],
+  // Whoever can approve can mark used. Splitting those between two roles would
+  // leave a queue that one person fills and nobody can finish.
+  'redemptions:record': ['ADMINISTRATOR'],
+  'redemptions:list': ['ADMINISTRATOR'],
   'redemptions:reverse': ['ADMINISTRATOR'],
-  'reports:read': ['ADMINISTRATOR', 'MANAGER'],
+  'reports:read': ['ADMINISTRATOR'],
   'reports:export': ['ADMINISTRATOR'],
   'staff:manage': ['ADMINISTRATOR'],
+  'staff:self': ['ADMINISTRATOR'],
   'member:self': [],
 };
 
@@ -154,37 +164,9 @@ describe('the authorization matrix covers every role against every permission', 
   });
 });
 
-describe('R11 — outlet_staff cannot list, search or enumerate members', () => {
-  it('holds no permission that reads or lists the membership', () => {
-    const held = permissionsForRole('OUTLET_STAFF');
-
-    expect(held).not.toContain('members:list');
-    expect(held).not.toContain('members:read');
-    expect(held).not.toContain('members:update');
-    expect(held).not.toContain('reports:read');
-    expect(held).not.toContain('reports:export');
-    expect(held).not.toContain('redemptions:list');
-  });
-
-  it('holds only the two permissions the verification page needs', () => {
-    expect([...permissionsForRole('OUTLET_STAFF')].sort()).toEqual([
-      'redemptions:record',
-      'verify:resolve',
-    ]);
-  });
-});
-
-describe('support cannot browse, list or export', () => {
-  it('holds a single read permission and nothing else', () => {
-    expect([...permissionsForRole('SUPPORT')]).toEqual(['members:read']);
-  });
-});
-
-describe('manager cannot edit benefits, manage staff, or export', () => {
-  it('is denied exactly the three prohibitions named in §5', () => {
-    expect(roleHasPermission('MANAGER', 'benefits:manage')).toBe(false);
-    expect(roleHasPermission('MANAGER', 'staff:manage')).toBe(false);
-    expect(roleHasPermission('MANAGER', 'reports:export')).toBe(false);
+describe('retired staff roles hold no permissions', () => {
+  it.each(RETIRED_ROLES)('%s holds nothing', (role) => {
+    expect([...permissionsForRole(role)]).toEqual([]);
   });
 });
 
@@ -229,35 +211,53 @@ describe('the matrix holds over HTTP, not only in the permission table', () => {
     await probe.close();
   });
 
-  it('rejects a valid token whose role lacks the permission with 403', async () => {
-    const probe = await buildApp({ env });
-    probe.get('/probe/members', { config: { permission: 'members:list' } }, async () => ({ ok: true }));
-    await probe.ready();
+  it.each(RETIRED_ROLES)(
+    'rejects a valid token for a stored retired %s account with 401',
+    async (role) => {
+      const probe = await buildApp({ env });
+      probe.get('/probe/members', { config: { permission: 'members:list' } }, async () => ({ ok: true }));
+      await probe.ready();
 
-    // The role in the token is not the role in the database — resolvePrincipal
-    // reads the authoritative role from the DB, so this is denied on the
-    // stored role, never on the claim.
-    const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
-      where: { role: 'OUTLET_STAFF' },
-    });
-    const token = await issueAccessToken({
-      issuer: env.JWT_ISSUER,
-      audience: env.JWT_AUDIENCE_STAFF,
-      subject: outletStaff.id,
-      subjectType: 'STAFF',
-      role: 'ADMINISTRATOR', // the lie
-      tokenVersion: outletStaff.tokenVersion,
-      ttlSeconds: 300,
-    });
+      const outlet =
+        role === 'OUTLET_STAFF'
+          ? await ownerPrisma.outlet.findFirstOrThrow({ where: { active: true } })
+          : null;
+      const retired = await ownerPrisma.staffUser.create({
+        data: {
+          fullName: `Retired ${role}`,
+          email: `authorization-retired-${role.toLowerCase()}-${Date.now()}@pgp.test`,
+          passwordHash: 'not-used-by-this-test',
+          role,
+          outletId: outlet?.id ?? null,
+          // The database permits retired roles only as suspended historical
+          // identities. They must remain unusable even with an old valid JWT.
+          status: 'SUSPENDED',
+        },
+      });
+      const token = await issueAccessToken({
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE_STAFF,
+        subject: retired.id,
+        subjectType: 'STAFF',
+        // Even an old or forged claim that says administrator must lose to the
+        // authoritative retired role in the database.
+        role: 'ADMINISTRATOR',
+        tokenVersion: retired.tokenVersion,
+        ttlSeconds: 300,
+      });
 
-    const response = await request(probe.server)
-      .get('/probe/members')
-      .set('Authorization', `Bearer ${token}`);
+      try {
+        const response = await request(probe.server)
+          .get('/probe/members')
+          .set('Authorization', `Bearer ${token}`);
 
-    expect(response.status).toBe(403);
-
-    await probe.close();
-  });
+        expect(response.status).toBe(401);
+      } finally {
+        await ownerPrisma.staffUser.delete({ where: { id: retired.id } });
+        await probe.close();
+      }
+    },
+  );
 
   it('accepts a token whose stored role holds the permission', async () => {
     const probe = await buildApp({ env });
@@ -339,38 +339,6 @@ describe('R18 — out-of-scope records return 404, never 403', () => {
     return probe;
   }
 
-  it('returns 404 — not 403 — when outlet_staff requests another member by ID', async () => {
-    const probe = await buildProbeApp();
-
-    const member = await ownerPrisma.member.findUniqueOrThrow({
-      where: { memberNumber: 'PG-0003' },
-    });
-    const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
-      where: { role: 'OUTLET_STAFF' },
-    });
-
-    const token = await issueAccessToken({
-      issuer: env.JWT_ISSUER,
-      audience: env.JWT_AUDIENCE_STAFF,
-      subject: outletStaff.id,
-      subjectType: 'STAFF',
-      role: outletStaff.role,
-      ...(outletStaff.outletId ? { outletId: outletStaff.outletId } : {}),
-      tokenVersion: outletStaff.tokenVersion,
-      ttlSeconds: 300,
-    });
-
-    const response = await request(probe.server)
-      .get(`/probe/members/${member.id}`)
-      .set('Authorization', `Bearer ${token}`);
-
-    // outlet_staff does not hold members:read at all, so this is refused at
-    // the route level before scope is even consulted.
-    expect(response.status).toBe(403);
-
-    await probe.close();
-  });
-
   it('returns an identical 404 for a real out-of-scope member and a nonexistent one', async () => {
     const probe = await buildProbeApp();
 
@@ -442,29 +410,6 @@ describe('scopeFor puts the restriction in the query, not after it', () => {
     expect(scopeForMember({ subjectId: 'member-1', subjectType: 'MEMBER' })).toEqual({
       id: 'member-1',
     });
-  });
-
-  it('gives outlet_staff a fragment that can match no member', () => {
-    const scope = scopeForMember({
-      subjectId: 'staff-1',
-      subjectType: 'STAFF',
-      role: 'OUTLET_STAFF',
-      outletId: 'outlet-1',
-    });
-
-    // Fails closed: an empty object would have matched every member.
-    expect(scope).toEqual({ id: { in: [] } });
-  });
-
-  it('scopes outlet_staff redemptions to their own outlet', () => {
-    expect(
-      scopeForRedemption({
-        subjectId: 'staff-1',
-        subjectType: 'STAFF',
-        role: 'OUTLET_STAFF',
-        outletId: 'outlet-1',
-      }),
-    ).toEqual({ outletId: 'outlet-1' });
   });
 
   it('scopes a member to their own redemptions', () => {

@@ -1,3 +1,4 @@
+import cookie from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 
@@ -7,15 +8,17 @@ import { createCodeSender, type CodeSender } from './notifications/code-sender.j
 import { warnIfDevOtpEchoEnabled } from './security/dev-otp.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
+import googleSheetsPlugin from './plugins/google-sheets.js';
 import prismaPlugin from './plugins/prisma.js';
 import adminMemberRoutes from './routes/admin-members.js';
+import adminStaffRoutes from './routes/admin-staff.js';
 import authRoutes from './routes/auth.js';
 import benefitRoutes from './routes/benefits.js';
 import healthRoutes from './routes/health.js';
-import identityRoutes from './routes/identity.js';
 import memberRoutes from './routes/member.js';
 import reportRoutes from './routes/reports.js';
-import verifyRoutes from './routes/verify.js';
+import requestRoutes from './routes/requests.js';
+import redemptionRoutes from './routes/redemptions.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -27,10 +30,16 @@ declare module 'fastify' {
 
 export interface BuildAppOptions {
   env: Env;
+  /** Test seam for observing delivery without opening a real SMTP connection. */
+  codeSender?: CodeSender;
 }
 
-export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstance> {
+export async function buildApp({ env, codeSender }: BuildAppOptions): Promise<FastifyInstance> {
   const app = Fastify({
+    // Settled by configuration rather than left at its default: see
+    // TRUST_PROXY in config/env.ts for why both values are dangerous in the
+    // wrong deployment.
+    trustProxy: env.TRUST_PROXY,
     logger: {
       level: env.LOG_LEVEL,
       // §9: "Application logs contain no member names, phone numbers or email
@@ -49,9 +58,6 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
         data: redact,
       },
     },
-    // `trustProxy` has to be settled before per-IP rate limiting and audit IP
-    // capture (Stage 9) can be believed. Left at its default until the
-    // deployment topology is known.
   });
 
   await app.register(
@@ -60,8 +66,15 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
     }, { name: 'env' }),
   );
 
+  // Parses the refresh cookie. Registered before the routes that read it, and
+  // deliberately unsigned: the value is already a high-entropy opaque token
+  // matched against a stored hash, so a signature would add a second secret
+  // and no security.
+  await app.register(cookie);
+
   await app.register(errorHandlerPlugin);
   await app.register(prismaPlugin);
+  await app.register(googleSheetsPlugin);
 
   // Built once, before routes. `createCodeSender` throws on a channel that is
   // configured but incomplete, so a deployment meaning to send mail and unable
@@ -69,7 +82,7 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(
     fp(
       async (instance) => {
-        instance.decorate('codeSender', await createCodeSender(env, instance.log));
+        instance.decorate('codeSender', codeSender ?? (await createCodeSender(env, instance.log)));
       },
       { name: 'code-sender' },
     ),
@@ -83,10 +96,11 @@ export async function buildApp({ env }: BuildAppOptions): Promise<FastifyInstanc
   await app.register(healthRoutes);
   await app.register(authRoutes);
   await app.register(adminMemberRoutes);
+  await app.register(adminStaffRoutes);
   await app.register(memberRoutes);
   await app.register(benefitRoutes);
-  await app.register(identityRoutes);
-  await app.register(verifyRoutes);
+  await app.register(requestRoutes);
+  await app.register(redemptionRoutes);
   await app.register(reportRoutes);
 
   warnIfDevOtpEchoEnabled(app.log, env);

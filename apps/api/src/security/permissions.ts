@@ -1,8 +1,7 @@
 import type { Role } from '@prisma/client';
 
 /**
- * The permission catalogue and the role matrix, derived from
- * security-implementation.md §5 and product-definition.md §7.
+ * The permission catalogue and the administrator permission matrix.
  *
  * Adding a permission here is not enough to grant it — `ROLE_PERMISSIONS`
  * below is the only place a role gains anything, and it is exhaustive.
@@ -22,8 +21,12 @@ export const PERMISSIONS = [
   'benefits:read-all',
   'benefits:manage',
 
-  // Verification and redemption
-  'verify:resolve',
+  // Benefit requests — a member asks, a person decides, an outlet fulfils
+  'requests:create',
+  'requests:read',
+  'requests:decide',
+
+  // Redemption
   'redemptions:record',
   'redemptions:list',
   'redemptions:reverse',
@@ -34,6 +37,9 @@ export const PERMISSIONS = [
 
   // Staff administration
   'staff:manage',
+  // A staff member acting on their own account — changing their own password.
+  // Separate from staff:manage so holding it grants nothing over anyone else.
+  'staff:self',
 
   // A member acting on their own record
   'member:self',
@@ -61,27 +67,27 @@ const PERMISSION_ACTORS: Record<Permission, Actor> = {
   'benefits:read-published': 'MEMBER',
   'benefits:read-all': 'STAFF',
   'benefits:manage': 'STAFF',
-  'verify:resolve': 'STAFF',
+  'requests:create': 'MEMBER',
+  'requests:read': 'STAFF',
+  'requests:decide': 'STAFF',
   'redemptions:record': 'STAFF',
   'redemptions:list': 'STAFF',
   'redemptions:reverse': 'STAFF',
   'reports:read': 'STAFF',
   'reports:export': 'STAFF',
   'staff:manage': 'STAFF',
+  'staff:self': 'STAFF',
   'member:self': 'MEMBER',
 };
 
 /**
- * The role matrix, stated exhaustively rather than by inheritance or
- * wildcards. `administrator` is spelled out in full even though the document
- * says "everything", so that adding a permission to the catalogue never
- * silently grants it to anyone — including the administrator.
+ * The product now has two surfaces: the administrator dashboard and the
+ * member app. `MANAGER`, `OUTLET_STAFF` and `SUPPORT` remain database enum
+ * values only so historical rows can keep naming the account that performed
+ * an action. They deliberately hold no permission and cannot authenticate.
  *
- * security-implementation.md §5:
- *   administrator | Everything: members, benefits, reports, staff, exports | —
- *   manager       | Member list, member detail, reports | Edit benefits, manage staff, export
- *   outlet_staff  | Verification page only | Member list, search, reports, any member not just scanned
- *   support       | Single member by exact ID | Listing, browsing, exporting
+ * Administrator permissions are stated exhaustively rather than by wildcard,
+ * so adding a permission to the catalogue never silently grants it.
  */
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ADMINISTRATOR: [
@@ -93,52 +99,22 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'members:issue-claim',
     'benefits:read-all',
     'benefits:manage',
-    'verify:resolve',
+    'requests:read',
+    'requests:decide',
     'redemptions:record',
     'redemptions:list',
     'redemptions:reverse',
     'reports:read',
     'reports:export',
     'staff:manage',
+    'staff:self',
   ],
 
-  /**
-   * TODO(open-question): the two authoritative documents describe this role at
-   * different resolutions. security-implementation.md §5's "can reach" column
-   * lists screens — "Member list, member detail, reports" — while its
-   * "explicitly cannot" column names exactly three prohibitions: edit
-   * benefits, manage staff, export. product-definition.md §7 says "Members and
-   * reports; no benefit or staff configuration", where the Members section of
-   * the dashboard (§7) includes creating and suspending.
-   *
-   * Implemented as: full member operations, reports, no benefits/staff/export.
-   * That satisfies every explicit prohibition in both documents and matches
-   * the Stage 12 acceptance test ("a manager account cannot reach benefit
-   * editing or export"). Recorded in PROGRESS.md — if the intent was
-   * read-only member access, remove the four write permissions here and
-   * nothing else changes.
-   */
-  MANAGER: [
-    'members:create',
-    'members:list',
-    'members:read',
-    'members:update',
-    'members:suspend',
-    'members:issue-claim',
-    'benefits:read-all',
-    'redemptions:list',
-    'reports:read',
-  ],
-
-  /**
-   * "Verification page only." Deliberately holds no `members:list`,
-   * `members:read`, `reports:*` or any other enumerating permission —
-   * R11 requires the endpoint be absent for this role, not filtered.
-   */
-  OUTLET_STAFF: ['verify:resolve', 'redemptions:record'],
-
-  /** "Single member by exact ID." No listing, browsing or exporting. */
-  SUPPORT: ['members:read'],
+  // Historical enum values only. Fail closed if an old account or token ever
+  // reaches authorization despite the login and principal checks.
+  MANAGER: [],
+  OUTLET_STAFF: [],
+  SUPPORT: [],
 };
 
 const PERMISSION_SET: ReadonlySet<string> = new Set(PERMISSIONS);

@@ -1,0 +1,22 @@
+Hero photography. Drop a file here and reload — no code change, no rebuild.
+
+In place:
+  auth.webp             /signin, /signin/verify and /activate
+  benefit-fnb.jpg       /offers/fnb
+  benefit-rooms.avif    /offers/rooms
+  benefit-spa.jpg       /offers/spa
+  benefit-events.jpg    /offers/events
+
+Still needed:
+  benefit-lifestyle.jpg /offers/lifestyle   — shows the grey placeholder until added
+
+The name after "benefit-" is the offer's key, shown in the admin dashboard
+next to the version number. A new offer created there picks up a hero by
+someone saving benefit-<key>.jpg; only a non-.jpg extension needs a line
+adding to src/screens/heroes.ts.
+
+Anything missing falls back to the dashed "IMAGE" placeholder, so a partial
+set is fine and a typo'd name never shows a broken image.
+
+Size: about 1170 x 780 covers the 390px design at 3x. JPEG or WebP — AVIF is
+unsupported before iOS 16.4 and will show the placeholder on older iPhones.

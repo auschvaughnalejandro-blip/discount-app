@@ -8,13 +8,13 @@ export interface Principal {
   /** Present only for STAFF principals. Typed as the Prisma enum so the
    * permission matrix lookup is exhaustive rather than string-keyed. */
   role?: Role;
-  outletId?: string;
 }
 
 export type PrincipalResolutionFailureReason =
   | 'token_invalid'
   | 'subject_not_found'
   | 'subject_inactive'
+  | 'role_not_allowed'
   | 'stale_token_version';
 
 export class PrincipalResolutionError extends Error {
@@ -51,6 +51,12 @@ export async function resolvePrincipal(
     if (staff.status !== 'ACTIVE') {
       throw new PrincipalResolutionError('subject_inactive');
     }
+    // The other enum values remain on suspended historical rows so member and
+    // redemption attribution keeps its original actor. They are not live
+    // account types and no access token may revive one.
+    if (staff.role !== 'ADMINISTRATOR') {
+      throw new PrincipalResolutionError('role_not_allowed');
+    }
     if (staff.tokenVersion !== claims.tv) {
       throw new PrincipalResolutionError('stale_token_version');
     }
@@ -58,7 +64,6 @@ export async function resolvePrincipal(
       subjectId: staff.id,
       subjectType: 'STAFF',
       role: staff.role,
-      ...(staff.outletId ? { outletId: staff.outletId } : {}),
     };
   }
 

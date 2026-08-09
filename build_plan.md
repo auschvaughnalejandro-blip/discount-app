@@ -1,4 +1,9 @@
-# BUILD PLAN — Privilege Guest Program
+# ARCHIVED BUILD PLAN — Privilege Guest Program
+
+> **Superseded in part on 2026-08-09.** The current product has exactly the
+> member guest app and administrator panel, with Administrator as the only
+> hotel-facing account type. Manager, support, outlet-staff and verification
+> client work below is retained as implementation history, not current scope.
 
 **Read this file completely before writing any code.**
 

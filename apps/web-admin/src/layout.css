@@ -3,7 +3,7 @@
  *
  * Desktop-first, and the only one of the three that is: this is the surface
  * where information density beats whitespace. It still has to work on a tablet,
- * because a manager checking figures on the floor is a real case — so the
+ * because an administrator checking figures on the floor is a real case — so the
  * sidebar collapses to a horizontal tab strip below 60rem rather than becoming
  * a hamburger nobody finds.
  *
@@ -314,6 +314,262 @@ main > section > h3 {
   max-inline-size: 8rem;
 }
 
+/**
+ * The one number on the panel that must not be misread.
+ *
+ * Every other field on a benefit is a label, a cap or a note; this is the rate
+ * a member is quoted and a bill is calculated from. It is set larger, tabular
+ * and in the primary hue so it can be checked at a glance down a column of
+ * panels, without being a different control from the ones beside it.
+ */
+.field--primary input {
+  font-size: var(--f-lg);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--c-primary);
+  border-color: var(--c-primary);
+}
+
+.field--primary > label {
+  font-weight: var(--fw-semibold);
+  color: var(--c-text);
+}
+
+/* A disabled field is still read, so it keeps its contrast and loses only its
+   affordance. The browser default greys the text to the point where checking a
+   value mid-save means waiting for the request to finish. */
+fieldset:disabled .field input,
+fieldset:disabled .field select,
+fieldset:disabled .field textarea {
+  color: var(--c-text-muted);
+  background: var(--c-surface-sunken);
+  cursor: default;
+}
+
+.field-hint {
+  display: block;
+  max-inline-size: 60ch;
+  margin-block-start: var(--s-1);
+  color: var(--c-text-muted);
+  font-size: var(--f-xs);
+  line-height: var(--lh-snug);
+}
+
+/* ── Benefit configuration ───────────────────────────────────────────────
+   Every member-facing value is editable here. Each offer stays in its own
+   panel so changing one rate cannot be mistaken for saving the whole list. */
+
+/**
+ * Each offer is its own panel, and the gap between panels is larger than any
+ * gap inside one.
+ *
+ * That is the whole hierarchy: an administrator editing the spa rate must never
+ * be in doubt about which offer they are editing, and the failure mode of a
+ * tighter list is saving the wrong panel. Nothing about a panel spans into its
+ * neighbour — not a border, not a shared action row.
+ */
+.benefit-editors {
+  display: grid;
+  gap: var(--s-6);
+}
+
+.benefit-editor {
+  margin-block-end: 0;
+}
+
+.benefit-editor__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: var(--s-4);
+  background: var(--c-panel-header);
+  border-block-end: 1px solid var(--c-border);
+}
+
+.benefit-editor__head > div {
+  min-inline-size: 0;
+}
+
+.benefit-editor__head h3 {
+  font-size: var(--f-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+  /* Offer titles are administrator-supplied and up to 200 characters. A long
+     one wraps; it never pushes the state badge off the panel. */
+  overflow-wrap: anywhere;
+}
+
+/* Provenance — key, version, who changed it and when. Deliberately quiet, and
+   deliberately present: "who changed the spa discount" gets asked. */
+.benefit-editor__head p {
+  margin-block-start: var(--s-1);
+  color: var(--c-text-muted);
+  font-size: var(--f-xs);
+  line-height: var(--lh-snug);
+}
+
+/* The state badge holds its size whatever the title does. */
+.benefit-editor__head .badge {
+  flex: none;
+}
+
+.benefit-editor__grid {
+  align-items: start;
+}
+
+/**
+ * The outer fieldset exists to disable every control in one move while a
+ * request is in flight. It groups nothing visually and must not draw a border —
+ * a box around the entire form would compete with the panel that already is
+ * one.
+ */
+.benefit-editor fieldset.benefit-editor__controls {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/**
+ * Nested fieldsets — Secondary discount, Child discounts — are the opposite
+ * case: they group a handful of fields that only make sense together, and the
+ * grouping is the information. Sunk into the panel rather than raised, so they
+ * read as part of the form rather than as panels within a panel.
+ */
+.benefit-editor fieldset:not(.benefit-editor__controls) {
+  min-inline-size: 0;
+  margin-block: var(--s-5) 0;
+  padding: var(--s-4);
+  background: var(--c-surface-sunken);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+}
+
+.benefit-editor fieldset:not(.benefit-editor__controls) > legend {
+  padding-inline: var(--s-2);
+  font-size: var(--f-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text-muted);
+}
+
+.child-discount-list {
+  display: grid;
+  gap: var(--s-3);
+  margin-block-end: var(--s-3);
+}
+
+/**
+ * Age band, rate, remove. The remove button sits on the same baseline as the
+ * inputs rather than below them, which is what keeps a three-row list readable.
+ */
+.child-discount-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1fr) minmax(6rem, 8rem) auto;
+  gap: var(--s-3);
+  align-items: end;
+}
+
+.child-discount-row > button {
+  margin-block-end: 0;
+  /* Removing a rate is not the action anyone came here for. Quiet, but a full
+     44px target — it sits between two inputs and a mis-tap costs an entry. */
+  min-block-size: var(--tap-min);
+  padding-inline: var(--s-4);
+  color: var(--c-text-muted);
+}
+
+.child-discount-row > button:hover:not(:disabled) {
+  color: var(--c-critical);
+  border-color: var(--c-critical);
+}
+
+.benefit-editor__terms {
+  margin-block-start: var(--s-5);
+}
+
+.benefit-editor__terms textarea {
+  display: block;
+  inline-size: 100%;
+  max-inline-size: none;
+  resize: vertical;
+  /* Terms run to 5000 characters and are read as prose, not scanned as data. */
+  line-height: var(--lh-normal);
+}
+
+.benefit-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-block-start: var(--s-5);
+  padding-block-start: var(--s-4);
+  border-block-start: 1px solid var(--c-border);
+}
+
+/* Publish sits apart from Save and Reset: it changes what members see, where
+   the other two only change what is stored. */
+.benefit-editor__actions > button:last-child {
+  margin-inline-start: auto;
+}
+
+/**
+ * "Unsaved changes" explains why Publish is unavailable.
+ *
+ * It is a `role="status"`, so it is announced when it appears — and it is the
+ * answer to the question a disabled button always raises. Tinted with the warn
+ * hue rather than left as a grey hint, because it is a state of the form.
+ */
+.benefit-editor__dirty {
+  margin-block-start: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  color: var(--c-warn-ink);
+  background: var(--c-warn-soft);
+  border-inline-start: 3px solid var(--c-warn);
+  border-radius: var(--r-sm);
+}
+
+/* Save succeeded, or the server refused. Both sit under the actions they
+   belong to, inside the panel, so a message can never be read against the
+   wrong offer. */
+.benefit-editor [role='status'],
+.benefit-editor [role='alert'] {
+  margin-block: var(--s-4) 0;
+}
+
+@media (max-width: 40rem) {
+  .benefit-editor__head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  /* The rate keeps its own row rather than being squeezed beside the age band
+     — an 8-character-wide number input on a 360px screen is a mis-tap. */
+  .child-discount-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .child-discount-row > .field:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .benefit-editor fieldset:not(.benefit-editor__controls) {
+    padding: var(--s-3);
+  }
+
+  /* Save and Reset share a row, Publish takes its own — it is the one with a
+     consequence outside this screen. */
+  .benefit-editor__actions > button {
+    flex: 1 1 8rem;
+  }
+
+  .benefit-editor__actions > button:last-child {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}
+
 /* ── Member and redemption tables ───────────────────────────────────────── */
 
 /* Actions column: buttons small enough not to dominate a dense row. */
@@ -395,4 +651,46 @@ td button[data-destructive='true']:hover:not(:disabled) {
 .signin-card button[type='submit'] {
   inline-size: 100%;
   margin-block-start: var(--s-2);
+}
+
+/* A dialling code the administrator reads rather than retypes. The prefix and
+   the input read as one control, so it is obvious the code is part of the
+   number being stored and not a label beside it. */
+.phone-input {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--c-surface);
+}
+
+.phone-prefix {
+  display: flex;
+  align-items: center;
+  padding-inline: var(--s-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--c-text-muted);
+  background: var(--c-surface-sunken);
+  border-inline-end: 1px solid var(--c-border);
+}
+
+.phone-input > input {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--fv-tabular);
+  letter-spacing: 0.06em;
+}
+
+/* The focus ring belongs on the whole control, not the bare input inside it. */
+.phone-input:focus-within {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+.phone-input > input:focus {
+  outline: none;
 }

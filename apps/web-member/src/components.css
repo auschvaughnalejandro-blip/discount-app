@@ -1,0 +1,1022 @@
+/**
+ * The design system's components.
+ *
+ * One rule throughout: a class names a thing (`.benefit-card`, `.toggle`),
+ * never an appearance. Sizes that the boards specify exactly — a 43 × 54
+ * passcode box, a 44 × 24 switch, a 342 × 216 card — are written as those
+ * numbers rather than pushed through the shared modular scale, because the
+ * relationships between them are the design.
+ *
+ * This file styles components. `layout.css` arranges them into screens.
+ */
+
+/* ── Shared ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Focus is the design's own sand border, per the brief — one treatment
+ * everywhere so a keyboard user learns it once.
+ *
+ * `:focus-visible` rather than `:focus`: a member tapping a card on a phone
+ * should not be left with a ring on it, but a member tabbing must see one.
+ */
+:where(a, button, input, [role='switch']):focus-visible {
+  outline: 2px solid var(--sand);
+  outline-offset: 2px;
+  border-radius: var(--r-input);
+}
+
+.visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.rule {
+  block-size: 1px;
+  border: 0;
+  margin-block: var(--s-5);
+  background: var(--divider);
+}
+
+.rule-sand {
+  background: rgb(236 215 163 / 0.35);
+}
+
+/* ── Type roles ─────────────────────────────────────────────────────────── */
+
+.title {
+  font-size: var(--t-title);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--tr-title);
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.title-auth {
+  font-size: var(--t-title-auth);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--tr-title-auth);
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.lede {
+  margin-block-start: var(--s-2);
+  font-size: var(--t-body);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.legal {
+  margin-block-start: var(--s-6);
+  font-size: var(--t-micro);
+  letter-spacing: var(--tr-micro);
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.eyebrow {
+  font-size: var(--t-eyebrow);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--tr-eyebrow);
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.eyebrow-sand {
+  color: var(--sand);
+}
+
+.eyebrow-muted {
+  color: var(--text-muted);
+}
+
+.hero-figure {
+  font-size: var(--t-hero);
+  font-weight: var(--w-bold);
+  letter-spacing: var(--tr-hero);
+  line-height: 1;
+  color: var(--sand);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+/**
+ * A text-weight link. Also used on `<button>` elements — "Change number" and
+ * "View all visits" perform an action rather than going somewhere, and the
+ * design draws them identically.
+ */
+.text-link {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--t-body-sm);
+  color: var(--sand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
+}
+
+.text-link:hover {
+  color: var(--gold-bright);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-block-size: var(--h-button);
+  padding-inline: var(--s-6);
+  padding-block: 0;
+  border-radius: var(--r-pill);
+  font-family: var(--font-display);
+  font-size: var(--t-body);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.2px;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    opacity var(--t-fast) var(--ease);
+}
+
+.btn-full {
+  inline-size: 100%;
+}
+
+.btn-primary {
+  color: var(--surface);
+  background: var(--sand);
+  border: 1px solid var(--sand);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--gold-bright);
+  border-color: var(--gold-bright);
+}
+
+.btn-outline {
+  color: var(--text);
+  background: transparent;
+  border: 1px solid rgb(245 241 234 / 0.22);
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: rgb(245 241 234 / 0.06);
+  border-color: rgb(245 241 234 / 0.34);
+}
+
+.btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+/* A pressed state that does not blur text: 1px of travel, no transform. */
+.btn:active:not(:disabled) {
+  translate: 0 1px;
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────────── */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  padding-inline: var(--s-3);
+  border-radius: var(--r-pill);
+  font-size: var(--t-meta-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chip-outline {
+  color: var(--text-muted);
+  border: 1px solid var(--hairline);
+}
+
+.chip-filled {
+  color: var(--surface);
+  background: var(--sand);
+}
+
+/* ── Fields ─────────────────────────────────────────────────────────────── */
+
+.field + .field {
+  margin-block-start: var(--s-5);
+}
+
+.field-label {
+  display: block;
+  margin-block-end: var(--s-2);
+  font-size: var(--t-label);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--tr-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/**
+ * The well holds the prefix and the input as one object, so the focus ring
+ * surrounds both rather than only the editable half.
+ */
+.field-well {
+  display: flex;
+  align-items: stretch;
+  block-size: var(--h-input);
+  border-radius: var(--r-input);
+  background: rgb(245 241 234 / 0.05);
+  border: 1px solid var(--hairline);
+  overflow: hidden;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.field-well:focus-within {
+  border-color: var(--sand);
+}
+
+.field-well[data-invalid='true'] {
+  border-color: var(--c-critical);
+}
+
+.field-prefix {
+  display: flex;
+  align-items: center;
+  padding-inline: var(--s-4);
+  font-size: var(--t-body);
+  color: var(--text-muted);
+  border-inline-end: 1px solid var(--hairline);
+  background: rgb(245 241 234 / 0.03);
+  user-select: none;
+}
+
+.field-input {
+  flex: 1;
+  min-inline-size: 0;
+  max-inline-size: none;
+  min-block-size: 0;
+  padding-inline: var(--s-4);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--t-body);
+}
+
+.field-input:focus {
+  outline: none;
+}
+
+.field-input::placeholder {
+  color: var(--text-faint);
+}
+
+.field-helper {
+  margin-block-start: var(--s-2);
+  font-size: var(--t-meta);
+  color: var(--text-faint);
+}
+
+/**
+ * Errors sit under the field as quiet text. The shared `[role="alert"]` styling
+ * in @pgp/ui draws a bordered box, which is right on a dashboard and wrong
+ * here — this is a correction to one field, not a banner about the page.
+ */
+.field-error,
+.field-error[role='alert'] {
+  display: block;
+  margin-block-start: var(--s-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--t-meta);
+  color: var(--c-critical);
+}
+
+.field-error[role='alert']::before {
+  content: none;
+}
+
+/* ── Toggle ─────────────────────────────────────────────────────────────── */
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  /* The row is the 44px target; the 24px switch is only the part you see. */
+  min-block-size: var(--tap-min);
+  padding-block: var(--s-2);
+}
+
+.toggle-row + .toggle-row {
+  border-block-start: 1px solid var(--divider);
+}
+
+.toggle-text {
+  display: grid;
+  gap: 2px;
+}
+
+.toggle-label {
+  font-size: var(--t-body);
+  color: var(--text);
+}
+
+.toggle-description {
+  font-size: var(--t-meta);
+  color: var(--text-faint);
+}
+
+.toggle {
+  flex: none;
+  position: relative;
+  inline-size: 44px;
+  block-size: 24px;
+  min-block-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: rgb(255 255 255 / 0.16);
+  cursor: pointer;
+  transition: background var(--t-base) var(--ease);
+}
+
+.toggle-knob {
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-start: 3px;
+  inline-size: 18px;
+  block-size: 18px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.55);
+  transition:
+    translate var(--t-base) var(--ease),
+    background var(--t-base) var(--ease);
+}
+
+.toggle[aria-checked='true'] {
+  background: var(--sand);
+}
+
+.toggle[aria-checked='true'] .toggle-knob {
+  translate: 20px 0;
+  background: var(--surface);
+}
+
+.toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Passcode boxes ─────────────────────────────────────────────────────── */
+
+.otp-group {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.otp-box {
+  inline-size: 43px;
+  block-size: 54px;
+  min-block-size: 0;
+  max-inline-size: none;
+  padding: 0;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: var(--w-medium);
+  letter-spacing: normal;
+  color: var(--text);
+  background: rgb(245 241 234 / 0.05);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  caret-color: var(--sand);
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.otp-box::placeholder {
+  color: var(--text-faint);
+  font-size: 14px;
+}
+
+.otp-box:focus {
+  outline: none;
+  border-color: var(--sand);
+}
+
+.otp-group[data-error='true'] .otp-box {
+  border-color: var(--c-critical);
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  inline-size: 100%;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.hero-image {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/**
+ * The placeholder for photography that does not exist yet. Dashed, labelled,
+ * and unmistakably not a design decision — so nobody ships it thinking the
+ * grey block was intended.
+ */
+.hero-placeholder {
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  background: var(--surface-2);
+  border: 1px dashed rgb(245 241 234 / 0.2);
+  color: var(--text-faint);
+  font-size: var(--t-meta);
+  letter-spacing: var(--tr-eyebrow);
+  text-transform: uppercase;
+}
+
+/* Carries the lockup over the picture and hands the page back to --base with
+   no seam. Weighted to the bottom half so the top of the image stays visible. */
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgb(34 28 27 / 0.15) 0%,
+    rgb(34 28 27 / 0.45) 45%,
+    var(--base) 100%
+  );
+  pointer-events: none;
+}
+
+/**
+ * The lockup sits in the lower third of the hero, not on its bottom edge.
+ *
+ * The scrim's darkest point is the bottom, and the screen's heading begins
+ * immediately below it — so an overlay pinned to the very bottom ends up
+ * touching "Welcome back". The extra block-end padding is what holds the
+ * wordmark clear of the text that follows the image.
+ */
+.hero-content {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  gap: var(--s-3);
+  padding: var(--gutter);
+  padding-block-start: calc(var(--gutter) + env(safe-area-inset-top, 0px));
+  padding-block-end: var(--s-10);
+}
+
+/* ── Back and close ─────────────────────────────────────────────────────── */
+
+.back-button,
+.close-button {
+  display: grid;
+  place-items: center;
+  /* 44px of target around a 36px circle — the circle is what the board draws,
+     the target is what a thumb needs. */
+  inline-size: var(--tap-min);
+  block-size: var(--tap-min);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.back-button::before,
+.close-button::before {
+  content: '';
+  position: absolute;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: 50%;
+  background: rgb(34 28 27 / 0.55);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px);
+}
+
+.back-button > svg,
+.close-button > svg {
+  position: relative;
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+/* The back button sits at the top-left of its hero, out of the content flow. */
+.hero .back-button {
+  position: absolute;
+  inset-block-start: calc(var(--s-2) + env(safe-area-inset-top, 0px));
+  inset-inline-start: var(--s-3);
+}
+
+/* ── Lockup ─────────────────────────────────────────────────────────────── */
+
+.lockup {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.lockup-brand {
+  font-family: var(--font-wordmark);
+  font-size: 15px;
+  font-weight: var(--w-book);
+  letter-spacing: 3.4px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.lockup-property {
+  font-size: 8px;
+  font-weight: var(--w-book);
+  letter-spacing: 2.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/**
+ * The mark on the membership card.
+ *
+ * Measured off both boards, which agree to the pixel: 46px wide with a 4.1px
+ * cap height on a 341px card — a third the size of the hero lockup, and cool
+ * grey rather than gold.
+ *
+ * Both of those read as mistakes until you see it next to the artwork. The
+ * building is the only gold object on the card; a gold wordmark competes with
+ * it, and a large one turns a credential into a poster. Small and quiet is
+ * what makes it look like something a hotel would hand you.
+ *
+ * Sized in `cqw` against the card's own width so the proportions survive the
+ * card being rendered at any size, with a px fallback first for engines
+ * without container queries.
+ */
+.lockup-card .lockup-brand {
+  font-size: 6px;
+  font-size: 1.76cqw;
+  font-weight: var(--w-book);
+  letter-spacing: 0.08em;
+  color: var(--grey);
+}
+
+.lockup-card .lockup-property {
+  font-size: 4.8px;
+  font-size: 1.4cqw;
+  letter-spacing: 0.18em;
+  color: var(--paper);
+}
+
+/* ── Membership card ────────────────────────────────────────────────────── */
+
+/**
+ * The membership card — every value below measured off the A3 and A4 boards,
+ * which agree to the pixel on a 341 × 215 face.
+ *
+ * `container-type: inline-size` makes the card its own layout context, so the
+ * mark, the name and the number are all expressed as a share of the card's
+ * width in `cqw`. The alternative — fixed pixels — was what made the first
+ * attempt wrong: the type stayed put while the card flexed, and the
+ * relationships the design is built on came apart. Each rule states a px
+ * fallback first for engines without container queries.
+ *
+ * Nothing here uses padding. The three elements sit at measured offsets, which
+ * is the honest way to reproduce a laid-out card and keeps the artwork's
+ * position independent of the text around it.
+ */
+.membership-card {
+  position: relative;
+  display: block;
+  inline-size: 100%;
+  /* Expressed as a ratio so the card stays a card on a 320px screen. */
+  aspect-ratio: 341 / 215;
+  border-radius: var(--r-card);
+  background: var(--card-gradient);
+  /* A hairline, not an edge: the boards show the card lifting off the base
+     rather than being outlined. The previous 40% read as a drawn border. */
+  border: 1px solid rgb(180 149 79 / 0.22);
+  overflow: hidden;
+  text-decoration: none;
+  container-type: inline-size;
+  /* Pairs with the same element inside the card modal, so the browser
+     interpolates between the two positions instead of cross-fading. */
+  view-transition-name: membership-card;
+}
+
+.membership-card-link {
+  cursor: pointer;
+}
+
+/**
+ * The building, at the position it occupies on both boards: 0.6% in from the
+ * left, 99.3% of the card's width, starting 27.5% down and 50.5% tall.
+ *
+ * `contain`, not `cover`. The artwork's own aspect is 3.148 and the box's is
+ * 3.140 — so close that either behaves the same, and `contain` is the one that
+ * cannot silently crop the roofline if the asset is ever re-exported at a
+ * different ratio.
+ *
+ * Full opacity: the fill is already the design's exact #b4954f, and dimming it
+ * would render a colour the boards never specified.
+ */
+.card-lineart {
+  position: absolute;
+  inset-inline-start: 0.6%;
+  inset-block-start: 27.5%;
+  inline-size: 99.3%;
+  block-size: 50.5%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Centred, 27px down — measured. Not top-left. */
+.card-head {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 27px;
+  inset-block-start: 8cqw;
+  display: grid;
+  justify-items: center;
+}
+
+/**
+ * Name and number share a baseline near the foot.
+ *
+ * They sit ~29px above the bottom edge rather than flush against it, which is
+ * what leaves the card its lower margin and stops the two lines reading as a
+ * footer bar.
+ */
+.card-foot {
+  position: absolute;
+  inset-inline: 15px;
+  inset-inline: 4.5cqw;
+  inset-block-end: 29px;
+  inset-block-end: 8.4cqw;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.card-name {
+  font-size: 12px;
+  font-size: 3.5cqw;
+  font-weight: var(--w-book);
+  letter-spacing: 0.01em;
+  color: var(--paper);
+  /* A long name shortens rather than colliding with the number. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-number {
+  flex: none;
+  font-size: 10px;
+  font-size: 2.9cqw;
+  letter-spacing: 0.1em;
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--gold-soft);
+}
+
+.card-name-skeleton {
+  display: block;
+  inline-size: 25cqw;
+  block-size: 3cqw;
+}
+
+.card-number-skeleton {
+  display: block;
+  inline-size: 11cqw;
+  block-size: 2.5cqw;
+}
+
+/* ── Benefit card ───────────────────────────────────────────────────────── */
+
+.benefit-card {
+  padding: var(--s-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-card);
+}
+
+.benefit-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin: 0;
+  font-size: var(--t-card-title);
+  font-weight: var(--w-medium);
+  letter-spacing: var(--tr-card-title);
+  text-transform: none;
+  color: var(--text);
+}
+
+.benefit-rate {
+  flex: none;
+  font-weight: var(--w-bold);
+  color: var(--sand);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+.benefit-sub {
+  margin-block-start: var(--s-2);
+  font-size: var(--t-body-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.benefit-sub-rate {
+  color: var(--text);
+}
+
+.benefit-sub-sep {
+  color: var(--text-faint);
+}
+
+.benefit-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin-block-start: var(--s-4);
+}
+
+/* Pushed to the end of the row, so the chips read left and the action right
+   however many chips a benefit happens to carry. */
+.benefit-details {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--tap-min);
+  padding-inline: var(--s-4);
+  font-size: var(--t-body-sm);
+  color: var(--sand);
+  text-decoration: none;
+}
+
+.benefit-details:hover {
+  color: var(--gold-bright);
+}
+
+.benefit-card-skeleton {
+  display: grid;
+  gap: var(--s-3);
+}
+
+/* ── Activity ───────────────────────────────────────────────────────────── */
+
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding-block: var(--s-3);
+}
+
+.activity-row + .activity-row {
+  border-block-start: 1px solid var(--divider);
+}
+
+.activity-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  inline-size: 34px;
+  block-size: 34px;
+  border-radius: 10px;
+  font-size: var(--t-meta);
+  font-weight: var(--w-medium);
+  letter-spacing: 0.4px;
+  color: var(--surface);
+  background: var(--grey);
+}
+
+/* Category hues from the boards. An unrecognised category keeps the neutral
+   tile above rather than being assigned a colour it was never given. */
+.activity-tile[data-category='spa'] {
+  background: var(--mint);
+}
+
+.activity-tile[data-category='dining'] {
+  background: var(--peach);
+}
+
+.activity-tile[data-category='rooms'] {
+  background: var(--gold-soft);
+}
+
+.activity-text {
+  flex: 1;
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.activity-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-body-sm);
+  color: var(--text);
+}
+
+.activity-meta {
+  font-size: var(--t-meta-sm);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-figures {
+  flex: none;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  text-align: end;
+}
+
+.activity-date {
+  font-size: var(--t-meta-sm);
+  color: var(--text-faint);
+}
+
+.activity-saved {
+  font-size: var(--t-body-sm);
+  font-weight: var(--w-medium);
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--text);
+}
+
+/* ── Stat bar ───────────────────────────────────────────────────────────── */
+
+.statbar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-block: var(--s-5);
+  padding-block: var(--s-4);
+  border-block: 1px solid var(--divider);
+}
+
+.statbar-cell {
+  display: grid;
+  justify-items: center;
+  gap: var(--s-1);
+  text-align: center;
+}
+
+.statbar-cell + .statbar-cell {
+  border-inline-start: 1px solid var(--divider);
+}
+
+.statbar-value {
+  margin: 0;
+  font-size: var(--t-card-title);
+  font-weight: var(--w-medium);
+  font-variant-numeric: var(--fv-tabular);
+  color: var(--text);
+}
+
+.statbar-value-sand {
+  color: var(--sand);
+}
+
+.statbar-label {
+  font-size: var(--t-meta-sm);
+  color: var(--text-faint);
+}
+
+.statbar-skeleton {
+  display: block;
+  inline-size: 56px;
+  block-size: 14px;
+}
+
+/* ── Detail rows ────────────────────────────────────────────────────────── */
+
+.detail-list {
+  margin: 0;
+}
+
+.detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding-block: var(--s-3);
+  border-block-end: 1px solid var(--divider);
+}
+
+.detail-label {
+  font-size: var(--t-body-sm);
+  color: var(--text-muted);
+}
+
+.detail-value {
+  margin: 0;
+  font-size: var(--t-body-sm);
+  font-weight: var(--w-medium);
+  color: var(--text);
+  text-align: end;
+}
+
+.detail-value-sand {
+  color: var(--sand);
+  font-variant-numeric: var(--fv-tabular);
+}
+
+/* ── Info panel ─────────────────────────────────────────────────────────── */
+
+.info-panel {
+  margin-block: var(--s-6);
+  padding: var(--s-4) var(--s-5);
+  border-radius: var(--r-card);
+  /* The board's mint is a light ground. Held at low opacity over --base so the
+     body text stays light and this reads as an aside rather than as the
+     loudest object on the screen. */
+  background: rgb(191 225 219 / 0.1);
+  border: 1px solid rgb(191 225 219 / 0.22);
+}
+
+.info-panel-body {
+  margin-block-start: var(--s-2);
+  font-size: var(--t-body-xs);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* ── Tab bar ────────────────────────────────────────────────────────────── */
+
+.tabbar {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-block-start: 1px solid rgb(236 215 163 / 0.14);
+  padding-block-end: env(safe-area-inset-bottom, 0px);
+}
+
+.tabbar-list {
+  display: flex;
+  max-inline-size: var(--column);
+  margin-inline: auto;
+  list-style: none;
+  padding: 0;
+}
+
+.tabbar-item {
+  flex: 1;
+}
+
+.tabbar-link {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--s-1);
+  min-block-size: var(--h-tabbar);
+  text-decoration: none;
+  color: var(--text-faint);
+  transition: color var(--t-fast) var(--ease);
+}
+
+.tabbar-link[aria-current='page'] {
+  color: var(--sand);
+}
+
+.tabbar-label {
+  font-size: var(--t-meta-sm);
+  letter-spacing: 0.6px;
+}
+
+/* The marks themselves are drawn in TabBar.tsx; the box they sit in is the
+   design's, and 18px is what the boards draw. */
+.tabbar-glyph {
+  inline-size: 18px;
+  block-size: 18px;
+}

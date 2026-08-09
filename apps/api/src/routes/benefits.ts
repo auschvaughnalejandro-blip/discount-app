@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
@@ -16,29 +17,62 @@ import { scopeForBenefit, scopedWhere } from '../security/scope.js';
  * works — which is why `benefits-are-data.test.ts` scans for exactly that.
  */
 
+const percentageSchema = z
+  .string()
+  .trim()
+  .regex(/^(?:\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)$/);
+
+const outletKindSchema = z.enum(['DINING', 'SPA', 'ROOMS', 'EVENTS', 'OTHER']).nullable();
+
 const benefitFields = {
   title: z.string().trim().min(1).max(200),
   category: z.string().trim().min(1).max(100),
   // Decimal as a string all the way to the database: parsing a percentage
   // through a float is how 25 becomes 24.999999999999996.
-  discountPct: z.string().regex(/^\d{1,3}(\.\d{1,2})?$/),
-  secondaryLabel: z.string().trim().max(200).nullable(),
-  secondaryPct: z.string().regex(/^\d{1,3}(\.\d{1,2})?$/).nullable(),
-  childRules: z.record(z.string(), z.number()).nullable(),
+  discountPct: percentageSchema,
+  secondaryLabel: z.string().trim().min(1).max(200).nullable(),
+  secondaryPct: percentageSchema.nullable(),
+  childRules: z
+    .record(
+      z.string().trim().min(1).max(50),
+      z.number().min(0).max(100).multipleOf(0.01),
+    )
+    .nullable(),
   maxGuests: z.number().int().positive().nullable(),
   minGuests: z.number().int().positive().nullable(),
-  reservationPhone: z.string().trim().max(50).nullable(),
-  terms: z.string().trim().max(5000),
-  sortOrder: z.number().int(),
+  reservationPhone: z.string().trim().min(1).max(50).nullable(),
+  terms: z.string().trim().min(1).max(5000),
+  sortOrder: z.number().int().min(0).max(10_000),
 };
 
 const createBenefitSchema = z
   .object({
     key: z.string().trim().min(1).max(50).regex(/^[a-z0-9-]+$/),
     ...benefitFields,
+    outletKind: outletKindSchema.optional().default(null),
     published: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((benefit, context) => {
+    if ((benefit.secondaryLabel === null) !== (benefit.secondaryPct === null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['secondaryPct'],
+        message: 'A secondary label and percentage must be supplied together.',
+      });
+    }
+    if (
+      benefit.minGuests !== null &&
+      benefit.maxGuests !== null &&
+      benefit.minGuests > benefit.maxGuests
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['minGuests'],
+        message: 'Minimum guests cannot exceed maximum guests.',
+      });
+    }
+  });
 
 const updateBenefitSchema = z
   .object({
@@ -53,6 +87,11 @@ const updateBenefitSchema = z
     reservationPhone: benefitFields.reservationPhone.optional(),
     terms: benefitFields.terms.optional(),
     sortOrder: benefitFields.sortOrder.optional(),
+    outletKind: outletKindSchema.optional(),
+    // Optional for compatibility with existing clients. Supplying it turns the
+    // PATCH into a compare-and-swap: an intervening edit returns 409 instead of
+    // silently overwriting the newer values.
+    expectedVersion: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -126,6 +165,7 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
         id: benefit.id,
         ...toMemberView(benefit),
         published: benefit.published,
+        outletKind: benefit.outletKind,
         version: benefit.version,
         updatedAt: benefit.updatedAt,
         updatedBy: benefit.updatedBy,
@@ -152,9 +192,11 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
         reservationPhone: body.reservationPhone,
         terms: body.terms,
         sortOrder: body.sortOrder,
+        outletKind: body.outletKind,
         published: body.published,
         updatedByUserId: principal?.subjectId ?? null,
       },
+      include: { updatedBy: { select: { id: true, fullName: true } } },
     });
 
     await writeAudit(app.prisma, {
@@ -166,12 +208,20 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
       ipAddress: request.ip,
     });
 
-    return reply.code(201).send({ id: created.id, ...toMemberView(created), version: created.version });
+    return reply.code(201).send({
+      id: created.id,
+      ...toMemberView(created),
+      published: created.published,
+      outletKind: created.outletKind,
+      version: created.version,
+      updatedAt: created.updatedAt,
+      updatedBy: created.updatedBy,
+    });
   });
 
   // ── PATCH /admin/benefits/:id ─────────────────────────────────────────
   // The headline of the whole project: this is how 25% becomes 20%.
-  app.patch('/admin/benefits/:id', { config: { permission: 'benefits:manage' } }, async (request) => {
+  app.patch('/admin/benefits/:id', { config: { permission: 'benefits:manage' } }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = updateBenefitSchema.parse(request.body);
     const principal = request.principal;
@@ -181,34 +231,109 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
 
     const existing = await app.prisma.benefit.findFirst({
       where: scopedWhere({ id }, scopeForBenefit(principal)),
-      select: { id: true, key: true, version: true, discountPct: true },
+      select: {
+        id: true,
+        key: true,
+        version: true,
+        discountPct: true,
+        secondaryLabel: true,
+        secondaryPct: true,
+        minGuests: true,
+        maxGuests: true,
+      },
     });
     if (!existing) {
       throw new NotFoundError();
     }
 
-    const updated = await app.prisma.benefit.update({
-      where: { id: existing.id },
-      data: {
-        ...(body.title !== undefined ? { title: body.title } : {}),
-        ...(body.category !== undefined ? { category: body.category } : {}),
-        ...(body.discountPct !== undefined ? { discountPct: body.discountPct } : {}),
-        ...(body.secondaryLabel !== undefined ? { secondaryLabel: body.secondaryLabel } : {}),
-        ...(body.secondaryPct !== undefined ? { secondaryPct: body.secondaryPct } : {}),
-        ...(body.childRules !== undefined && body.childRules !== null
-          ? { childRules: body.childRules }
-          : {}),
-        ...(body.maxGuests !== undefined ? { maxGuests: body.maxGuests } : {}),
-        ...(body.minGuests !== undefined ? { minGuests: body.minGuests } : {}),
-        ...(body.reservationPhone !== undefined ? { reservationPhone: body.reservationPhone } : {}),
-        ...(body.terms !== undefined ? { terms: body.terms } : {}),
-        ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
-        // "Who changed the spa discount, and when" is a question that will be
-        // asked (wireframes screen 14 note 3).
-        version: { increment: 1 },
-        updatedByUserId: principal.subjectId,
-      },
-    });
+    if (body.expectedVersion !== undefined && body.expectedVersion !== existing.version) {
+      return reply.code(409).send({
+        error: 'version_conflict',
+        message: 'This benefit was changed by someone else. Refresh and try again.',
+      });
+    }
+
+    const nextSecondaryLabel =
+      body.secondaryLabel === undefined ? existing.secondaryLabel : body.secondaryLabel;
+    const nextSecondaryPct =
+      body.secondaryPct === undefined
+        ? existing.secondaryPct === null
+          ? null
+          : String(existing.secondaryPct)
+        : body.secondaryPct;
+    z.object({
+      secondaryLabel: benefitFields.secondaryLabel,
+      secondaryPct: benefitFields.secondaryPct,
+    })
+      .refine(
+        ({ secondaryLabel, secondaryPct }) =>
+          (secondaryLabel === null) === (secondaryPct === null),
+        {
+          path: ['secondaryPct'],
+          message: 'A secondary label and percentage must be supplied together.',
+        },
+      )
+      .parse({ secondaryLabel: nextSecondaryLabel, secondaryPct: nextSecondaryPct });
+
+    const nextMinGuests =
+      body.minGuests === undefined ? existing.minGuests : body.minGuests;
+    const nextMaxGuests =
+      body.maxGuests === undefined ? existing.maxGuests : body.maxGuests;
+    z.object({
+      minGuests: benefitFields.minGuests,
+      maxGuests: benefitFields.maxGuests,
+    })
+      .refine(
+        ({ minGuests, maxGuests }) =>
+          minGuests === null || maxGuests === null || minGuests <= maxGuests,
+        { path: ['minGuests'], message: 'Minimum guests cannot exceed maximum guests.' },
+      )
+      .parse({ minGuests: nextMinGuests, maxGuests: nextMaxGuests });
+
+    let updated;
+    try {
+      updated = await app.prisma.benefit.update({
+        // Prisma's extended unique WHERE adds the version predicate to the
+        // UPDATE itself. A read-then-compare here would still lose a race
+        // between the comparison and the write.
+        where: {
+          id: existing.id,
+          ...(body.expectedVersion !== undefined ? { version: body.expectedVersion } : {}),
+        },
+        data: {
+          ...(body.title !== undefined ? { title: body.title } : {}),
+          ...(body.category !== undefined ? { category: body.category } : {}),
+          ...(body.discountPct !== undefined ? { discountPct: body.discountPct } : {}),
+          ...(body.secondaryLabel !== undefined ? { secondaryLabel: body.secondaryLabel } : {}),
+          ...(body.secondaryPct !== undefined ? { secondaryPct: body.secondaryPct } : {}),
+          ...(body.childRules !== undefined
+            ? { childRules: body.childRules === null ? Prisma.DbNull : body.childRules }
+            : {}),
+          ...(body.maxGuests !== undefined ? { maxGuests: body.maxGuests } : {}),
+          ...(body.minGuests !== undefined ? { minGuests: body.minGuests } : {}),
+          ...(body.reservationPhone !== undefined ? { reservationPhone: body.reservationPhone } : {}),
+          ...(body.terms !== undefined ? { terms: body.terms } : {}),
+          ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+          ...(body.outletKind !== undefined ? { outletKind: body.outletKind } : {}),
+          // "Who changed the spa discount, and when" is a question that will be
+          // asked (wireframes screen 14 note 3).
+          version: { increment: 1 },
+          updatedByUserId: principal.subjectId,
+        },
+        include: { updatedBy: { select: { id: true, fullName: true } } },
+      });
+    } catch (error) {
+      if (
+        body.expectedVersion !== undefined &&
+        (error as { code?: unknown }).code === 'P2025'
+      ) {
+        return reply.code(409).send({
+          error: 'version_conflict',
+          message: 'This benefit was changed by someone else. Refresh and try again.',
+        });
+      }
+      throw error;
+    }
 
     await writeAudit(app.prisma, {
       action: 'benefit.updated',
@@ -220,7 +345,9 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
       metadata: {
         key: updated.key,
         version: updated.version,
-        changed: Object.keys(body),
+        // `expectedVersion` controls the write; it is not benefit content and
+        // must not appear in the list of fields the administrator changed.
+        changed: Object.keys(body).filter((field) => field !== 'expectedVersion'),
         ...(body.discountPct !== undefined
           ? { discountPctFrom: String(existing.discountPct), discountPctTo: body.discountPct }
           : {}),
@@ -228,7 +355,15 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
       ipAddress: request.ip,
     });
 
-    return { id: updated.id, ...toMemberView(updated), published: updated.published, version: updated.version };
+    return {
+      id: updated.id,
+      ...toMemberView(updated),
+      published: updated.published,
+      outletKind: updated.outletKind,
+      version: updated.version,
+      updatedAt: updated.updatedAt,
+      updatedBy: updated.updatedBy,
+    };
   });
 
   // ── POST /admin/benefits/:id/publish ──────────────────────────────────
@@ -258,6 +393,7 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
           version: { increment: 1 },
           updatedByUserId: principal.subjectId,
         },
+        include: { updatedBy: { select: { id: true, fullName: true } } },
       });
 
       await writeAudit(app.prisma, {
@@ -275,7 +411,15 @@ const benefitRoutes: FastifyPluginAsync = async (app) => {
       // reference documents — the same gap as PROGRESS.md Q6. Consent state
       // is already recorded per channel and ready to be read when one exists.
 
-      return { id: updated.id, published: updated.published, version: updated.version };
+      return {
+        id: updated.id,
+        ...toMemberView(updated),
+        published: updated.published,
+        outletKind: updated.outletKind,
+        version: updated.version,
+        updatedAt: updated.updatedAt,
+        updatedBy: updated.updatedBy,
+      };
     },
   );
 };

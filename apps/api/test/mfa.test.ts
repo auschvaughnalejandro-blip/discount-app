@@ -31,26 +31,22 @@ beforeAll(() => {
 });
 
 describe('which roles require a second factor', () => {
-  /**
-   * §3 says both "mandatory on every dashboard account, without exception" and
-   * "MFA for any staff account that can reach more than the verification page".
-   * The second is the specific one; OUTLET_STAFF reaches only the verification
-   * page and so is not a dashboard account. See DECISIONS.md.
-   */
-  it('requires it for every role that reaches more than the verification page', () => {
+  it('requires it for the only active staff role', () => {
     expect(roleRequiresMfa('ADMINISTRATOR')).toBe(true);
-    expect(roleRequiresMfa('MANAGER')).toBe(true);
-    expect(roleRequiresMfa('SUPPORT')).toBe(true);
   });
 
-  it('does not require it for outlet staff', () => {
-    expect(roleRequiresMfa('OUTLET_STAFF')).toBe(false);
-  });
+  it.each(['MANAGER', 'OUTLET_STAFF', 'SUPPORT'] as const)(
+    'does not open the MFA path for retired role %s',
+    (role) => {
+      // Authentication rejects these roles before MFA. Returning false here
+      // must never be interpreted as a password-only sign-in path.
+      expect(roleRequiresMfa(role)).toBe(false);
+    },
+  );
 
   it('does not require it for an unrecognised role', () => {
-    // Fails closed in the sense that matters: an unknown role gets no MFA
-    // *gate*, but it also gets no permissions from the matrix, so it can reach
-    // nothing. The gate is not the thing holding the door here.
+    // Unknown roles are not eligible staff identities. Authentication and the
+    // permission matrix reject them; MFA is not the authorization boundary.
     expect(roleRequiresMfa('SOMETHING_NEW')).toBe(false);
   });
 });

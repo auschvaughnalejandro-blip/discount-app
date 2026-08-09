@@ -146,8 +146,8 @@ export default function Overview({ onNavigate }: { onNavigate: (to: 'members' | 
             <div className="panel-body">
               {byBenefit.length === 0 ? (
                 <p className="empty">
-                  Nothing has been redeemed yet. Bars appear as staff record redemptions on the
-                  verification page.
+                  Nothing has been redeemed yet. Bars appear as administrators record redemptions
+                  in this panel.
                 </p>
               ) : (
                 <BarChart

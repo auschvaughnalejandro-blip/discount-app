@@ -38,7 +38,7 @@ beforeAll(async () => {
     ownerPrisma.member.findUniqueOrThrow({ where: { memberNumber: 'PG-0003' } }),
     ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'spa' } }),
     ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } }),
-    ownerPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } }),
+    ownerPrisma.staffUser.findUniqueOrThrow({ where: { email: 'admin@pgp.test' } }),
   ]);
 
   await ownerPrisma.redemption.create({
@@ -50,6 +50,8 @@ beforeAll(async () => {
       staffUserId: staff.id,
       partySize: 2,
       billAmountMinor: 45_000,
+      discountPctApplied: benefit.discountPct,
+      benefitVersion: benefit.version,
       idempotencyKey: FIXTURE_IDEMPOTENCY_KEY,
     },
   });
@@ -115,15 +117,18 @@ describe('R7 — redemptions are immutable', () => {
   });
 
   it('still allows the application to record a redemption', async () => {
+    const spa = await appPrisma.benefit.findUniqueOrThrow({ where: { key: 'spa' } });
     const created = await appPrisma.redemption.create({
       data: {
         memberId: (await appPrisma.member.findUniqueOrThrow({ where: { memberNumber: 'PG-0003' } }))
           .id,
-        benefitId: (await appPrisma.benefit.findUniqueOrThrow({ where: { key: 'spa' } })).id,
+        benefitId: spa.id,
         outletId: (await appPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } })).id,
-        staffUserId: (await appPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } }))
+        staffUserId: (await appPrisma.staffUser.findUniqueOrThrow({ where: { email: 'admin@pgp.test' } }))
           .id,
         partySize: 1,
+        discountPctApplied: spa.discountPct,
+        benefitVersion: spa.version,
         idempotencyKey: `test-insert-${Date.now()}`,
       },
     });
@@ -186,9 +191,13 @@ describe('money is never floating point', () => {
 
 describe('R14 — benefit values live in the database, not in code', () => {
   it('seeds the five benefits from the printed sheet with their real values', async () => {
-    const benefits = await appPrisma.benefit.findMany({ orderBy: { sortOrder: 'asc' } });
+    const seedKeys = ['fnb', 'rooms', 'spa', 'events', 'lifestyle'];
+    const benefits = await appPrisma.benefit.findMany({
+      where: { key: { in: seedKeys } },
+      orderBy: { sortOrder: 'asc' },
+    });
 
-    expect(benefits.map((b) => b.key)).toEqual(['fnb', 'rooms', 'spa', 'events', 'lifestyle']);
+    expect(benefits.map((b) => b.key)).toEqual(seedKeys);
 
     const byKey = Object.fromEntries(benefits.map((b) => [b.key, b]));
 
@@ -244,7 +253,7 @@ describe('R3 — membership numbers are sequential and separate from the interna
 });
 
 describe('database-level coherence constraints', () => {
-  it('requires an outlet on an outlet_staff account and forbids one otherwise', async () => {
+  it('keeps retained historical outlet-staff rows tied to an outlet', async () => {
     await expect(
       ownerPrisma.staffUser.create({
         data: {
@@ -263,7 +272,7 @@ describe('database-level coherence constraints', () => {
       ownerPrisma.member.findUniqueOrThrow({ where: { memberNumber: 'PG-0003' } }),
       ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'spa' } }),
       ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } }),
-      ownerPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } }),
+      ownerPrisma.staffUser.findUniqueOrThrow({ where: { email: 'admin@pgp.test' } }),
     ]);
 
     await expect(
@@ -274,6 +283,8 @@ describe('database-level coherence constraints', () => {
           outletId: outlet.id,
           staffUserId: staff.id,
           partySize: 0,
+          discountPctApplied: benefit.discountPct,
+          benefitVersion: benefit.version,
           idempotencyKey: `test-zero-party-${Date.now()}`,
         },
       }),

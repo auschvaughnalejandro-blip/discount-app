@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
 import { NotFoundError } from '../errors.js';
+import { logDeliveryOutcome } from '../notifications/code-sender.js';
 import { writeAudit } from '../security/audit.js';
 import { generateClaimCode } from '../security/claim-codes.js';
 import { normalizePhone } from '../security/phone.js';
@@ -42,11 +43,10 @@ const listQuerySchema = z
 const idParamSchema = z.object({ id: z.string().uuid() }).strict();
 
 /**
- * The administrator sees a claim code exactly once, at the moment it is
- * issued, to print on the invitation letter. Only its hash is stored, so it
- * cannot be shown again — losing it means issuing a new one via
- * `/resend-claim`, which is also what a member who lost their letter needs
- * (wireframes D4 note 5).
+ * The invitation code exists in plaintext for exactly as long as it takes to
+ * email it. Only its hash is stored, so it cannot be produced again — a member
+ * who never received one needs `/resend-claim`, which supersedes the old code
+ * so a stray copy stops working (wireframes D4 note 5).
  */
 function issueClaimCodeData(memberId: string, ttlHours: number) {
   const { plaintext, hash } = generateClaimCode();
@@ -68,6 +68,66 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
   // and issues a code (wireframes screen 11 note 1).
   app.post('/admin/members', { config: { permission: 'members:create' } }, async (request, reply) => {
     const body = createMemberSchema.parse(request.body);
+    const principal = request.principal;
+    if (!principal) {
+      throw new NotFoundError();
+    }
+
+    /**
+     * A membership nobody can activate is not a membership.
+     *
+     * Sign-in passcodes go out over the configured delivery channel, and the
+     * member does not supply their own address until *after* the first one has
+     * been sent — so where that channel is email, a record created without one
+     * is permanently unactivatable. The failure would otherwise surface at the
+     * guest's first attempt, days later, with nothing on the administrator's
+     * screen having suggested a problem.
+     *
+     * Conditional on the channel rather than absolute: on 'none' (development,
+     * where the terminal echo stands in) an email is genuinely optional, and
+     * requiring one there would be a rule with no reason behind it.
+     */
+    if (env.OTP_DELIVERY_CHANNEL === 'smtp' && !body.email) {
+      return reply.code(400).send({
+        error: 'email_required',
+        message:
+          'An email address is required: sign-in passcodes are delivered by email, ' +
+          'and this member could not otherwise activate the app.',
+      });
+    }
+
+    /**
+     * A phone number belongs to one membership. Checked here so the answer is
+     * useful — the number, and which membership already holds it — rather than
+     * arriving as an unmapped constraint violation and a 500.
+     *
+     * Naming the other membership is not a disclosure: the caller holds
+     * `members:list` and can already see every one of them. It is the
+     * difference between "that failed" and "you already created them".
+     */
+    const normalizedPhone = body.phone
+      ? (normalizePhone(body.phone, { defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE }) ??
+        body.phone)
+      : null;
+
+    if (normalizedPhone) {
+      // `findFirst` with the scope rather than `findUnique`, which cannot take
+      // a composed where. The scope is empty for both roles that hold
+      // members:create, so this restricts nothing today — but it is written the
+      // way every other read is, so a narrower role added later inherits the
+      // restriction instead of quietly bypassing it.
+      const taken = await app.prisma.member.findFirst({
+        where: scopedWhere({ phone: normalizedPhone }, scopeForMember(principal)),
+        select: { memberNumber: true, fullName: true },
+      });
+      if (taken) {
+        return reply.code(409).send({
+          error: 'phone_already_used',
+          message: `${taken.memberNumber} (${taken.fullName}) already uses that mobile number.`,
+          memberNumber: taken.memberNumber,
+        });
+      }
+    }
 
     const created = await app.prisma.$transaction(async (tx) => {
       // R3: the membership number comes from a database sequence, so two
@@ -84,18 +144,14 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
         data: {
           memberNumber,
           fullName: body.fullName,
-          // Normalised on the way in, or one member is created as
-          // +97455550003 and another as 55550003 and the unique index does not
-          // notice they are the same person.
-          phone: body.phone
-            ? (normalizePhone(body.phone, {
-                defaultCountryCode: env.DEFAULT_PHONE_COUNTRY_CODE,
-              }) ?? body.phone)
-            : null,
+          // Normalised above, or one member is created as +97455550003 and
+          // another as 55550003 and the unique index does not notice they are
+          // the same person.
+          phone: normalizedPhone,
           email: body.email ?? null,
           status: 'ACTIVE',
           joinedAt: new Date(),
-          createdByUserId: request.principal?.subjectId ?? '',
+          createdByUserId: principal.subjectId,
         },
       });
 
@@ -105,9 +161,30 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       return { member, claimCodePlaintext: claim.plaintext, expiresAt: claimCode.expiresAt };
     });
 
+    /**
+     * Send the invitation, and hand the code back to the administrator only if
+     * it did not go.
+     *
+     * In the normal case nobody at the hotel ever sees a credential belonging
+     * to a member: the invitation lands in their inbox, and passcodes were
+     * already going straight to them. Where delivery fails the code is returned
+     * so the membership is not stranded — an administrator reading it off a
+     * screen is a worse position than not, but a member who can never activate
+     * is worse still.
+     */
+    const delivery = {
+      email: created.member.email,
+      phone: created.member.phone ?? '',
+      code: created.claimCodePlaintext,
+      purpose: 'invitation' as const,
+      validFor: `${Math.round(env.CLAIM_CODE_TTL_HOURS / 24)} days`,
+    };
+    const outcome = await app.codeSender.send(delivery);
+    logDeliveryOutcome(app.log, app.codeSender, delivery, outcome);
+
     await writeAudit(app.prisma, {
       action: 'member.created',
-      principal: request.principal,
+      principal,
       subjectType: 'Member',
       subjectId: created.member.id,
       // Membership number, never the name (§9).
@@ -122,16 +199,20 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       status: created.member.status,
       joinedAt: created.member.joinedAt,
       claimCode: {
-        // Shown once. Not retrievable afterwards.
-        code: created.claimCodePlaintext,
+        // Returned only when the member could not be reached. Stored as a hash
+        // either way, so this is the one moment it exists in plaintext.
+        ...(outcome.delivered ? {} : { code: created.claimCodePlaintext }),
         expiresAt: created.expiresAt,
       },
+      invitation: outcome.delivered
+        ? { sent: true, to: created.member.email }
+        : { sent: false, reason: outcome.reason },
     });
   });
 
   // ── GET /admin/members ────────────────────────────────────────────────
-  // R11: this route exists only for roles holding `members:list`.
-  // `outlet_staff` does not, so it is refused before any query is built.
+  // This route exists only for the Administrator permission set. Retired
+  // historical staff roles are refused before any query is built.
   app.get('/admin/members', { config: { permission: 'members:list' } }, async (request) => {
     const query = listQuerySchema.parse(request.query);
     const principal = request.principal;
@@ -163,8 +244,7 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
           memberNumber: true,
           fullName: true,
           // The contact number, so the dashboard can show who to actually ring.
-          // Every role holding `members:list` — ADMINISTRATOR and MANAGER, and
-          // no others — also holds `members:read`, whose detail route has
+          // ADMINISTRATOR also holds `members:read`, whose detail route has
           // always returned `phone`. So this discloses nothing a caller could
           // not already retrieve one member at a time; it saves them a click per
           // member, which is the whole point of a list.
@@ -436,7 +516,7 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
 
       const existing = await app.prisma.member.findFirst({
         where: scopedWhere({ id }, scopeForMember(principal)),
-        select: { id: true, claimedAt: true },
+        select: { id: true, claimedAt: true, email: true, phone: true },
       });
       if (!existing) {
         throw new NotFoundError();
@@ -461,6 +541,19 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
 
         return tx.claimCode.create({ data: claim.row });
       });
+
+      // Emailed, like the original — but unlike creation, the plaintext is
+      // returned to the administrator either way. This route exists precisely
+      // because the normal path did not reach the member, so withholding the
+      // code here would remove the only remaining way to activate them.
+      const delivery = {
+        email: existing.email,
+        phone: existing.phone ?? '',
+        code: claim.plaintext,
+        purpose: 'invitation' as const,
+        validFor: `${Math.round(env.CLAIM_CODE_TTL_HOURS / 24)} days`,
+      };
+      logDeliveryOutcome(app.log, app.codeSender, delivery, await app.codeSender.send(delivery));
 
       await writeAudit(app.prisma, {
         action: 'member.claim_code_issued',

@@ -1,3 +1,11 @@
+# Archived product definition
+
+> **Superseded on 2026-08-09.** The current definition is
+> `docs/product-definition.md`. The live product has exactly two surfaces (the
+> member guest app and administrator panel) and only Administrator accounts.
+> Manager, support, outlet-staff and verification-page descriptions below are
+> retained only as design history.
+
 # Product Definition
 
 **Product:** Digital companion for the Steigenberger Doha Privilege Guest Program

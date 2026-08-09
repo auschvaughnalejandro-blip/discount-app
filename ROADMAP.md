@@ -1,5 +1,12 @@
 # Roadmap — from working logic to a shipped product
 
+> **Scope correction — 2026-08-09:** the client confirmed exactly two
+> user-facing applications (member guest app and administrator panel) and one
+> hotel-facing account type (`ADMINISTRATOR`). All manager, support,
+> outlet-staff, counter and verification-page stages below are superseded. They
+> remain in this file only as planning history; see the Stage 27 workstream and
+> DECISIONS.md for the active direction.
+
 Last updated: 2026-07-30
 Status: stages 0–14 complete; **16, 17, 18 and 19 now also complete**. 313 tests
 passing. Stage 15's decisions are partly answered (Q1, Q5, Q6 closed; Q11 open) —
@@ -375,7 +382,7 @@ cookies are what the spec asks for, and `SameSite=Strict` plus a CSRF token is
 what makes them safe. Note the access token can stay in memory; it is the
 long-lived refresh token that matters here.
 
-**Secret management** — the Argon2id pepper, `IDENTITY_CODE_HMAC_SECRET` and the
+**Secret management** — the Argon2id pepper, `VERIFICATION_SESSION_HMAC_SECRET` and the
 JWT signing secret move to the platform secret manager. §3 explicitly says the
 pepper must not live in the database. Also: give the JWT secret a `kid` now, even
 with one key, so rotation later does not need a flag day.
@@ -712,6 +719,82 @@ These do not require code and are frequently discovered too late.
   one. §11.4 asks how many members exist today — if the reference card is number
   three, the whole programme is small enough that a careful pilot costs nothing
   and catches everything.
+
+---
+
+# 10b. Stage 26 — hotel-facing Google Sheets mirror
+
+Hotel management asked for Google Sheets because it is easier for staff to
+inspect and filter. That does **not** replace PostgreSQL: authentication,
+uniqueness, concurrent redemption protection, immutable history and the audit
+trail still require a transactional database. The agreed shape is:
+
+```text
+PostgreSQL (authoritative) -> sanitised full snapshot -> Google Sheets (read only)
+```
+
+The code path is implemented and disabled by default. It runs outside request
+handlers, reconciles the full workbook every five minutes, skips overlapping
+runs, and leaves the application working when Google is unavailable. A manual
+`npm run sheets:sync` command uses the same path for initial setup and recovery.
+
+Managed tabs are `_Sync`, `Members`, `Benefits`, `Outlets` and `Redemptions`.
+The membership tab contains number/status/usage only. The redemption tab reuses
+the existing export policy: membership number, never member name or contact
+details. Requests are deliberately absent in v1 because their free-text notes
+and live approval state do not belong in a standing bulk export. The dashboard
+remains the place to view personal details and make every change.
+
+Code acceptance:
+
+- [x] PostgreSQL remains the only write path and source of truth.
+- [x] Snapshot queries use explicit field allowlists and repeatable-read
+      consistency.
+- [x] Managed tabs are replaced atomically and deterministically; stale rows
+      disappear and repeated runs do not duplicate records.
+- [x] Strings are written as literal cell values, never formulas.
+- [x] Names/contact data, request free text, credentials, tokens, OTP/MFA,
+      consent and audit/IP records cannot enter the workbook projection.
+- [x] Automatic sync is opt-in, non-overlapping and isolated from API writes.
+- [x] Every successful publication writes a system-attributed export audit row
+      containing counts only.
+- [x] Focused tests cover schema, privacy, formula injection, stale clearing,
+      missing-tab creation and conditional configuration.
+
+Operational acceptance before enabling production:
+
+- [ ] Hotel/privacy owner approves Google Workspace and the data-residency
+      arrangement for member-number and movement data.
+- [ ] Dedicated workbook has link sharing off; named administrators are Viewers
+      and the dedicated service identity is the only Editor.
+- [ ] Service-account credential is stored in the deployment secret manager and
+      its rotation owner/date are recorded.
+- [ ] Initial manual sync row counts match PostgreSQL and no prohibited field is
+      present.
+- [ ] Monitoring detects a `_Sync` timestamp older than two sync intervals.
+- [ ] Restore drill includes rebuilding the workbook from restored PostgreSQL.
+
+The current deployment has one API process. Before horizontal scaling, move the
+timer to one external scheduler or add leader election so replicas cannot race.
+
+## Stage 27 — administrator-only hotel access (2026-08-09)
+
+Client-confirmed product correction: keep the member guest app and
+administrator panel; retire every other staff role and surface.
+
+Acceptance criteria:
+
+- [x] Account creation has no role or outlet selector and always creates a named
+      `ADMINISTRATOR` account server-side.
+- [x] Manager, support and outlet-staff rows cannot log in, complete MFA,
+      refresh a session, resolve a principal or hold any permission.
+- [x] Existing non-administrator rows are suspended and their refresh sessions
+      revoked without deleting or relabelling historical redemption attribution.
+- [x] The panel lists and manages administrator accounts only.
+- [x] The seed creates no non-administrator login.
+- [x] Product, security, deployment and operations documentation describe only
+      the two active applications and the Administrator account type.
+- [x] API tests, all workspace typechecks and migration validation pass.
 
 ---
 

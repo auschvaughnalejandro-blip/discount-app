@@ -1,5 +1,24 @@
 import { z } from 'zod';
 
+const optionalNonEmptyString = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
+const optionalEmail = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().trim().email().optional(),
+);
+
+const optionalBase64 = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'must be standard base64 without whitespace')
+    .optional(),
+);
+
 /**
  * Each stage extends this schema with the variables it introduces, so a
  * missing secret fails at startup rather than at first use. Every variable is
@@ -11,6 +30,23 @@ const envSchema = z.object({
   API_HOST: z.string().min(1).default('127.0.0.1'),
   API_PORT: z.coerce.number().int().positive().max(65535).default(3000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /**
+   * Whether to believe `X-Forwarded-For`.
+   *
+   * Behind a reverse proxy this is not optional. Left off, Fastify sees the
+   * proxy's address on every request — so every per-IP rate limit shares one
+   * bucket and every audited address is the proxy's. Both controls appear
+   * present in the code and do nothing, which is worse than their absence.
+   *
+   * Off by default because a directly-exposed API must *not* believe that
+   * header: anyone can set it, and trusting it there would let a caller pick
+   * their own rate-limit bucket and forge their own audit trail. Turn it on
+   * only where something trustworthy overwrites it — which Caddy does.
+   */
+  TRUST_PROXY: z
+    .string()
+    .default('false')
+    .transform((value) => value === 'true'),
   DATABASE_URL: z.string().min(1),
 
   // ── Stage 2 — credentials ─────────────────────────────────────────────
@@ -29,12 +65,10 @@ const envSchema = z.object({
   // HS256 (see src/security/tokens.ts); 32 bytes minimum for a symmetric key
   // used with HMAC-SHA256.
   JWT_SIGNING_KEY: z.string().min(32),
-  // security-implementation.md §4 lifetimes: 10 min dashboard, 15 min
-  // verification page, 30 min member app; 12h staff refresh, 30-day member
-  // refresh.
+  // security-implementation.md §4 lifetimes: 10 min dashboard, 30 min member
+  // app; 12h staff refresh, 30-day member refresh.
   ACCESS_TOKEN_TTL_MEMBER_SECONDS: z.coerce.number().int().positive().default(1800),
   ACCESS_TOKEN_TTL_STAFF_DASHBOARD_SECONDS: z.coerce.number().int().positive().default(600),
-  ACCESS_TOKEN_TTL_STAFF_VERIFY_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_MEMBER_SECONDS: z.coerce.number().int().positive().default(2_592_000),
   REFRESH_TOKEN_TTL_STAFF_SECONDS: z.coerce.number().int().positive().default(43_200),
 
@@ -64,26 +98,6 @@ const envSchema = z.object({
   // §8: "Pagination caps so no endpoint can be coerced into returning the
   // full membership."
   MEMBER_LIST_MAX_PAGE_SIZE: z.coerce.number().int().positive().default(100),
-
-  // ── Stage 6 — identity codes ──────────────────────────────────────────
-  IDENTITY_CODE_HMAC_SECRET: z.string().min(16),
-  // R9: the rotation window is a tunable setting, not a hardcoded constant.
-  // §7: "start around 24 hours, monitor verification failures at outlets, and
-  // adjust." Changing this must need no code change.
-  IDENTITY_CODE_WINDOW_HOURS: z.coerce.number().positive().default(24),
-
-  // -- Stage 7 -- verification lookups ------------------------------------
-  // security-implementation.md §5: "Rate limited hard: a handful of lookups
-  // per staff member per hour. Membership numbers are sequential and printed
-  // on cards, so an unlimited lookup endpoint is an enumeration tool."
-  // "A handful per hour" is the only quantity given; 30 reads that generously
-  // for a busy restaurant shift. See PROGRESS.md.
-  RATE_LIMIT_VERIFY_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
-  RATE_LIMIT_VERIFY_PER_STAFF_MAX: z.coerce.number().int().positive().default(30),
-  // §5: the resolve result is "bound to a short-lived verification session --
-  // staff can act on that member for a few minutes, then the context expires."
-  // "A few minutes" is the only quantity given.
-  VERIFICATION_SESSION_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 
   // Development-only OTP delivery. Honoured only when NODE_ENV is
   // 'development' as well -- see src/security/dev-otp.ts for why both gates
@@ -155,6 +169,54 @@ const envSchema = z.object({
   // routine.
   RATE_LIMIT_EXPORT_PER_USER_MAX: z.coerce.number().int().positive().default(5),
   RATE_LIMIT_EXPORT_WINDOW_SECONDS: z.coerce.number().int().positive().default(86400),
+
+  // -- Hotel-facing Google Sheets mirror --------------------------------
+  // PostgreSQL remains authoritative. When enabled, a background task writes
+  // a privacy-limited, read-only snapshot; no request handler waits for Google.
+  GOOGLE_SHEETS_SYNC_ENABLED: z
+    .string()
+    .default('false')
+    .transform((value) => value === 'true'),
+  GOOGLE_SHEETS_SPREADSHEET_ID: optionalNonEmptyString,
+  GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: optionalEmail,
+  // Base64 avoids putting a multiline PEM value in .env/Compose. It is only an
+  // encoding and must still be supplied through the deployment secret store.
+  GOOGLE_SHEETS_PRIVATE_KEY_BASE64: optionalBase64,
+  GOOGLE_SHEETS_SYNC_INTERVAL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(86_400)
+    .default(300),
+}).superRefine((env, context) => {
+  const requiredWhenEnabled = [
+    ['GOOGLE_SHEETS_SPREADSHEET_ID', env.GOOGLE_SHEETS_SPREADSHEET_ID],
+    ['GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL', env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL],
+    ['GOOGLE_SHEETS_PRIVATE_KEY_BASE64', env.GOOGLE_SHEETS_PRIVATE_KEY_BASE64],
+  ] as const;
+
+  if (env.GOOGLE_SHEETS_SYNC_ENABLED) {
+    for (const [key, value] of requiredWhenEnabled) {
+      if (value === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'is required when GOOGLE_SHEETS_SYNC_ENABLED=true',
+        });
+      }
+    }
+  }
+
+  if (env.GOOGLE_SHEETS_PRIVATE_KEY_BASE64 !== undefined) {
+    const decoded = Buffer.from(env.GOOGLE_SHEETS_PRIVATE_KEY_BASE64, 'base64').toString('utf8');
+    if (!decoded.includes('-----BEGIN PRIVATE KEY-----')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['GOOGLE_SHEETS_PRIVATE_KEY_BASE64'],
+        message: 'must decode to a PEM PKCS#8 private key',
+      });
+    }
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;

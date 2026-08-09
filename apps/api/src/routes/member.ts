@@ -4,10 +4,8 @@ import { z } from 'zod';
 import { NotFoundError, RateLimitedError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
-import { logDeliveryOutcome } from '../notifications/code-sender.js';
-import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
+import { echoNoOtpForDevelopment } from '../security/dev-otp.js';
 import { normalizePhone } from '../security/phone.js';
-import { issueOtp, verifyOtp } from '../security/otp.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { issueRefreshToken } from '../security/refresh-tokens.js';
 import { scopeForMember, scopedWhere } from '../security/scope.js';
@@ -26,23 +24,27 @@ import { currentConsent } from './admin-members.js';
  *   phase 1  { claimCode, phone }                    → validates, sends an OTP
  *   phase 2  { claimCode, phone, otp, consent, … }   → completes the claim
  *
- * The claim code is required again in phase 2 and only consumed there, so a
- * phase-1 call that is never completed leaves the code usable — otherwise a
- * mistyped phone number would burn the member's invitation.
+ * ## One step, and why there is no second code
+ *
+ * The invitation code is emailed to the member. Receiving it is already proof
+ * that they control that mailbox — so sending a second code to the same mailbox
+ * proves the same fact twice, and two factors drawn from one channel are one
+ * factor wearing a disguise.
+ *
+ * What this gives up, stated plainly: a member can forward their invitation
+ * email to someone else, who can then activate the membership. The second code
+ * used to prevent that, because the reply went to the member's address rather
+ * than the friend's. That was judged not worth the friction at this stage — see
+ * DECISIONS.md. If membership sharing ever becomes a real problem, reinstating
+ * it is this file and one screen.
+ *
+ * The claim code is consumed only on success, so a mistyped phone number does
+ * not burn the member's invitation.
  */
-const claimPhaseOneSchema = z
+const claimSchema = z
   .object({
     claimCode: z.string().trim().min(1).max(64),
     phone: z.string().trim().min(1).max(32),
-  })
-  .strict();
-
-const claimPhaseTwoSchema = z
-  .object({
-    claimCode: z.string().trim().min(1).max(64),
-    phone: z.string().trim().min(1).max(32),
-    otp: z.string().trim().min(1).max(16),
-    email: z.string().trim().email().max(320).optional(),
     // §10 and wireframes screen 2 note 2: per channel, unticked by default.
     // Both are required so an omission is never silently read as consent.
     consent: z
@@ -79,8 +81,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
       throw new RateLimitedError(limit.retryAfterSeconds);
     }
 
-    const phaseTwo = claimPhaseTwoSchema.safeParse(request.body);
-    const parsed = phaseTwo.success ? phaseTwo.data : claimPhaseOneSchema.parse(request.body);
+    const parsed = claimSchema.parse(request.body);
 
     // Normalised before anything compares it, so 55550003 and +97455550003
     // are the same member rather than two.
@@ -156,54 +157,6 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    // ── Phase 1: issue the OTP ──────────────────────────────────────────
-    if (!phaseTwo.success) {
-      const issued = await issueOtp(app.prisma, body.phone);
-      echoOtpForDevelopment(app.log, env, body.phone, issued.code);
-
-      /**
-       * Stage 18 (Q6), and the awkward part of delivering activation codes by
-       * email rather than SMS.
-       *
-       * The member supplies their email in **phase 2** — screen 2 asks for it
-       * alongside the code. So at this moment the only address available is
-       * whatever the administrator recorded when creating the member. If that
-       * is null, the code is generated, stored, never delivered, and the member
-       * cannot activate.
-       *
-       * **Operational consequence: while the delivery channel is email, the
-       * administrator must record a member's email address at creation time.**
-       * Recorded in DECISIONS.md rather than worked around here, because the
-       * alternative — asking for the email before the claim code is verified —
-       * would let anyone holding a discarded invitation letter probe for valid
-       * codes while supplying their own address.
-       *
-       * Real SMS removes the problem entirely: the phone number is already in
-       * hand at phase 1. This is the clearest argument for treating SMTP as the
-       * interim measure it is.
-       */
-      const delivery = {
-        email: claimCode.member.email,
-        phone: body.phone,
-        code: issued.code,
-        purpose: 'activation' as const,
-      };
-      const outcome = await app.codeSender.send(delivery);
-      logDeliveryOutcome(app.log, app.codeSender, delivery, outcome);
-
-      return reply.code(200).send({
-        message: 'A verification code has been sent to that number.',
-      });
-    }
-
-    // ── Phase 2: verify the OTP and complete the claim ──────────────────
-    const otpResult = await verifyOtp(app.prisma, body.phone, phaseTwo.data.otp);
-    if (!otpResult.ok) {
-      return reply
-        .code(401)
-        .send({ error: 'invalid_code', message: 'Invalid or expired verification code.' });
-    }
-
     const claimed = await app.prisma.$transaction(async (tx) => {
       // R1 — atomic consumption. The WHERE clause carries `usedAt: null`, so
       // two concurrent activations with the same code cannot both match: the
@@ -223,7 +176,10 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
         data: {
           claimedAt: new Date(),
           phone: body.phone,
-          ...(phaseTwo.data.email ? { email: phaseTwo.data.email } : {}),
+          // Email is not taken from this request. The administrator recorded it
+          // when creating the member, it is where the invitation was just sent,
+          // and letting the activation payload change it would mean a forwarded
+          // invitation could also redirect every future passcode.
         },
         select: { id: true, memberNumber: true, fullName: true, tokenVersion: true },
       });
@@ -236,13 +192,13 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
           {
             memberId: member.id,
             channel: 'EMAIL',
-            granted: phaseTwo.data.consent.email,
+            granted: body.consent.email,
             wordingVersion: env.CONSENT_WORDING_VERSION,
           },
           {
             memberId: member.id,
             channel: 'SMS',
-            granted: phaseTwo.data.consent.sms,
+            granted: body.consent.sms,
             wordingVersion: env.CONSENT_WORDING_VERSION,
           },
         ],

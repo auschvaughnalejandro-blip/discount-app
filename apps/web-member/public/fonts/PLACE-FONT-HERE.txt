@@ -1,0 +1,7 @@
+Licensed webfonts are not committed. Drop the purchased file here as:
+
+  FairplexNarrowOT-Book.woff2   (preferred)
+  FairplexNarrowOT-Book.otf     (also accepted)
+
+The @font-face in src/theme.css already points at both names, so the wordmark
+picks it up on the next reload with no code change.

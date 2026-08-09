@@ -1,0 +1,1360 @@
+<title>Privilege Guest Program — System Overview</title>
+
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     Tokens — complete light palette on bare :root.
+     Neutrals carry a slight green-slate bias so they read as chosen
+     rather than inherited. The single accent is a bronze drawn from
+     the programme's own numbered card, and it is spent sparingly.
+     Type and space scales echo packages/ui/src/tokens.css, including
+     its deliberate no-webfont decision.
+     ══════════════════════════════════════════════════════════════════ */
+  :root {
+    --ground:      #faf9f7;
+    --surface:     #ffffff;
+    --surface-alt: #f2f1ec;
+    --ink:         #16211f;
+    --muted:       #59635f;
+    --faint:       #8b938f;
+    --rule:        #dedcd5;
+    --rule-strong: #c3c2b9;
+    --accent:      #8a6a2f;
+    --accent-soft: #f0e8d8;
+    --good:        #2c6a4d;
+    --good-soft:   #e2efe7;
+    --warn:        #8a6320;
+    --warn-soft:   #f6ecd9;
+    --risk:        #97382f;
+    --risk-soft:   #f7e6e3;
+
+    --font-sans:  ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+    --font-mono:  ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas, monospace;
+
+    --f-xs: 0.75rem;  --f-sm: 0.875rem; --f-md: 1rem;
+    --f-lg: 1.125rem; --f-xl: 1.375rem; --f-2xl: 1.75rem;
+    --f-3xl: 2.25rem; --f-4xl: 3rem;
+
+    --s-1: 0.25rem; --s-2: 0.5rem;  --s-3: 0.75rem; --s-4: 1rem;
+    --s-5: 1.25rem; --s-6: 1.5rem;  --s-8: 2rem;    --s-10: 2.5rem;
+    --s-12: 3rem;   --s-16: 4rem;   --s-20: 5rem;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #101413;
+      --surface:     #181d1c;
+      --surface-alt: #1e2523;
+      --ink:         #e8e7e1;
+      --muted:       #9aa4a0;
+      --faint:       #79837f;
+      --rule:        #2a3230;
+      --rule-strong: #3d4644;
+      --accent:      #d0a459;
+      --accent-soft: #2a2418;
+      --good:        #6fc094;
+      --good-soft:   #16261e;
+      --warn:        #d9a94f;
+      --warn-soft:   #2a2313;
+      --risk:        #e08277;
+      --risk-soft:   #2b1917;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #101413;
+    --surface:     #181d1c;
+    --surface-alt: #1e2523;
+    --ink:         #e8e7e1;
+    --muted:       #9aa4a0;
+    --faint:       #79837f;
+    --rule:        #2a3230;
+    --rule-strong: #3d4644;
+    --accent:      #d0a459;
+    --accent-soft: #2a2418;
+    --good:        #6fc094;
+    --good-soft:   #16261e;
+    --warn:        #d9a94f;
+    --warn-soft:   #2a2313;
+    --risk:        #e08277;
+    --risk-soft:   #2b1917;
+  }
+
+  /* ── Base ─────────────────────────────────────────────────────── */
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--f-md);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1180px;
+    margin-inline: auto;
+    padding: var(--s-8) var(--s-5) var(--s-20);
+  }
+
+  @media (min-width: 1080px) {
+    .page {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      gap: var(--s-16);
+      align-items: start;
+      padding-inline: var(--s-8);
+    }
+  }
+
+  /* ── Contents rail ────────────────────────────────────────────── */
+  .toc { display: none; }
+
+  @media (min-width: 1080px) {
+    .toc {
+      display: block;
+      position: sticky;
+      top: var(--s-8);
+      font-size: var(--f-sm);
+      border-inline-start: 1px solid var(--rule);
+      padding-inline-start: var(--s-4);
+    }
+    .toc-title {
+      font-family: var(--font-mono);
+      font-size: var(--f-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--faint);
+      margin: 0 0 var(--s-3);
+    }
+    .toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+    .toc a { color: var(--muted); text-decoration: none; display: flex; gap: var(--s-2); }
+    .toc a:hover, .toc a:focus-visible { color: var(--accent); }
+    .toc .n { font-family: var(--font-mono); font-size: var(--f-xs); color: var(--faint); padding-top: 0.15em; }
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────────── */
+  .masthead { border-block-end: 2px solid var(--ink); padding-block-end: var(--s-6); margin-block-end: var(--s-10); }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: var(--f-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin: 0 0 var(--s-4);
+  }
+
+  .masthead h1 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: clamp(2rem, 5vw, var(--f-4xl));
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+    margin: 0 0 var(--s-4);
+  }
+
+  .standfirst {
+    font-family: var(--font-serif);
+    font-size: var(--f-lg);
+    line-height: 1.55;
+    color: var(--muted);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-6);
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    color: var(--faint); margin-block-start: var(--s-6);
+  }
+  .meta b { color: var(--muted); font-weight: 500; }
+
+  /* ── Sections ─────────────────────────────────────────────────── */
+  section { margin-block-start: var(--s-16); scroll-margin-top: var(--s-6); }
+
+  h2 {
+    font-family: var(--font-serif);
+    font-size: var(--f-2xl);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 var(--s-5);
+    padding-block-end: var(--s-3);
+    border-block-end: 1px solid var(--rule-strong);
+    display: flex; align-items: baseline; gap: var(--s-4);
+  }
+  h2 .n {
+    font-family: var(--font-mono); font-size: var(--f-sm);
+    color: var(--accent); font-weight: 400; flex: none;
+  }
+
+  h3 {
+    font-family: var(--font-sans);
+    font-size: var(--f-lg); font-weight: 600;
+    letter-spacing: -0.005em; text-wrap: balance;
+    margin: var(--s-10) 0 var(--s-3);
+  }
+
+  h4 {
+    font-family: var(--font-mono);
+    font-size: var(--f-xs); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--muted);
+    margin: var(--s-6) 0 var(--s-2);
+  }
+
+  p, ul, ol { max-width: var(--measure); }
+  p { margin: 0 0 var(--s-4); }
+  ul, ol { margin: 0 0 var(--s-4); padding-inline-start: var(--s-5); }
+  li { margin-block-end: var(--s-2); }
+  li::marker { color: var(--faint); }
+
+  a { color: var(--accent); text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  strong { font-weight: 600; }
+  code {
+    font-family: var(--font-mono); font-size: 0.875em;
+    background: var(--surface-alt); color: var(--ink);
+    padding: 0.1em 0.35em; border-radius: 3px;
+    border: 1px solid var(--rule);
+  }
+
+  .lede {
+    font-family: var(--font-serif);
+    font-size: var(--f-lg); line-height: 1.6;
+    color: var(--muted); max-width: var(--measure);
+    margin: 0 0 var(--s-6);
+  }
+
+  /* ── Pull quote / key statement ───────────────────────────────── */
+  .keynote {
+    border-inline-start: 3px solid var(--accent);
+    background: var(--surface);
+    padding: var(--s-5) var(--s-6);
+    margin: var(--s-6) 0;
+    max-width: var(--measure);
+    font-family: var(--font-serif);
+    font-size: var(--f-lg);
+    line-height: 1.5;
+  }
+  .keynote p { margin: 0; max-width: none; }
+
+  /* ── Callout ──────────────────────────────────────────────────── */
+  .callout {
+    border: 1px solid var(--rule);
+    border-inline-start: 3px solid var(--muted);
+    background: var(--surface);
+    padding: var(--s-4) var(--s-5);
+    margin: var(--s-5) 0;
+    max-width: var(--measure);
+    font-size: var(--f-sm);
+  }
+  .callout > :last-child { margin-block-end: 0; }
+  .callout-title {
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin: 0 0 var(--s-2); color: var(--muted);
+  }
+  .callout.finding { border-inline-start-color: var(--warn); }
+  .callout.finding .callout-title { color: var(--warn); }
+  .callout.risk { border-inline-start-color: var(--risk); }
+  .callout.risk .callout-title { color: var(--risk); }
+
+  /* ── Tables ───────────────────────────────────────────────────── */
+  .scroller { overflow-x: auto; margin: var(--s-5) 0; border-block: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; font-size: var(--f-sm); min-width: 560px; }
+  caption {
+    text-align: start; font-family: var(--font-mono); font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint);
+    padding-block-end: var(--s-2);
+  }
+  th, td { text-align: start; padding: var(--s-3) var(--s-4); vertical-align: top; }
+  th {
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); font-weight: 600;
+    border-block-end: 1px solid var(--rule-strong);
+    white-space: nowrap;
+  }
+  tbody tr + tr td { border-block-start: 1px solid var(--rule); }
+  tbody tr:hover { background: var(--surface); }
+  td.num { font-variant-numeric: tabular-nums; text-align: end; white-space: nowrap; }
+  td code { white-space: nowrap; }
+
+  /* ── Status chips ─────────────────────────────────────────────── */
+  .chip {
+    display: inline-block; white-space: nowrap;
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    font-weight: 600; letter-spacing: 0.04em;
+    padding: 0.15em 0.55em; border-radius: 3px;
+    border: 1px solid transparent;
+  }
+  .chip.built   { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+  .chip.partial { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+  .chip.gap     { background: var(--risk-soft); color: var(--risk); border-color: var(--risk); }
+  .chip.na      { background: var(--surface-alt); color: var(--faint); border-color: var(--rule-strong); }
+
+  /* ── Stat row ─────────────────────────────────────────────────── */
+  .stats {
+    display: grid; gap: 1px;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    background: var(--rule); border: 1px solid var(--rule);
+    margin: var(--s-6) 0;
+  }
+  .stat { background: var(--surface); padding: var(--s-4) var(--s-5); }
+  .stat dt {
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--faint); margin: 0 0 var(--s-2);
+  }
+  .stat dd {
+    margin: 0; font-family: var(--font-serif);
+    font-size: var(--f-2xl); line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat dd small {
+    display: block; font-family: var(--font-sans);
+    font-size: var(--f-xs); color: var(--muted);
+    margin-block-start: var(--s-2); line-height: 1.4;
+  }
+
+  /* ── Numbered workflow steps ──────────────────────────────────── */
+  .steps { list-style: none; margin: var(--s-6) 0; padding: 0; max-width: none;
+           display: flex; flex-direction: column; gap: 0; counter-reset: step; }
+  .steps > li {
+    counter-increment: step;
+    display: grid; grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: var(--s-4); padding: var(--s-4) 0; margin: 0;
+    border-block-start: 1px solid var(--rule);
+  }
+  .steps > li:first-child { border-block-start: none; padding-block-start: 0; }
+  .steps > li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    color: var(--accent); padding-block-start: 0.35em;
+    font-variant-numeric: tabular-nums;
+  }
+  .steps h4 { margin: 0 0 var(--s-1); font-family: var(--font-sans);
+              font-size: var(--f-md); text-transform: none;
+              letter-spacing: 0; color: var(--ink); font-weight: 600; }
+  .steps p { margin: 0; max-width: var(--measure); }
+  .steps .actor {
+    font-family: var(--font-mono); font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--faint); display: block; margin-block-end: var(--s-1);
+  }
+
+  /* ── Figures ──────────────────────────────────────────────────── */
+  figure { margin: var(--s-8) 0; }
+  figure svg { display: block; width: 100%; height: auto; min-width: 540px; }
+  figcaption {
+    font-size: var(--f-sm); color: var(--muted);
+    margin-block-start: var(--s-3); max-width: var(--measure);
+  }
+  .dia-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .dia-title { font-family: var(--font-sans); font-size: 13px; font-weight: 600; }
+  .dia-note  { font-family: var(--font-sans); font-size: 11px; }
+
+  /* ── Two-column split for comparisons ─────────────────────────── */
+  .split {
+    display: grid; gap: var(--s-6);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin: var(--s-6) 0;
+  }
+  .panel {
+    border: 1px solid var(--rule); background: var(--surface);
+    padding: var(--s-5);
+  }
+  .panel h3 { margin-block-start: 0; }
+  .panel > :last-child { margin-block-end: 0; }
+  .panel p, .panel ul, .panel ol { max-width: none; }
+
+  /* ── Footer ───────────────────────────────────────────────────── */
+  .colophon {
+    margin-block-start: var(--s-20); padding-block-start: var(--s-5);
+    border-block-start: 2px solid var(--ink);
+    font-size: var(--f-sm); color: var(--muted);
+    max-width: var(--measure);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="page">
+
+  <nav class="toc" aria-label="Contents">
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#s1"><span class="n">1</span><span>The programme</span></a></li>
+      <li><a href="#s2"><span class="n">2</span><span>What was built</span></a></li>
+      <li><a href="#s3"><span class="n">3</span><span>Architecture</span></a></li>
+      <li><a href="#s4"><span class="n">4</span><span>Workflows</span></a></li>
+      <li><a href="#s5"><span class="n">5</span><span>Data model</span></a></li>
+      <li><a href="#s6"><span class="n">6</span><span>Security</span></a></li>
+      <li><a href="#s7"><span class="n">7</span><span>Current status</span></a></li>
+      <li><a href="#s8"><span class="n">8</span><span>Before launch</span></a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <header class="masthead">
+      <p class="eyebrow">System overview · Internal</p>
+      <h1>The Privilege Guest Program, as software</h1>
+      <p class="standfirst">
+        An invitation-only hotel benefits programme currently run on printed
+        letters and plastic cards, rebuilt as a guest app and an administrator
+        panel — with the confidentiality of the membership list treated as the
+        primary design constraint rather than a later addition.
+      </p>
+      <div class="meta">
+        <span><b>Property</b> Steigenberger Doha</span>
+        <span><b>Definition</b> Version 3</span>
+        <span><b>Stage</b> Pre-production</span>
+        <span><b>Compiled</b> 10 August 2026</span>
+      </div>
+    </header>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s1">
+      <h2><span class="n">1</span> The programme, and the problem</h2>
+
+      <p class="lede">
+        The Privilege Guest Program already exists. What does not exist is any
+        digital trace of it.
+      </p>
+
+      <p>
+        Membership is extended personally by the Cluster General Manager. A
+        member receives three things: an invitation letter, a numbered plastic
+        card printed with their name, and a printed sheet of benefits. The
+        reference card in the programme materials is number three — this is a
+        small, deliberately exclusive list.
+      </p>
+
+      <p>The benefits are a fixed discount schedule, not a points currency:</p>
+
+      <div class="scroller">
+        <table>
+          <caption>The benefit schedule as it stands on paper</caption>
+          <thead>
+            <tr><th>Category</th><th>Benefit</th><th>Constraints</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Food &amp; Beverage</td>
+              <td>25% off · 50% for children 6–12 · free for children 0–6</td>
+              <td>Maximum 6 people</td>
+            </tr>
+            <tr>
+              <td>Rooms &amp; Suites</td>
+              <td>30% off published bar rates</td>
+              <td>Subject to availability</td>
+            </tr>
+            <tr>
+              <td>Spa</td>
+              <td>40% off treatments · 25% off retail</td>
+              <td>Maximum 2 people</td>
+            </tr>
+            <tr>
+              <td>Meetings &amp; Events</td>
+              <td>25% off events · 20% off outside catering</td>
+              <td>Minimum 20 people</td>
+            </tr>
+            <tr>
+              <td>Lifestyle</td>
+              <td>30% off memberships · 25% off pool day pass · free valet &amp; wifi</td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Two problems, one on each side of the desk</h3>
+
+      <div class="split">
+        <div class="panel">
+          <h3>For the member</h3>
+          <p>
+            The benefits live on a sheet of paper that will be lost. There is no
+            way to check an entitlement while standing in a restaurant, and every
+            reservation means finding the right phone number on a printed table.
+          </p>
+        </div>
+        <div class="panel">
+          <h3>For the hotel</h3>
+          <p>
+            There is no data at all. Nobody can say how many members used the spa
+            discount last month, which benefit is most popular, whether the
+            programme earns its cost, or which members have never used anything.
+            The programme runs blind.
+          </p>
+        </div>
+      </div>
+
+      <div class="keynote">
+        <p>
+          The printed benefits sheet becomes an app, and the administrator panel
+          gives the hotel one place to manage membership, decide requests, and
+          record each use.
+        </p>
+      </div>
+
+      <h3>What this deliberately is not</h3>
+      <p>
+        The first version of the specification assumed a multi-brand coalition
+        with a points currency. The client narrowed it twice. The reductions are
+        recorded so they read as decisions rather than omissions:
+      </p>
+      <ul>
+        <li><strong>No points, ledger or balances.</strong> Nothing is earned; benefits are granted on joining.</li>
+        <li><strong>No tiers.</strong> One membership level, and every member sees the same schedule.</li>
+        <li><strong>No POS integration.</strong> The discount is applied on the hotel's own till, exactly as it is today. The system records that it happened; it never touches money.</li>
+        <li><strong>No payment processing, no public signup, no multi-property support.</strong></li>
+        <li><strong>No staff verification app.</strong> Version 3 removed the counter-facing surface entirely — see §2.</li>
+      </ul>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s2">
+      <h2><span class="n">2</span> What was built</h2>
+
+      <p class="lede">
+        Two applications, one shared backend. There is no third surface and no
+        second account type.
+      </p>
+
+      <div class="split">
+        <div class="panel">
+          <h3>The member guest app</h3>
+          <p>Phone-first, reachable from anywhere. Seven screens:</p>
+          <ul>
+            <li><strong>Activate</strong> — enter the invitation code from the letter</li>
+            <li><strong>Sign in / Verify</strong> — phone number, then a one-time passcode</li>
+            <li><strong>Offers</strong> — the full benefit list, nothing hidden behind a tap</li>
+            <li><strong>Offer detail</strong> — terms, party-size limits, tap-to-call reservations, and the button that asks to use it</li>
+            <li><strong>Profile</strong> — contact details, communication consent, redemption history</li>
+            <li><strong>Card</strong> — the digital equivalent of the plastic card: name and membership number</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>The administrator panel</h3>
+          <p>Desktop, and reachable only from the hotel network. Six sections:</p>
+          <ul>
+            <li><strong>Members</strong> — create, search, suspend, reinstate, reissue an invitation code</li>
+            <li><strong>Requests</strong> — the queue of members asking to use a benefit; approve or decline</li>
+            <li><strong>Redemptions</strong> — record a use, reverse a mistake, review the full log</li>
+            <li><strong>Benefits</strong> — edit percentages, terms, caps and reservation numbers; publish and unpublish</li>
+            <li><strong>Reports</strong> — usage by month, benefit and outlet; dormant and unclaimed members; CSV export</li>
+            <li><strong>Administrators</strong> — create accounts, suspend them, reset a lost second factor</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>The digital card carries no QR code</h3>
+      <p>
+        Earlier drafts specified a scannable, rotating credential and a
+        counter-staff verification page to scan it. Version 3 removed both. The
+        card now shows a name and a membership number, and entitlement is
+        established by an administrator deciding a request — not by a member
+        presenting a code that a machine trusts.
+      </p>
+      <div class="callout">
+        <p class="callout-title">Why this matters commercially</p>
+        <p>
+          A 40% spa discount is worth real money. A self-declared or
+          screenshot-forwardable credential would be worth stealing. Routing
+          every use through a named person who approves it means the discount is
+          never granted by software alone.
+        </p>
+      </div>
+
+      <h3>One account type on the hotel side</h3>
+      <p>
+        Manager, support and outlet-staff roles were specified in version 2 and
+        removed in version 3. Only named <strong>Administrator</strong> accounts
+        can sign in. The old role values survive in the database purely so that
+        historical records keep naming whoever performed an action; they are
+        forced suspended, hold no permissions, and cannot authenticate.
+      </p>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s3">
+      <h2><span class="n">3</span> How it is put together</h2>
+
+      <figure>
+        <div class="scroller" style="border: none;">
+          <svg viewBox="0 0 860 470" role="img" aria-labelledby="arch-title">
+            <title id="arch-title">System architecture: two clients reach a single API through an edge proxy that restricts the administrator surface to the hotel network</title>
+
+            <!-- Clients -->
+            <rect x="60" y="20" width="230" height="66" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="76" y="44" class="dia-title" fill="var(--ink)">Member guest app</text>
+            <text x="76" y="63" class="dia-note" fill="var(--muted)">React · phone · public internet</text>
+            <text x="76" y="78" class="dia-label" fill="var(--good)">anyone, anywhere</text>
+
+            <rect x="570" y="20" width="230" height="66" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="586" y="44" class="dia-title" fill="var(--ink)">Administrator panel</text>
+            <text x="586" y="63" class="dia-note" fill="var(--muted)">React · desktop</text>
+            <text x="586" y="78" class="dia-label" fill="var(--risk)">hotel network + VPN only</text>
+
+            <!-- arrows down to edge -->
+            <path d="M175 86 L175 118" stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)"/>
+            <path d="M685 86 L685 118" stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)"/>
+
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--rule-strong)"/>
+              </marker>
+              <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
+
+            <!-- Edge -->
+            <rect x="60" y="118" width="740" height="76" fill="var(--accent-soft)" stroke="var(--accent)"/>
+            <text x="76" y="142" class="dia-title" fill="var(--ink)">Caddy — the edge</text>
+            <text x="76" y="161" class="dia-note" fill="var(--muted)">Automatic TLS · HSTS · Content-Security-Policy · serves both apps · proxies the API</text>
+            <text x="76" y="182" class="dia-label" fill="var(--accent)">refuses /admin/* from outside the hotel network — the UI is not the control, this is</text>
+
+            <path d="M430 194 L430 226" stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)"/>
+
+            <!-- API -->
+            <rect x="60" y="226" width="740" height="104" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="76" y="250" class="dia-title" fill="var(--ink)">Fastify API — one process, both surfaces</text>
+            <text x="76" y="270" class="dia-note" fill="var(--muted)">Node 20 · TypeScript · Zod validation on every request body</text>
+
+            <rect x="76" y="284" width="220" height="32" fill="var(--surface-alt)" stroke="var(--rule)"/>
+            <text x="88" y="304" class="dia-label" fill="var(--ink)">authorization plugin</text>
+            <rect x="308" y="284" width="220" height="32" fill="var(--surface-alt)" stroke="var(--rule)"/>
+            <text x="320" y="304" class="dia-label" fill="var(--ink)">query scoping</text>
+            <rect x="540" y="284" width="244" height="32" fill="var(--surface-alt)" stroke="var(--rule)"/>
+            <text x="552" y="304" class="dia-label" fill="var(--ink)">audit + log redaction</text>
+
+            <path d="M300 330 L300 366" stroke="var(--rule-strong)" fill="none" marker-end="url(#ar)"/>
+            <path d="M620 330 L620 366" stroke="var(--accent)" fill="none" stroke-dasharray="4 3" marker-end="url(#ar-a)"/>
+
+            <!-- Data -->
+            <rect x="60" y="366" width="440" height="80" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="76" y="390" class="dia-title" fill="var(--ink)">PostgreSQL 16 — authoritative</text>
+            <text x="76" y="409" class="dia-note" fill="var(--muted)">Never exposed to the host or the internet</text>
+            <text x="76" y="429" class="dia-label" fill="var(--good)">app role denied UPDATE / DELETE on redemptions + audit</text>
+
+            <rect x="530" y="366" width="270" height="80" fill="var(--surface)" stroke="var(--rule)" stroke-dasharray="4 3"/>
+            <text x="546" y="390" class="dia-title" fill="var(--muted)">Google Sheets mirror</text>
+            <text x="546" y="409" class="dia-note" fill="var(--muted)">Optional · off by default · one-way</text>
+            <text x="546" y="429" class="dia-label" fill="var(--faint)">no names, phones or emails leave</text>
+          </svg>
+        </div>
+        <figcaption>
+          Both applications are served from the same origin as the API, so there
+          is no cross-origin request to allowlist. The administrator restriction
+          is enforced on the API path itself, not merely on the panel's hostname.
+        </figcaption>
+      </figure>
+
+      <div class="scroller">
+        <table>
+          <caption>The stack, and why each piece is there</caption>
+          <thead><tr><th>Layer</th><th>Technology</th><th>Reason</th></tr></thead>
+          <tbody>
+            <tr><td>Both clients</td><td>React + TypeScript, Vite</td><td>Static bundles; no server rendering to secure</td></tr>
+            <tr><td>API</td><td>Fastify 5 on Node 20</td><td>Route-level config hooks make deny-by-default enforceable at startup</td></tr>
+            <tr><td>Validation</td><td>Zod</td><td>Strict schemas — unknown fields are rejected, not ignored</td></tr>
+            <tr><td>Database access</td><td>Prisma 6</td><td>Parameterised queries throughout; no string-built SQL</td></tr>
+            <tr><td>Database</td><td>PostgreSQL 16</td><td>Exact decimal money, table-level privilege revocation, CHECK constraints</td></tr>
+            <tr><td>Edge</td><td>Caddy</td><td>Automatic certificate renewal, header policy, network restriction</td></tr>
+            <tr><td>Passwords</td><td>Argon2id</td><td>Memory-hard; parameters fixed in code, not configurable</td></tr>
+            <tr><td>Second factor</td><td>TOTP (otplib)</td><td>Offline and free; an emailed code would not be a second <em>factor</em></td></tr>
+            <tr><td>Tokens</td><td>JOSE / JWT</td><td>Algorithm pinned; audience separates the two surfaces</td></tr>
+            <tr><td>Passcode delivery</td><td>SMTP (email)</td><td>Interim — SMS was not provisioned; see §8</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        The repository is a single npm workspace: <code>apps/api</code>,
+        <code>apps/web-member</code>, <code>apps/web-admin</code>, and shared
+        packages for design tokens and types. One command
+        (<code>npm run dev</code>) starts all three.
+      </p>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s4">
+      <h2><span class="n">4</span> The workflows</h2>
+
+      <p class="lede">
+        Six flows carry the whole product. Everything else is a list or a form.
+      </p>
+
+      <h3>4.1 Bringing a member onto the app</h3>
+      <p>
+        The programme is invitation-only, so onboarding runs in the opposite
+        direction from a normal app — the hotel creates the account, and the
+        member claims it.
+      </p>
+
+      <ol class="steps">
+        <li>
+          <div>
+            <span class="actor">Administrator</span>
+            <h4>Create the member record</h4>
+            <p>Name, and optionally the phone number and email the hotel already holds. The system assigns the next membership number in sequence — <code>PG-0004</code>, and so on.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">System</span>
+            <h4>Generate a single-use invitation code</h4>
+            <p>160 bits of randomness, formatted in groups for a printed letter. It is shown to the administrator exactly once and stored only as a hash — it cannot be produced again, only reissued.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Hotel</span>
+            <h4>Deliver the invitation</h4>
+            <p>Printed on the letter alongside the physical card, or sent directly. The code expires after 30 days by default.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Member</span>
+            <h4>Activate</h4>
+            <p>Enter the code and a phone number. Where the hotel already recorded a number, the one supplied must match it. Consent is captured per channel, unticked by default.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">System</span>
+            <h4>Consume the code and open the session</h4>
+            <p>The code is marked used inside the same database transaction that activates the membership, so two simultaneous attempts cannot both succeed. The card appears.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="callout">
+        <p class="callout-title">Why single-use matters here</p>
+        <p>
+          The letter and the card both carry the membership number. A code that
+          could be reused would let anyone holding a discarded letter join the
+          programme. Reissuing a code invalidates the previous one, so a stray
+          copy stops working.
+        </p>
+      </div>
+
+      <h3>4.2 Signing in — the two paths</h3>
+
+      <div class="split">
+        <div class="panel">
+          <h3>A member</h3>
+          <ol>
+            <li>Enters their phone number</li>
+            <li>Receives a six-digit passcode, valid five minutes</li>
+            <li>Enters it — five wrong attempts and the code is dead</li>
+          </ol>
+          <p>
+            No password ever exists for a member, so none can be reused from
+            another breach. The response is identical whether or not the number
+            belongs to a member.
+          </p>
+        </div>
+        <div class="panel">
+          <h3>An administrator</h3>
+          <ol>
+            <li>Email and password (Argon2id, screened against breach lists)</li>
+            <li>A short-lived challenge is issued — <em>not</em> a session</li>
+            <li>A six-digit code from their authenticator app</li>
+          </ol>
+          <p>
+            A correct password alone yields nothing. First sign-in forces
+            enrolment; ten single-use recovery codes are shown once, at that
+            moment, and never again.
+          </p>
+        </div>
+      </div>
+
+      <h3>4.3 The main loop — request, decide, record</h3>
+      <p>
+        This is the flow the product exists for, and the one place where the
+        design is deliberately unusual: <strong>a member never grants themselves
+        anything.</strong>
+      </p>
+
+      <figure>
+        <div class="scroller" style="border: none;">
+          <svg viewBox="0 0 860 300" role="img" aria-labelledby="flow-title">
+            <title id="flow-title">Benefit request lifecycle: pending, then approved or declined, then fulfilled by a redemption</title>
+
+            <defs>
+              <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--rule-strong)"/>
+              </marker>
+            </defs>
+
+            <!-- Lane labels -->
+            <text x="14" y="58" class="dia-label" fill="var(--faint)">MEMBER</text>
+            <text x="14" y="150" class="dia-label" fill="var(--faint)">ADMIN</text>
+            <text x="14" y="248" class="dia-label" fill="var(--faint)">RECORD</text>
+            <line x1="0" y1="90" x2="860" y2="90" stroke="var(--rule)"/>
+            <line x1="0" y1="188" x2="860" y2="188" stroke="var(--rule)"/>
+
+            <!-- Member asks -->
+            <rect x="110" y="26" width="170" height="46" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="124" y="46" class="dia-title" fill="var(--ink)">Asks for a benefit</text>
+            <text x="124" y="63" class="dia-note" fill="var(--muted)">"Friday evening, four of us"</text>
+
+            <path d="M195 72 L195 116" stroke="var(--rule-strong)" fill="none" marker-end="url(#fa)"/>
+
+            <!-- Pending -->
+            <rect x="110" y="116" width="170" height="46" fill="var(--warn-soft)" stroke="var(--warn)"/>
+            <text x="124" y="136" class="dia-title" fill="var(--ink)">PENDING</text>
+            <text x="124" y="153" class="dia-note" fill="var(--muted)">in the queue, oldest first</text>
+
+            <path d="M280 139 L340 139" stroke="var(--rule-strong)" fill="none" marker-end="url(#fa)"/>
+
+            <!-- Decision -->
+            <rect x="348" y="106" width="170" height="66" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="362" y="130" class="dia-title" fill="var(--ink)">A person decides</text>
+            <text x="362" y="148" class="dia-note" fill="var(--muted)">named, timestamped,</text>
+            <text x="362" y="163" class="dia-note" fill="var(--muted)">reason recorded</text>
+
+            <path d="M518 126 L590 126" stroke="var(--rule-strong)" fill="none" marker-end="url(#fa)"/>
+            <path d="M518 152 L590 172" stroke="var(--rule-strong)" fill="none" marker-end="url(#fa)"/>
+
+            <!-- Approved / Declined -->
+            <rect x="598" y="104" width="150" height="42" fill="var(--good-soft)" stroke="var(--good)"/>
+            <text x="612" y="130" class="dia-title" fill="var(--ink)">APPROVED</text>
+
+            <rect x="598" y="158" width="150" height="42" fill="var(--risk-soft)" stroke="var(--risk)"/>
+            <text x="612" y="184" class="dia-title" fill="var(--ink)">DECLINED</text>
+
+            <path d="M673 146 L673 214" stroke="var(--rule-strong)" fill="none" marker-end="url(#fa)"/>
+
+            <!-- Redemption -->
+            <rect x="480" y="222" width="290" height="58" fill="var(--surface)" stroke="var(--rule-strong)"/>
+            <text x="496" y="244" class="dia-title" fill="var(--ink)">Redemption written — FULFILLED</text>
+            <text x="496" y="262" class="dia-note" fill="var(--muted)">rate snapshotted · immutable · one approval, once</text>
+
+            <text x="110" y="244" class="dia-note" fill="var(--muted)">A guest who simply turns up is still served —</text>
+            <text x="110" y="262" class="dia-note" fill="var(--muted)">that path records a redemption with no request behind it.</text>
+          </svg>
+        </div>
+        <figcaption>
+          The approval is permission for a discount to be given. The redemption
+          is the record that it was. They are separate rows, and only the second
+          one counts as a use.
+        </figcaption>
+      </figure>
+
+      <p>Four properties of this loop are enforced rather than assumed:</p>
+      <ul>
+        <li><strong>One open request per benefit.</strong> A member tapping twice does not put two identical rows in the queue for someone to approve twice.</li>
+        <li><strong>One decision.</strong> Two administrators working the queue simultaneously cannot both decide the same row; the second is told it has already been dealt with.</li>
+        <li><strong>One approval, spent once.</strong> The database holds a unique constraint linking an approval to at most one redemption — enforced by the schema, not by a handler remembering to check.</li>
+        <li><strong>Party-size limits are checked at recording.</strong> A spa redemption for three guests is refused, because the cap is two.</li>
+      </ul>
+
+      <h3>4.4 Recording a use, and correcting one</h3>
+      <p>
+        When a redemption is recorded, the discount percentage in force at that
+        moment is <strong>copied onto the row</strong>. It is never read back
+        from the benefit later.
+      </p>
+      <div class="keynote">
+        <p>
+          Changing the dining discount from 25% to 20% changes what members are
+          offered tomorrow. It does not rewrite what a member was given last
+          month, and it does not restate a report that has already been sent.
+        </p>
+      </div>
+      <p>
+        Redemptions cannot be edited or deleted — not by policy, but because the
+        database account the application uses has had <code>UPDATE</code> and
+        <code>DELETE</code> revoked on that table. A correction is a new
+        reversing row carrying a negated amount and pointing at the original,
+        attributed to whoever authorised it. Totals therefore net correctly
+        without any query needing to know about reversals.
+      </p>
+      <p>
+        Every recording carries a client-supplied idempotency key, so a retried
+        submission on a bad connection returns the original record rather than
+        creating a second one.
+      </p>
+
+      <h3>4.5 Changing a benefit without a deployment</h3>
+      <p>
+        The programme materials state that benefits are subject to change without
+        notice. That made editability the single most important configuration
+        requirement: every value a member sees is a database row, never a
+        constant in code.
+      </p>
+      <div class="callout">
+        <p class="callout-title">The test of success</p>
+        <p>
+          Changing the F&amp;B discount from 25% to 20% is a form field, not a
+          code change. Each edit increments a version number and records who made
+          it — "who changed the spa discount, and when" is answerable.
+        </p>
+      </div>
+
+      <h3>4.6 Reporting and export</h3>
+      <p>
+        The panel answers usage by month, by benefit and by outlet; average party
+        size; estimated discount value given; and the two lists the hotel cannot
+        currently produce at all — members who have never redeemed anything, and
+        members issued a card who never activated the app.
+      </p>
+      <p>
+        Export produces a CSV a person can open, containing membership numbers
+        rather than names. It is a separate permission, limited to five per
+        administrator per day, and every export is individually recorded.
+      </p>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s5">
+      <h2><span class="n">5</span> The data model</h2>
+
+      <p class="lede">
+        Eleven tables. The constraints on them carry as much of the design as the
+        application code does.
+      </p>
+
+      <div class="scroller">
+        <table>
+          <caption>Core tables and the rule each one enforces</caption>
+          <thead><tr><th>Table</th><th>Holds</th><th>The rule it enforces</th></tr></thead>
+          <tbody>
+            <tr><td><code>Member</code></td><td>Name, membership number, phone, status</td><td>Suspended, never deleted — deleting one destroys the history reporting depends on</td></tr>
+            <tr><td><code>ClaimCode</code></td><td>Hashed invitation code, expiry</td><td>Single use, consumed atomically; never derived from the printed membership number</td></tr>
+            <tr><td><code>StaffUser</code></td><td>Administrator accounts, encrypted TOTP secret</td><td>New accounts are always Administrator; legacy roles are forced suspended by a database CHECK</td></tr>
+            <tr><td><code>Benefit</code></td><td>Percentages, caps, terms, reservation numbers</td><td>Versioned and attributed on every edit; percentages constrained to 0–100</td></tr>
+            <tr><td><code>BenefitRequest</code></td><td>The ask, the decision, the fulfilment</td><td>One approval can be spent by at most one redemption — a unique constraint, not a check in code</td></tr>
+            <tr><td><code>Redemption</code></td><td>What was given, to whom, by whom, where</td><td>Immutable at the database level; carries the rate applied and the benefit version</td></tr>
+            <tr><td><code>ConsentRecord</code></td><td>Per channel, with wording version</td><td>Append-only — a withdrawal is a new row, so the original stays intact</td></tr>
+            <tr><td><code>AuditLog</code></td><td>Who did what, to which record, from where</td><td>Insert-only; the application cannot rewrite its own trail</td></tr>
+            <tr><td><code>RefreshToken</code></td><td>Hashed session tokens in families</td><td>Replaying a spent token revokes the entire family</td></tr>
+            <tr><td><code>OtpCode</code></td><td>Hashed sign-in passcodes</td><td>One live code per number; five attempts; five-minute expiry</td></tr>
+            <tr><td><code>MfaRecoveryCode</code></td><td>Hashed fallback codes</td><td>Marked used rather than deleted, so "which code, and when" stays answerable</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <p class="callout-title">A note in the schema worth quoting</p>
+        <p>
+          "There are no points, tiers, balances or earned currency in this
+          programme. If a <code>balance</code> column ever appears here, it is a
+          misreading of the specification."
+        </p>
+      </div>
+
+      <p>
+        Money is stored as integer minor units — fils — and never as a floating
+        point number. Percentages are exact decimals. The one place discount
+        value is computed twice (once in SQL for the dashboard, once per row for
+        the member's own history) is held to the same arithmetic by a test.
+      </p>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s6">
+      <h2><span class="n">6</span> Security</h2>
+
+      <p class="lede">
+        The membership list is the asset. Everything in this section follows from
+        that, not from a generic checklist.
+      </p>
+
+      <p>
+        The reference card in the programme materials is issued to a member of
+        the Qatari ruling family. A membership list of this kind is a record of
+        named, prominent individuals and their movements — when they dined, when
+        they visited the spa, how often they stay.
+      </p>
+
+      <div class="keynote">
+        <p>
+          That is not ordinary customer data. A leak would be a serious matter for
+          the hotel independent of any regulatory penalty — which is why
+          confidentiality controls here go beyond what a loyalty app would
+          normally carry.
+        </p>
+      </div>
+
+      <h3>6.1 Authorisation — deny by default, enforced at startup</h3>
+      <p>
+        Every route must declare which permission it requires. A route that
+        declares nothing does not fail at runtime with a 403 — it prevents the
+        server from starting at all.
+      </p>
+      <div class="callout">
+        <p class="callout-title">Why this is the strongest control in the system</p>
+        <p>
+          A wrapper you have to remember to call is exactly the control that fails
+          under deadline. Here, forgetting to declare a permission is not a hole
+          discovered in production; it is a server that will not boot. Public
+          endpoints exist, but they must say <code>'public'</code> explicitly —
+          the opt-out is greppable.
+        </p>
+      </div>
+      <p>
+        Permissions are listed exhaustively per role rather than by wildcard, so
+        adding a new permission to the catalogue never silently grants it to
+        anyone.
+      </p>
+
+      <h3>6.2 Scoping — the query, not the result</h3>
+      <p>
+        Records are filtered in the database <code>WHERE</code> clause, never
+        fetched and then checked. Loading a record first and testing it afterwards
+        leaks its existence through timing and error shape even when the response
+        is eventually a 404.
+      </p>
+      <p>
+        The scope combinator uses <code>AND</code> rather than an object spread —
+        a subtle but real distinction, because a spread would let a member's own
+        identifier silently overwrite the one they asked about, returning their own
+        record for any ID they tried. A dedicated test file
+        (<code>fetch-then-check.test.ts</code>) exists to hold this line.
+      </p>
+
+      <h3>6.3 Credentials</h3>
+      <div class="scroller">
+        <table>
+          <caption>How each secret is stored and checked</caption>
+          <thead><tr><th>Credential</th><th>Storage</th><th>Reasoning</th></tr></thead>
+          <tbody>
+            <tr><td>Administrator password</td><td>Argon2id — 64 MB, 3 iterations, plus a pepper held outside the database</td><td>Memory-hard and deliberately slow; parameters are constants, so misconfiguration cannot weaken them</td></tr>
+            <tr><td>Password screening</td><td>Minimum 12 characters, checked against Have I Been Pwned</td><td>Composition rules reliably produce <code>Password1!</code>; breach membership is what actually distinguishes a weak password. Only the first five characters of the hash leave the process</td></tr>
+            <tr><td>TOTP secret</td><td>AES-256-GCM encrypted before it reaches the database</td><td>A stolen database dump alone yields no working second factors</td></tr>
+            <tr><td>Recovery codes</td><td>Argon2id, same parameters as passwords</td><td>Password-equivalent credentials; being machine-generated does not lower the bar</td></tr>
+            <tr><td>Sign-in passcodes</td><td>HMAC-SHA256 with a server secret</td><td>A six-digit code is a 20-bit space — a slow hash buys nothing, but the HMAC stops a leaked table being matched offline</td></tr>
+            <tr><td>Invitation codes</td><td>SHA-256, 160 bits of entropy</td><td>Server-generated randomness cannot be brute-forced at any hash speed</td></tr>
+            <tr><td>Refresh tokens</td><td>SHA-256 of 256 random bits</td><td>Looked up by unique index, so no timing signal distinguishes a near miss</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Replay protection on the second factor</h4>
+      <p>
+        A TOTP code stays valid for roughly ninety seconds. The system records the
+        time period of the last code each account used and refuses anything at or
+        before it — so a code read over a shoulder cannot be used a second time
+        inside its own window. Member passcodes are single-use for the same
+        reason; a staff second factor should not be weaker.
+      </p>
+
+      <h3>6.4 Sessions and tokens</h3>
+      <ul>
+        <li><strong>Two audiences.</strong> A token minted for the member app is rejected by an administrator endpoint at the audience check, before it is inspected at all.</li>
+        <li><strong>Algorithm pinned.</strong> Verification is called with a fixed algorithm allowlist, so <code>alg: none</code> and algorithm-confusion attacks fail before the signature is examined.</li>
+        <li><strong>Short lifetimes.</strong> Ten minutes for the panel, thirty for the member app.</li>
+        <li><strong>Instant revocation.</strong> Every account carries a token version, checked on every request. Suspending a member or an administrator invalidates all their outstanding tokens immediately — they do not stay valid until expiry.</li>
+        <li><strong>Rotation with reuse detection.</strong> Refresh tokens are single-use and grouped into families. Presenting a spent one revokes the whole family and forces re-authentication, because a legitimate client never replays one.</li>
+        <li><strong>No token in browser storage.</strong> The refresh token lives in a cookie marked <code>httpOnly</code>, <code>Secure</code> and <code>SameSite=Strict</code>, scoped to the single endpoint that reads it. A test strips comments from every client source file and asserts no <code>localStorage</code>, <code>sessionStorage</code> or <code>document.cookie</code> use.</li>
+      </ul>
+
+      <h3>6.5 Confidentiality of the membership</h3>
+
+      <h4>Names never reach the logs</h4>
+      <p>
+        Two mechanisms, because either alone leaves a gap: the logger redacts
+        known paths, and a serialiser walks whatever it is handed and removes
+        anything <em>named</em> like personal data at any depth. That second layer
+        is what makes an accidental "log the whole member object" call safe —
+        enforced by a redaction layer rather than by convention.
+      </p>
+
+      <h4>Reports cannot be used to identify a single person</h4>
+      <p>
+        With a membership of dozens, a report filtered to one benefit, one outlet
+        and one week may describe exactly one individual. Any figure backed by
+        fewer than five distinct members returns "insufficient data" instead of a
+        number — and the cohort size itself is withheld too, since publishing
+        "3 members" is the same disclosure stated outright.
+      </p>
+
+      <h4>Exports carry numbers, not names</h4>
+      <p>
+        The CSV is the one artefact that leaves the system, and it identifies
+        members by membership number. It is a separate permission, rate-limited to
+        five per administrator per day, and both successful and throttled attempts
+        are recorded.
+      </p>
+
+      <h4>Health data is excluded by construction</h4>
+      <p>
+        Spa treatment records can imply health information. The redemption table
+        has no column for a treatment or description, and no endpoint accepts one
+        — only that a spa benefit was used.
+      </p>
+
+      <h3>6.6 Resistance to probing</h3>
+      <ul>
+        <li><strong>Account enumeration.</strong> Requesting a passcode returns the same response whether or not the number belongs to a member — on a membership this exclusive, confirming that a phone number is on the list is itself a disclosure.</li>
+        <li><strong>Timing.</strong> A sign-in against a non-existent account still runs a full Argon2 verification against a dummy hash, so it costs the same wall-clock time as a real one.</li>
+        <li><strong>Uniform failures.</strong> Unknown, expired, already-used and wrong-phone invitation codes all return one identical message. Which one it was is exactly what someone holding a discarded letter would want to learn.</li>
+        <li><strong>Rate limits</strong> on sign-in, passcode request and verification, activation, second-factor verification, and export — applied per IP <em>and</em> per identifier, so rotating IPs does not buy a fresh budget of guesses.</li>
+        <li><strong>Pagination caps</strong> so no endpoint can be coerced into returning the whole membership.</li>
+        <li><strong>No client-supplied SQL, ever.</strong> Report metrics and dimensions come from a server-side allowlist; an unknown name never reaches a query builder.</li>
+      </ul>
+
+      <h3>6.7 Integrity at the database level</h3>
+      <p>
+        The application connects as a role that is <em>not</em> the schema owner.
+        That role has had <code>UPDATE</code> and <code>DELETE</code> revoked on
+        redemptions, the audit log and consent records, and <code>DELETE</code>
+        revoked on members. Migrations run as the owner over a separate
+        connection, so the revocation cannot be undone by the migration that
+        creates the tables.
+      </p>
+      <div class="callout">
+        <p class="callout-title">Why the role split is the point</p>
+        <p>
+          An owner cannot be denied access to its own tables. Immutability only
+          means something because the application is not the owner — if both used
+          the same account, the guarantee would be decorative.
+        </p>
+      </div>
+
+      <h3>6.8 The audit trail</h3>
+      <p>
+        Thirty-eight distinct actions are recorded, including the ones a system
+        like this is usually missing: every member record viewed and by whom,
+        every export, every benefit change, every authorisation denial, every
+        refresh-token replay, and every approval or decline with the deciding
+        administrator named.
+      </p>
+      <p>
+        Audit metadata carries membership numbers, never names. A failed sign-in
+        against a non-existent account deliberately does not record the email
+        tried — otherwise the attacker's guesses would be written into the trail.
+      </p>
+
+      <h3>6.9 At the edge</h3>
+      <ul>
+        <li>Automatic TLS with two-year HSTS, preload-eligible</li>
+        <li>A strict Content-Security-Policy with no <code>unsafe-inline</code>; <code>frame-ancestors 'none'</code>, <code>object-src 'none'</code></li>
+        <li><code>X-Content-Type-Options: nosniff</code>, <code>Referrer-Policy: no-referrer</code>, camera/microphone/geolocation/payment denied</li>
+        <li>Server version banners removed</li>
+        <li>The database publishes no port — it is reachable only on the internal container network</li>
+        <li>The API container runs read-only, with <code>no-new-privileges</code></li>
+        <li>Administrator routes are refused from outside the hotel network on the API path, not just the panel's hostname</li>
+      </ul>
+
+      <h3>6.10 Control summary</h3>
+      <div class="scroller">
+        <table>
+          <caption>Thirty controls from the security specification, as verified against the code on 10 August 2026</caption>
+          <thead><tr><th>Control</th><th>State</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Argon2id with per-user salts and a pepper</td><td><span class="chip built">BUILT</span></td><td>Pepper in the environment, not a KMS</td></tr>
+            <tr><td>MFA on every administrator account</td><td><span class="chip built">BUILT</span></td><td>Mandatory; enrolment forced at first sign-in</td></tr>
+            <tr><td>Passcodes and invitation codes hashed, single-use, short-lived</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Constant-time comparison throughout</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Uniform responses and timings</td><td><span class="chip built">BUILT</span></td><td>Dummy hash keeps failed sign-ins the same cost</td></tr>
+            <tr><td>Token lifetimes, pinned algorithm, validated issuer and audience</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Token version checked; rotation with reuse detection</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>httpOnly / Secure / SameSite cookies</td><td><span class="chip built">BUILT</span></td><td>Implemented since the review was last written</td></tr>
+            <tr><td>No tokens in browser storage or URLs</td><td><span class="chip built">BUILT</span></td><td>Asserted by test</td></tr>
+            <tr><td>Every route declares a permission; undeclared routes fail at startup</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Queries scoped in <code>WHERE</code>; out-of-scope returns 404</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Authorisation matrix covered by tests</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td><code>UPDATE</code>/<code>DELETE</code> revoked on redemptions at database level</td><td><span class="chip built">BUILT</span></td><td>Verified against a real database</td></tr>
+            <tr><td>Idempotency keys on redemption creation</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Small-cohort suppression on all reporting</td><td><span class="chip built">BUILT</span></td><td>Minimum cohort of 5</td></tr>
+            <tr><td>No member names in application logs</td><td><span class="chip built">BUILT</span></td><td>Redaction layer, two mechanisms</td></tr>
+            <tr><td>Audit log separate and append-only</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Exports administrator-only, rate-limited, individually logged</td><td><span class="chip built">BUILT</span></td><td></td></tr>
+            <tr><td>Security headers and transport policy</td><td><span class="chip partial">PARTIAL</span></td><td>Configured at the edge; the API sets none of its own</td></tr>
+            <tr><td>Deletion by irreversible anonymisation</td><td><span class="chip partial">PARTIAL</span></td><td>Schema supports it; no endpoint exists yet</td></tr>
+            <tr><td>Pagination caps</td><td><span class="chip partial">PARTIAL</span></td><td>Export cap of 5,000 rows is high enough to be non-protective</td></tr>
+            <tr><td>Pepper and signing keys in a key management service</td><td><span class="chip gap">DEFERRED</span></td><td>Environment variables today</td></tr>
+            <tr><td>Key rotation with <code>kid</code> for rollover</td><td><span class="chip gap">DEFERRED</span></td><td>Rotating today invalidates every session at once</td></tr>
+            <tr><td>Real-time alerting</td><td><span class="chip gap">DEFERRED</span></td><td>Every event is recorded; nothing watches them</td></tr>
+            <tr><td>Data protection impact assessment</td><td><span class="chip gap">DEFERRED</span></td><td>Not an engineering task — see §8</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s7">
+      <h2><span class="n">7</span> Where the build stands</h2>
+
+      <dl class="stats">
+        <div class="stat">
+          <dt>API source</dt>
+          <dd>8,623<small>lines across 40 modules</small></dd>
+        </div>
+        <div class="stat">
+          <dt>Test suite</dt>
+          <dd>369<small>tests in 22 files</small></dd>
+        </div>
+        <div class="stat">
+          <dt>Passing</dt>
+          <dd>344<small>as run on 10 Aug 2026</small></dd>
+        </div>
+        <div class="stat">
+          <dt>Failing</dt>
+          <dd>25<small>one cause, described below</small></dd>
+        </div>
+      </dl>
+
+      <p>
+        The functional build is complete: both applications, all six workflows,
+        the reporting and export layer, and the administrator account management
+        added most recently. Twenty of twenty-two test files pass in full.
+      </p>
+
+      <h3>The 25 failing tests have a single cause</h3>
+      <p>
+        Every failure traces to one recently added guard. Member creation now
+        refuses a record with no email address when passcodes are delivered by
+        email — because such a member could never activate the app, and the
+        failure would otherwise surface days later at the guest's first attempt,
+        with nothing on the administrator's screen having suggested a problem.
+      </p>
+      <p>
+        The guard is correct and has its own passing test. Two older test files
+        create members without an email address and now receive a 400 where they
+        expect a 201; every assertion after that point in those files cascades.
+      </p>
+      <div class="callout finding">
+        <p class="callout-title">Finding · low severity, quick fix</p>
+        <p>
+          The fix is to add an email address to the member-creation helpers in
+          <code>member-lifecycle.test.ts</code> and
+          <code>acceptance-journey.test.ts</code>. No product code is wrong.
+          Until it is done, the suite reports red, which will hide the next real
+          regression.
+        </p>
+      </div>
+
+      <h3>Two other findings from this review</h3>
+
+      <div class="callout risk">
+        <p class="callout-title">Finding · would block a production start</p>
+        <p>
+          <code>docker-compose.prod.yml</code> still requires a
+          <code>VERIFICATION_SESSION_HMAC_SECRET</code> variable. That secret
+          belonged to the verification page, which version 3 removed — the
+          application no longer reads it, and it is not listed in
+          <code>.env.example</code>. Because the compose file marks it mandatory,
+          the production stack will refuse to start until the line is deleted or
+          the variable is set to a throwaway value.
+        </p>
+      </div>
+
+      <div class="callout finding">
+        <p class="callout-title">Finding · documentation drift</p>
+        <p>
+          <code>SECURITY-REVIEW.md</code> has fallen behind the code in three
+          places. It lists secure cookies as deferred (they are implemented), it
+          states that no security headers are configured (the edge configuration
+          sets a full policy), and it refers throughout to three client
+          applications and a verification page that no longer exist. The control
+          summary in §6.10 above reflects the code as it actually stands.
+        </p>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <section id="s8">
+      <h2><span class="n">8</span> What remains before launch</h2>
+
+      <p class="lede">
+        In the order I would take them.
+      </p>
+
+      <ol class="steps">
+        <li>
+          <div>
+            <span class="actor">Engineering · small</span>
+            <h4>Green the test suite and remove the stale production secret</h4>
+            <p>Both findings in §7. Hours, not days — but the second one is the difference between a deployment that starts and one that does not.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Decision · client</span>
+            <h4>Settle passcode delivery</h4>
+            <p>Sign-in codes currently go by <strong>email</strong>, because no SMS provider was provisioned. The programme's own materials say members are notified by their preferred channel, and a member who gave only a phone number cannot receive a code at all. This needs a provider and a budget line, not more code.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Decision · legal</span>
+            <h4>Hosting region and a data protection impact assessment</h4>
+            <p>Qatar's data protection law restricts transferring personal data outside the country, and failing to carry out an assessment carries an administrative fine of up to QAR 1,000,000 on its own — independent of any breach. Both are blocking for launch and neither is an engineering task.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Engineering · medium</span>
+            <h4>Alerting</h4>
+            <p>Repeated failed lookups, refresh-token replay, bulk export, out-of-hours administrative access and spikes in authorisation denials are all already recorded as distinct events. Nothing consumes them, which makes the audit trail forensic rather than preventive. A destination needs choosing.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Engineering · medium</span>
+            <h4>Key management and rotation</h4>
+            <p>The password pepper and the token signing key are environment variables. Moving them into a managed key service, and adding a key identifier so old tokens still verify during a rollover, retires the last of the deferred credential items.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Engineering · small</span>
+            <h4>An anonymisation endpoint</h4>
+            <p>A deletion request must be honoured by irreversibly severing the link to redemption history rather than removing rows, so aggregate reporting survives. The schema already supports this; the endpoint does not exist.</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <span class="actor">Decision · client</span>
+            <h4>Approve or drop the Google Sheets mirror</h4>
+            <p>An optional one-way export to a hotel-facing spreadsheet is built and disabled by default. It carries membership numbers, usage counts and benefit configuration, and deliberately excludes names, phone numbers, emails, request notes, consents and audit records. It is a standing bulk disclosure and should be an explicit decision rather than a default.</p>
+          </div>
+        </li>
+      </ol>
+
+      <h3>Questions still open with the client</h3>
+      <ul>
+        <li>Should the app cover the priority reservations and member-event invitations promised in the letter but absent from the benefits sheet?</li>
+        <li>Should staff record the bill amount at redemption? It is the only route to knowing what the programme costs — the field exists and is optional today.</li>
+        <li>Does membership expire or renew?</li>
+        <li>Who issues invitations, and is there an approval step?</li>
+        <li>Arabic as well as English? The layout was built with logical properties throughout so right-to-left is a single attribute rather than a second stylesheet, but no translation exists.</li>
+        <li>What are the three numbers you would check every month? The fastest way to confirm the reporting scope is right.</li>
+      </ul>
+    </section>
+
+    <div class="colophon">
+      <p>
+        Compiled 10 August 2026 by reading the source rather than the
+        documentation, and by running the test suite against a live database.
+        Where this document and the older markdown files in the repository
+        disagree, this one reflects the code as it stands.
+      </p>
+      <p>
+        No credentials, member records or configuration values appear anywhere in
+        this document.
+      </p>
+    </div>
+
+  </main>
+</div>

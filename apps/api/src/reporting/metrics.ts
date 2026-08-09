@@ -19,12 +19,18 @@ export const METRICS = {
   guests: Prisma.sql`coalesce(sum(r."partySize"), 0)::bigint`,
   distinct_members: Prisma.sql`count(distinct r."memberId")::bigint`,
   /**
-   * Integer minor units throughout: `billAmountMinor * discountPct / 100`,
+   * Integer minor units throughout: `billAmountMinor * discountPctApplied / 100`,
    * rounded to a whole minor unit at the end. No floating point anywhere in
    * the expression — `numeric` in PostgreSQL is exact decimal.
+   *
+   * The rate comes from the redemption, **not** from `b."discountPct"`. R14
+   * makes the benefit's percentage editable without a deployment, so joining to
+   * it here meant an administrator moving dining from 25% to 20% silently
+   * restated every month that had already been reported. A past month is a
+   * closed fact; it does not change because a future offer did.
    */
   est_value_minor: Prisma.sql`
-    coalesce(sum(round(r."billAmountMinor" * b."discountPct" / 100.0)), 0)::bigint
+    coalesce(sum(round(r."billAmountMinor" * r."discountPctApplied" / 100.0)), 0)::bigint
   `,
 } as const;
 

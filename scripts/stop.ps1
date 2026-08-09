@@ -25,7 +25,7 @@
 #>
 [CmdletBinding()]
 param(
-  [int[]]$Ports = @(3000, 5173, 5174, 5175)
+  [int[]]$Ports = @(3000, 5173, 5175)
 )
 
 $ErrorActionPreference = 'Stop'

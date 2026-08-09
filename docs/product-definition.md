@@ -1,7 +1,7 @@
 # Product Definition
 
 **Product:** Digital companion for the Steigenberger Doha Privilege Guest Program
-**Version:** 2 — revised after client confirmation
+**Version:** 3 — administrator-only hotel access confirmed
 **Status:** Draft for review
 
 ---
@@ -23,6 +23,13 @@ Version 1 assumed a multi-brand coalition with a points currency. The client has
 
 **What remains is a small, sharply defined product**, and the timeline shortens accordingly.
 
+Version 3 narrows the product again after direct client confirmation. There are
+exactly two user-facing applications: the member guest app and the administrator
+panel. Manager, support and outlet-staff accounts are not part of the product.
+Only named administrators can sign in to the hotel panel. Historical database
+role values may remain solely to preserve attribution on old records; they grant
+no access and are not shown in the product.
+
 ---
 
 # 1. What we are building
@@ -34,7 +41,9 @@ The Privilege Guest Program already exists. Members receive a printed letter, a 
 1. **A member app** — so a Privilege Guest can see their benefits, search them, and present their membership.
 2. **An admin dashboard** — so the hotel can manage members and see exactly which benefits are being used, by whom, and when.
 
-> **In one sentence:** the printed benefits sheet becomes an app, the plastic card becomes a scannable digital credential, and every use of a benefit becomes a record the hotel can see.
+> **In one sentence:** the printed benefits sheet becomes a member app, and the
+> administrator panel gives the hotel one secure place to manage membership,
+> approve benefit requests and record each use.
 
 ## The problem it solves
 
@@ -78,7 +87,6 @@ Additionally stated in the invitation letter, though absent from the benefits ta
 - Membership claim by invitation
 - Redemption capture and history
 - Admin dashboard: member management, redemption records, benefit editing
-- Staff verification page for applying and logging a benefit
 
 ## Out of scope
 
@@ -122,7 +130,7 @@ Straightforward text search across benefit names, categories and outlets. With f
 ## Profile
 
 - Member name and number
-- **The digital card** — the scannable credential
+- **The digital card** — the member's name and membership number
 - **Redemption history** — every benefit used, with date and outlet
 - Contact details, editable
 - Communication preferences
@@ -136,11 +144,9 @@ Redemption history matters more than it appears. It is the member's own record o
 
 The physical card stays; the app carries a digital equivalent.
 
-**What it shows:** member name, membership number, and a QR code.
-
-**What the QR code is:** an opaque member identifier with a signed, rotating timestamp. It identifies the member. It does not, by itself, authorise a discount — staff confirm entitlement against the member record before applying anything.
-
-**Why the rotation matters here more than usual.** These are high-value benefits — 40% off spa treatments, 30% off room rates. A static code that could be screenshotted and forwarded would be worth real money. The payload refreshes, so an old screenshot fails validation.
+**What it shows:** member name and membership number. There is no QR or
+staff-verification application. A member requests a benefit in the guest app;
+an administrator reviews and records it in the administrator panel.
 
 ---
 
@@ -148,33 +154,18 @@ The physical card stays; the app carries a digital equivalent.
 
 ## The flow
 
-1. Member requests a benefit — at a restaurant, spa reception, or when booking
-2. Staff open the **verification page** and scan the member's code, or type the membership number
-3. The page confirms: valid member, name, and the benefits they are entitled to
-4. Staff select the benefit applied and enter the party size
-5. Staff confirm. The redemption is recorded
-6. The discount is applied on the hotel's own till as it is today
+1. The member requests a benefit in the guest app.
+2. An administrator reviews the request in the administrator panel and approves
+   or declines it.
+3. The outlet applies the approved discount using its normal operating process.
+4. An administrator marks the request as used, selects the outlet and records
+   the redemption details.
 
 **The system records the redemption. It does not process the discount** — that stays where it already works.
-
-## The verification page
-
-Deliberately a **web page, not a separate application.** Staff open a URL on any device already behind the counter, sign in with their own account, and use it. No installation, no device procurement, no app store.
-
-It is part of the dashboard, not a fourth product.
 
 ## Party size
 
 Two benefits carry hard limits — maximum 6 for F&B, maximum 2 for spa. Party size is therefore a required field at redemption, not an optional note. Without it the limits are unenforceable and the dashboard cannot report accurately on programme cost.
-
-## Open question on the existing QR
-
-The client mentions an existing QR code for the offer. Two possibilities, and they lead to different builds:
-
-- **A code displayed at each outlet**, scanned by the member. Lighter — no staff page needed — but self-declared, and a 40% discount should not be self-declared.
-- **A code identifying the member**, scanned by staff. Matches the flow above.
-
-This needs confirming before development starts. The specification above assumes the second.
 
 ---
 
@@ -219,15 +210,12 @@ Because benefits are explicitly subject to change:
 
 **Test of success:** changing the F&B discount from 25% to 20% is a form field, not a code change.
 
-## Staff and roles
+## Administrators
 
-| Role | Access |
-|---|---|
-| **Administrator** | Everything: members, benefits, reports, staff accounts |
-| **Manager** | Members and reports; no benefit or staff configuration |
-| **Outlet staff** | Verification page only. Can look up the member in front of them. **No member list, no reports** |
-
-Outlet staff cannot browse the membership. Given who these members are, that restriction is not a formality.
+The hotel-facing product has one account type: **Administrator**. Named
+administrators can manage members, requests, redemptions, benefits, reports and
+other administrator accounts. There are no manager, support or outlet-staff
+logins, and there is no reduced staff panel.
 
 ---
 
@@ -256,7 +244,7 @@ The reference card in the programme materials is issued to a member of the Qatar
 
 Practical consequences, carried through into the security specification:
 
-- Outlet staff can retrieve only the member currently in front of them, never a list
+- Only named administrators can access hotel/member administration data
 - Every lookup and export is individually logged and attributed
 - Member names never appear in application logs
 - Exports are restricted to administrators and audited
@@ -267,7 +255,9 @@ Practical consequences, carried through into the security specification:
 # 10. Phasing
 
 **Phase 1 — Core**
-Member app with all four sections. Digital card. Claim flow. Verification page. Member management. Redemption capture and history. Basic reporting. Benefit editing.
+Member app with all four sections. Digital card. Claim flow. Administrator
+panel. Member and benefit-request management. Redemption capture and history.
+Basic reporting. Benefit editing.
 
 **Phase 2 — Refinement**
 Tap-to-call reservations. Push notifications for benefit changes and event invitations. Fuller reporting. Optional wallet pass.
@@ -279,7 +269,8 @@ In-app reservation requests. Member-event invitations and RSVPs. Integration wit
 
 # 11. Open questions
 
-1. **What does the existing QR code do?** Determines the redemption build.
+1. **Resolved:** there is no QR-based redemption flow; members request benefits
+   and administrators process them in the panel.
 2. **Should the app cover priority reservations and event invitations?** Both are promised in the letter but absent from the benefits sheet.
 3. **Should staff record the bill amount at redemption?** The only route to knowing what the programme costs.
 4. **How many members are there today, and what is the expected growth?** The reference card is number three.

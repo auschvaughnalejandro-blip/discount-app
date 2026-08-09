@@ -5,9 +5,8 @@ import { loadEnv, type Env } from './config/env.js';
 
 /** The three front ends, and the ports their dev servers use. */
 const FRONT_ENDS = [
-  { port: 5173, name: 'Member app (customers)' },
-  { port: 5174, name: 'Verification page (staff)' },
-  { port: 5175, name: 'Admin dashboard (owner)' },
+  { port: 5173, name: 'Member app (guests)' },
+  { port: 5175, name: 'Admin dashboard (the hotel)' },
 ] as const;
 
 function isPortOpen(port: number, host: string): Promise<boolean> {

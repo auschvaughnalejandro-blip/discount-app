@@ -32,6 +32,29 @@ const errorHandlerPlugin: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'invalid_request', message: 'Invalid request.' });
     }
 
+    /**
+     * A unique constraint the handler did not anticipate.
+     *
+     * Prisma raises P2002 when a write collides with a unique index. Left
+     * unmapped it becomes a 500, which reads as "the server is broken" when the
+     * truth is "that value is already taken" — and 500s are what people stop
+     * reporting because they assume nothing can be done.
+     *
+     * Handlers that can name the conflict should still check for it first and
+     * say which record holds the value; this is the backstop for the race
+     * between that check and the write, and for constraints nobody predicted.
+     * Deliberately generic: which field collided can be a disclosure on an
+     * endpoint that has no business confirming a value exists.
+     */
+    const code: unknown = (error as { code?: unknown }).code;
+    if (code === 'P2002') {
+      request.log.warn({ err: error }, 'unique constraint violated');
+      return reply.code(409).send({
+        error: 'already_exists',
+        message: 'That value is already in use.',
+      });
+    }
+
     // Fastify's own body parsing and validation errors carry a statusCode.
     const statusCode: unknown = (error as { statusCode?: unknown }).statusCode;
     if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {

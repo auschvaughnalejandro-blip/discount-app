@@ -22,7 +22,7 @@ import './mfa.css';
 interface Props {
   challengeToken: string;
   stage: 'enroll' | 'verify';
-  onSignedIn: (accessToken: string) => void;
+  onSignedIn: (tokens: { accessToken: string }) => void;
 }
 
 export default function MfaSignIn({ challengeToken, stage, onSignedIn }: Props) {
@@ -40,12 +40,12 @@ function Enroll({
   onSignedIn,
 }: {
   challengeToken: string;
-  onSignedIn: (accessToken: string) => void;
+  onSignedIn: (tokens: { accessToken: string }) => void;
 }) {
   const [setup, setSetup] = useState<{ otpauthUri: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
-  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [pendingToken, setPendingToken] = useState<{ accessToken: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -81,7 +81,9 @@ function Enroll({
        * acknowledge first.
        */
       setRecoveryCodes(result.recoveryCodes);
-      setPendingToken(result.accessToken);
+      // Only the access token: the refresh token arrived as an httpOnly cookie
+      // the browser now holds, and this code cannot see it.
+      setPendingToken({ accessToken: result.accessToken });
     } catch {
       setError('That code was not accepted.');
     } finally {
@@ -171,7 +173,7 @@ function Verify({
   onSignedIn,
 }: {
   challengeToken: string;
-  onSignedIn: (accessToken: string) => void;
+  onSignedIn: (tokens: { accessToken: string }) => void;
 }) {
   const [code, setCode] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
@@ -188,7 +190,7 @@ function Verify({
         challengeToken,
         useRecovery ? { recoveryCode } : { code },
       );
-      onSignedIn(result.accessToken);
+      onSignedIn(result);
     } catch {
       // Uniform message: the server does not distinguish a wrong code from an
       // expired challenge, and neither does this.

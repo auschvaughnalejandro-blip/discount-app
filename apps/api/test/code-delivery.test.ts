@@ -20,6 +20,7 @@ import {
   type CodeDelivery,
   type CodeSender,
 } from '../src/notifications/code-sender.js';
+import { messageBody } from '../src/notifications/smtp-sender.js';
 
 function delivery(overrides: Partial<CodeDelivery> = {}): CodeDelivery {
   return {
@@ -122,5 +123,47 @@ describe('a sender that fails does not change what the caller can observe', () =
     };
 
     await expect(hostile.send(delivery())).resolves.toMatchObject({ delivered: false });
+  });
+});
+
+describe('member lifecycle email content', () => {
+  it.each([
+    ['request-submitted', 'request was received'],
+    ['request-approved', 'request was approved'],
+    ['request-declined', 'Update on your'],
+    ['redemption-recorded', 'benefit was recorded'],
+  ] as const)('builds a %s message', (purpose, subjectFragment) => {
+    const message = messageBody(
+      {
+        email: 'member@example.com',
+        phone: '+97455550003',
+        purpose,
+        benefitTitle: 'Spa & Recreation',
+        reason: 'Please reserve in advance.',
+        outletName: 'The Spa',
+        discountPct: '20',
+        savedMinor: 12_345,
+      },
+      5,
+    );
+
+    expect(message.subject).toContain(subjectFragment);
+    expect(message.text).toContain('Spa & Recreation');
+    expect(message.text).not.toContain('member@example.com');
+    expect(message.text).not.toContain('+97455550003');
+  });
+
+  it('formats recorded savings as QAR', () => {
+    const message = messageBody(
+      {
+        email: 'member@example.com',
+        phone: '+97455550003',
+        purpose: 'redemption-recorded',
+        benefitTitle: 'F&B Outlets',
+        savedMinor: 12_345,
+      },
+      5,
+    );
+    expect(message.text).toMatch(/QAR\s*123\.45/);
   });
 });

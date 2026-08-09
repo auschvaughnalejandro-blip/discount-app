@@ -46,13 +46,8 @@ export function scopedWhere<T extends object>(base: T, scope: T): T {
 }
 
 /**
- * Members visible to this principal.
- *
- * `OUTLET_STAFF` resolves nothing here by design. They may act only on the
- * member currently in front of them, and that binding is a short-lived
- * verification session (security-implementation.md §5) built in Stage 7 —
- * which will pass the resolved member id explicitly rather than widening
- * this scope. Until then the fail-closed answer is the correct one.
+ * Members visible to this principal. Historical staff roles resolve nothing;
+ * only an administrator reaches the dashboard.
  */
 export function scopeForMember(principal: Principal): Prisma.MemberWhereInput {
   if (principal.subjectType === 'MEMBER') {
@@ -61,8 +56,6 @@ export function scopeForMember(principal: Principal): Prisma.MemberWhereInput {
 
   switch (principal.role) {
     case 'ADMINISTRATOR':
-    case 'MANAGER':
-    case 'SUPPORT':
       return {};
     default:
       return MATCHES_NOTHING;
@@ -78,23 +71,34 @@ export function scopeForRedemption(principal: Principal): Prisma.RedemptionWhere
 
   switch (principal.role) {
     case 'ADMINISTRATOR':
-    case 'MANAGER':
       return {};
-    case 'OUTLET_STAFF':
-      // Scoped to the one outlet the account is bound to. The database CHECK
-      // constraint from Stage 1 guarantees outletId is set for this role, so
-      // the fallback below is unreachable in practice — but an unscoped
-      // fragment here would expose every outlet's traffic, so it fails closed
-      // rather than trusting that.
-      return principal.outletId ? { outletId: principal.outletId } : MATCHES_NOTHING;
     default:
       return MATCHES_NOTHING;
   }
 }
 
 /**
- * Benefits visible to this principal. Members see published benefits only
- * (Stage 5); staff who can manage them see everything.
+ * Benefit requests visible to this principal.
+ *
+ * There is no counter application. Historical staff roles resolve nothing.
+ */
+export function scopeForBenefitRequest(principal: Principal): Prisma.BenefitRequestWhereInput {
+  if (principal.subjectType === 'MEMBER') {
+    // A member reads their own requests and nobody else's.
+    return { memberId: principal.subjectId };
+  }
+
+  switch (principal.role) {
+    case 'ADMINISTRATOR':
+      return {};
+    default:
+      return MATCHES_NOTHING;
+  }
+}
+
+/**
+ * Benefits visible to this principal. Members see published benefits only;
+ * administrators see everything and historical staff roles see nothing.
  */
 export function scopeForBenefit(principal: Principal): Prisma.BenefitWhereInput {
   if (principal.subjectType === 'MEMBER') {
@@ -103,9 +107,8 @@ export function scopeForBenefit(principal: Principal): Prisma.BenefitWhereInput 
 
   switch (principal.role) {
     case 'ADMINISTRATOR':
-    case 'MANAGER':
       return {};
     default:
-      return { published: true };
+      return MATCHES_NOTHING;
   }
 }

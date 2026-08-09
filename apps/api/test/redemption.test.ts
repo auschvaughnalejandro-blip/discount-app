@@ -7,7 +7,11 @@
  *   - the same idempotency key twice creates one row, returns the original
  *   - reversal leaves the original row byte-identical
  *   - a member cannot read another member's redemptions
- *   - outlet_staff cannot list redemptions across members
+ *   - retired staff account types cannot enter redemption routes
+ *
+ * Recording moved to `POST /admin/redemptions` when the counter application was
+ * removed: an administrator marks a benefit used, naming the outlet, because
+ * they are at a desk rather than standing in one.
  */
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
@@ -16,10 +20,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../src/app.js';
 import { loadEnv, type Env } from '../src/config/env.js';
-import { issueIdentityCode } from '../src/security/identity-codes.js';
 import { resetRateLimits } from '../src/security/rate-limit.js';
 import { issueAccessToken } from '../src/security/tokens.js';
-import { issueVerificationSession } from '../src/security/verification-session.js';
 
 const ownerUrl = process.env['DATABASE_MIGRATION_URL'];
 if (!ownerUrl) {
@@ -30,13 +32,13 @@ let app: FastifyInstance;
 let env: Env;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
-let staffToken: string;
 let adminToken: string;
+/** A retired historical account type, used here only to prove it cannot authenticate. */
+let outletStaffToken: string;
 let memberToken: string;
 let otherMemberToken: string;
 
 let memberId: string;
-let memberNumber: string;
 let otherMemberId: string;
 let spaBenefitId: string;
 let eventsBenefitId: string;
@@ -49,15 +51,7 @@ function key(label: string): string {
   return `test-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-let outletStaffId: string;
 
-/**
- * A verification session bound to the outlet-staff account and the member,
- * as POST /verify/resolve would have issued moments earlier (§5).
- */
-function session(forMemberId: string): string {
-  return issueVerificationSession(outletStaffId, forMemberId);
-}
 
 beforeAll(async () => {
   env = loadEnv();
@@ -67,15 +61,13 @@ beforeAll(async () => {
   const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
     where: { role: 'OUTLET_STAFF' },
   });
-  spaOutletId = outletStaff.outletId ?? '';
-  outletStaffId = outletStaff.id;
-  staffToken = await issueAccessToken({
+  spaOutletId = (await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } })).id;
+  outletStaffToken = await issueAccessToken({
     issuer: env.JWT_ISSUER,
     audience: env.JWT_AUDIENCE_STAFF,
     subject: outletStaff.id,
     subjectType: 'STAFF',
     role: 'OUTLET_STAFF',
-    outletId: spaOutletId,
     tokenVersion: outletStaff.tokenVersion,
     ttlSeconds: 900,
   });
@@ -97,7 +89,6 @@ beforeAll(async () => {
     where: { memberNumber: 'PG-0003' },
   });
   memberId = member.id;
-  memberNumber = member.memberNumber;
   memberToken = await issueAccessToken({
     issuer: env.JWT_ISSUER,
     audience: env.JWT_AUDIENCE_MEMBER,
@@ -147,10 +138,10 @@ afterAll(async () => {
 describe('R5 — party size must not exceed maxGuests', () => {
   it('rejects a spa redemption with 3 guests, where the cap is 2', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 3,
@@ -170,10 +161,10 @@ describe('R5 — party size must not exceed maxGuests', () => {
 
   it('accepts a spa redemption with 2 guests', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 2,
@@ -186,10 +177,10 @@ describe('R5 — party size must not exceed maxGuests', () => {
 
   it('rejects a dining redemption with 7 guests, where the cap is 6', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: fnbBenefitId,
         partySize: 7,
@@ -207,10 +198,10 @@ describe('R5 — party size must not exceed maxGuests', () => {
 
     try {
       const response = await request(app.server)
-        .post('/verify/redemptions')
-        .set('Authorization', `Bearer ${staffToken}`)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
-          verificationSession: session(memberId),
+          outletId: spaOutletId,
         memberId,
           benefitId: spaBenefitId,
           partySize: 3,
@@ -227,10 +218,10 @@ describe('R5 — party size must not exceed maxGuests', () => {
 describe('R6 — party size must meet minGuests where set', () => {
   it('rejects an events redemption with 15 guests, where the minimum is 20', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: eventsBenefitId,
         partySize: 15,
@@ -244,10 +235,10 @@ describe('R6 — party size must meet minGuests where set', () => {
 
   it('accepts an events redemption with 20 guests', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: eventsBenefitId,
         partySize: 20,
@@ -259,9 +250,9 @@ describe('R6 — party size must meet minGuests where set', () => {
 
   it('requires a party size at all when the benefit constrains it', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ verificationSession: session(memberId), memberId, benefitId: spaBenefitId, idempotencyKey: key('spa-missing') });
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ outletId: spaOutletId, memberId, benefitId: spaBenefitId, idempotencyKey: key('spa-missing') });
 
     expect(response.status).toBe(422);
     expect(response.body.error).toBe('party_size_required');
@@ -286,11 +277,11 @@ describe('R4 — only an ACTIVE member may have a benefit recorded', () => {
     try {
       // A redemption recorded while active.
       const before = await request(app.server)
-        .post('/verify/redemptions')
-        .set('Authorization', `Bearer ${staffToken}`)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
-          verificationSession: session(suspendable.id),
-          memberId: suspendable.id,
+          outletId: spaOutletId,
+        memberId: suspendable.id,
           benefitId: spaBenefitId,
           partySize: 1,
           idempotencyKey: key('susp-before'),
@@ -304,11 +295,11 @@ describe('R4 — only an ACTIVE member may have a benefit recorded', () => {
 
       // The Stage 4 half of this criterion, now completable.
       const after = await request(app.server)
-        .post('/verify/redemptions')
-        .set('Authorization', `Bearer ${staffToken}`)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send({
-          verificationSession: session(suspendable.id),
-          memberId: suspendable.id,
+          outletId: spaOutletId,
+        memberId: suspendable.id,
           benefitId: spaBenefitId,
           partySize: 1,
           idempotencyKey: key('susp-after'),
@@ -335,8 +326,8 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
   it('creates one row and returns the original on a repeat', async () => {
     const idempotencyKey = key('idem');
     const payload = {
-      verificationSession: session(memberId),
-      memberId,
+      outletId: spaOutletId,
+        memberId,
       benefitId: spaBenefitId,
       partySize: 2,
       billAmountMinor: 45_000,
@@ -344,15 +335,15 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
     };
 
     const first = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send(payload);
     expect(first.status).toBe(201);
     expect(first.body.idempotent).toBe(false);
 
     const second = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send(payload);
     expect(second.status).toBe(200);
     expect(second.body.idempotent).toBe(true);
@@ -365,8 +356,8 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
   it('survives two identical submissions in flight at once', async () => {
     const idempotencyKey = key('idem-race');
     const payload = {
-      verificationSession: session(memberId),
-      memberId,
+      outletId: spaOutletId,
+        memberId,
       benefitId: spaBenefitId,
       partySize: 1,
       idempotencyKey,
@@ -374,12 +365,12 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
 
     const [a, b] = await Promise.all([
       request(app.server)
-        .post('/verify/redemptions')
-        .set('Authorization', `Bearer ${staffToken}`)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send(payload),
       request(app.server)
-        .post('/verify/redemptions')
-        .set('Authorization', `Bearer ${staffToken}`)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
         .send(payload),
     ]);
 
@@ -394,14 +385,14 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
     const idempotencyKey = key('idem-conflict');
 
     await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ verificationSession: session(memberId), memberId, benefitId: spaBenefitId, partySize: 1, idempotencyKey });
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ outletId: spaOutletId, memberId, benefitId: spaBenefitId, partySize: 1, idempotencyKey });
 
     const conflicting = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ verificationSession: session(memberId), memberId, benefitId: fnbBenefitId, partySize: 1, idempotencyKey });
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ outletId: spaOutletId, memberId, benefitId: fnbBenefitId, partySize: 1, idempotencyKey });
 
     // A retry returns the original; a different payload under the same key is
     // a client bug, and silently returning the original would hide it.
@@ -414,10 +405,10 @@ describe('R8 — redemption creation is idempotent by client-supplied key', () =
 describe('R7 — reversal leaves the original untouched', () => {
   it('creates a new reversing row and does not modify the original', async () => {
     const created = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 2,
@@ -450,10 +441,10 @@ describe('R7 — reversal leaves the original untouched', () => {
 
   it('refuses to reverse the same redemption twice', async () => {
     const created = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 1,
@@ -475,141 +466,36 @@ describe('R7 — reversal leaves the original untouched', () => {
 
   it('is administrator-only', async () => {
     const created = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 1,
         idempotencyKey: key('rev-authz'),
       });
 
+    // Historical non-administrator accounts cannot authenticate, including
+    // for reversal of a permanent record.
     const attempt = await request(app.server)
       .post(`/admin/redemptions/${created.body.id}/reverse`)
-      .set('Authorization', `Bearer ${staffToken}`)
+      .set('Authorization', `Bearer ${outletStaffToken}`)
       .send({ reason: 'nope', idempotencyKey: key('rev-authz-2') });
 
-    expect(attempt.status).toBe(403);
+    expect(attempt.status).toBe(401);
   });
 });
 
 // ── Resolution ─────────────────────────────────────────────────────────────
 
-describe('R12 — lookup requires an exact number or a scanned payload', () => {
-  it('resolves by exact membership number', async () => {
-    const response = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: memberNumber });
-
-    expect(response.status).toBe(200);
-    expect(response.body.member.memberNumber).toBe(memberNumber);
-    expect(response.body.member.valid).toBe(true);
-    expect(response.body.entitlements.length).toBeGreaterThan(0);
-  });
-
-  it('resolves by scanned identity payload', async () => {
-    const response = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ payload: issueIdentityCode(memberId) });
-
-    expect(response.status).toBe(200);
-    expect(response.body.member.id).toBe(memberId);
-  });
-
-  it('rejects a stale payload', async () => {
-    const stale = issueIdentityCode(memberId, new Date(Date.now() - 48 * 60 * 60 * 1000));
-
-    const response = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ payload: stale });
-
-    expect(response.status).toBe(404);
-  });
-
-  it('does not accept a partial membership number', async () => {
-    const partial = memberNumber.slice(0, 4);
-
-    const response = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: partial });
-
-    // No prefix matching, no wildcard — that would be a search endpoint.
-    expect(response.status).toBe(404);
-  });
-
-  it('requires exactly one of payload or membershipNumber', async () => {
-    const both = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: memberNumber, payload: issueIdentityCode(memberId) });
-    expect(both.status).toBe(400);
-
-    const neither = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({});
-    expect(neither.status).toBe(400);
-  });
-
-  it('shows a suspended member as invalid before any benefit can be chosen', async () => {
-    const suspended = await ownerPrisma.member.create({
-      data: {
-        memberNumber: `PG-INV-${Date.now()}`,
-        fullName: 'Invalid Display Test',
-        status: 'SUSPENDED',
-        joinedAt: new Date(),
-        claimedAt: new Date(),
-        createdByUserId: 'seed-staff-administrator',
-      },
-    });
-
-    try {
-      const response = await request(app.server)
-        .post('/verify/resolve')
-        .set('Authorization', `Bearer ${staffToken}`)
-        .send({ membershipNumber: suspended.memberNumber });
-
-      expect(response.status).toBe(200);
-      expect(response.body.member.valid).toBe(false);
-      expect(response.body.member.status).toBe('SUSPENDED');
-    } finally {
-      await ownerPrisma.member.delete({ where: { id: suspended.id } });
-    }
-  });
-
-  it('logs a failed lookup', async () => {
-    const before = await ownerPrisma.auditLog.count({
-      where: { action: 'verification.lookup.failure' },
-    });
-
-    await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: 'PG-9999' });
-
-    const after = await ownerPrisma.auditLog.count({
-      where: { action: 'verification.lookup.failure' },
-    });
-
-    // A run of these against non-existent numbers is someone probing (§5).
-    expect(after).toBe(before + 1);
-  });
-});
-
-// ── Isolation ──────────────────────────────────────────────────────────────
-
 describe('a member cannot read another member’s redemptions', () => {
   it('returns only the caller’s own history', async () => {
     await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 1,
@@ -643,13 +529,28 @@ describe('a member cannot read another member’s redemptions', () => {
   });
 });
 
-describe('R11 — outlet_staff cannot list redemptions across members', () => {
-  it('refuses the admin redemption log', async () => {
+describe('retired outlet-staff accounts cannot access redemptions', () => {
+  it('refuses the administrator redemption log', async () => {
     const response = await request(app.server)
       .get('/admin/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`);
+      .set('Authorization', `Bearer ${outletStaffToken}`);
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
+  });
+
+  it('cannot record a redemption either, now that it holds nothing', async () => {
+    const response = await request(app.server)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${outletStaffToken}`)
+      .send({
+        outletId: spaOutletId,
+        memberId,
+        benefitId: spaBenefitId,
+        partySize: 1,
+        idempotencyKey: key('outlet-staff-record'),
+      });
+
+    expect(response.status).toBe(401);
   });
 
   it('shows an administrator every redemption, attributed to the staff member', async () => {
@@ -666,126 +567,13 @@ describe('R11 — outlet_staff cannot list redemptions across members', () => {
   });
 });
 
-describe('§5 — a redemption must be bound to a verification session', () => {
-  it('refuses to record without one', async () => {
-    const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        memberId,
-        benefitId: spaBenefitId,
-        partySize: 1,
-        idempotencyKey: key('no-session'),
-      });
-
-    expect(response.status).toBe(400);
-  });
-
-  it('refuses a session issued for a different member', async () => {
-    // The attack this closes: resolve one member you are entitled to see,
-    // then record against another whose id you happen to know.
-    const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        verificationSession: session(otherMemberId),
-        memberId,
-        benefitId: spaBenefitId,
-        partySize: 1,
-        idempotencyKey: key('wrong-member'),
-      });
-
-    expect(response.status).toBe(403);
-    expect(response.body.error).toBe('verification_session_invalid');
-  });
-
-  it('refuses a session issued to a different staff account', async () => {
-    const otherStaff = await ownerPrisma.staffUser.findUniqueOrThrow({
-      where: { email: 'admin@pgp.test' },
-    });
-
-    const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        verificationSession: issueVerificationSession(otherStaff.id, memberId),
-        memberId,
-        benefitId: spaBenefitId,
-        partySize: 1,
-        idempotencyKey: key('wrong-staff'),
-      });
-
-    expect(response.status).toBe(403);
-  });
-
-  it('refuses an expired session', async () => {
-    const stale = issueVerificationSession(
-      outletStaffId,
-      memberId,
-      new Date(Date.now() - (env.VERIFICATION_SESSION_TTL_SECONDS + 60) * 1000),
-    );
-
-    const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        verificationSession: stale,
-        memberId,
-        benefitId: spaBenefitId,
-        partySize: 1,
-        idempotencyKey: key('stale-session'),
-      });
-
-    expect(response.status).toBe(403);
-  });
-
-  it('refuses a forged session', async () => {
-    const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        verificationSession: `vs1.${outletStaffId}.${memberId}.${Math.floor(Date.now() / 1000)}.forged`,
-        memberId,
-        benefitId: spaBenefitId,
-        partySize: 1,
-        idempotencyKey: key('forged-session'),
-      });
-
-    expect(response.status).toBe(403);
-  });
-
-  it('accepts the session that resolve actually issued', async () => {
-    // End to end through both endpoints, as the verification page does it.
-    const resolved = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: memberNumber });
-
-    expect(resolved.status).toBe(200);
-    expect(resolved.body.verificationSession).toBeTruthy();
-
-    const recorded = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({
-        verificationSession: resolved.body.verificationSession,
-        memberId: resolved.body.member.id,
-        benefitId: spaBenefitId,
-        partySize: 2,
-        idempotencyKey: key('end-to-end'),
-      });
-
-    expect(recorded.status).toBe(201);
-  });
-});
-
 describe('money never becomes a float', () => {
   it('stores and returns bill amounts as integer minor units', async () => {
     const created = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 1,
@@ -800,10 +588,10 @@ describe('money never becomes a float', () => {
 
   it('rejects a fractional bill amount at the edge', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({
-        verificationSession: session(memberId),
+        outletId: spaOutletId,
         memberId,
         benefitId: spaBenefitId,
         partySize: 1,
@@ -812,5 +600,51 @@ describe('money never becomes a float', () => {
       });
 
     expect(response.status).toBe(400);
+  });
+
+  it('rounds a fractional percentage exactly in member history', async () => {
+    const benefit = await ownerPrisma.benefit.create({
+      data: {
+        key: `test-fractional-${Date.now()}`,
+        title: 'Fractional Rate Test',
+        category: 'Test',
+        discountPct: '19.99',
+        terms: 'Test only.',
+        sortOrder: 999,
+        published: true,
+      },
+    });
+
+    try {
+      const created = await request(app.server)
+        .post('/admin/redemptions')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          outletId: spaOutletId,
+          memberId,
+          benefitId: benefit.id,
+          partySize: 1,
+          // 50.00 at 19.99% is 9.995, which rounds to 10.00 (1,000 fils).
+          billAmountMinor: 5_000,
+          idempotencyKey: key('fractional-rate'),
+        });
+      expect(created.status).toBe(201);
+
+      const history = await request(app.server)
+        .get('/member/me/redemptions')
+        .set('Authorization', `Bearer ${memberToken}`);
+      const row = history.body.redemptions.find(
+        (redemption: { id: string }) => redemption.id === created.body.id,
+      );
+
+      expect(row.discountPctApplied).toBe('19.99');
+      expect(row.savedMinor).toBe(1_000);
+    } finally {
+      await ownerPrisma.redemption.deleteMany({
+        where: { benefitId: benefit.id, reversesId: { not: null } },
+      });
+      await ownerPrisma.redemption.deleteMany({ where: { benefitId: benefit.id } });
+      await ownerPrisma.benefit.delete({ where: { id: benefit.id } });
+    }
   });
 });

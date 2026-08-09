@@ -52,6 +52,12 @@ interface BenefitSeed {
   reservationPhone: string | null;
   terms: string;
   sortOrder: number;
+  /**
+   * Which kind of outlet honours it, so an approved request appears on that
+   * outlet's list and no other. Data, not code — reassigning a benefit to a
+   * different outlet is an UPDATE, the same as changing its percentage (R14).
+   */
+  outletKind: 'DINING' | 'SPA' | 'ROOMS' | 'EVENTS' | 'OTHER' | null;
 }
 
 /**
@@ -73,6 +79,7 @@ const BENEFITS: BenefitSeed[] = [
     terms:
       'Maximum 6 people per cardholder. 50% discount for children aged 6–12; children under 6 dine free. Benefits are subject to change; you will be notified of significant changes.',
     sortOrder: 1,
+    outletKind: 'DINING',
   },
   {
     key: 'rooms',
@@ -88,6 +95,7 @@ const BENEFITS: BenefitSeed[] = [
     terms:
       'Off published bar rates at the Hotel & Residence. Subject to availability. Benefits are subject to change; you will be notified of significant changes.',
     sortOrder: 2,
+    outletKind: 'ROOMS',
   },
   {
     key: 'spa',
@@ -103,6 +111,7 @@ const BENEFITS: BenefitSeed[] = [
     terms:
       'Maximum 2 people per cardholder. Applies to all treatments booked directly with the spa. Subject to availability. Benefits are subject to change; you will be notified of significant changes.',
     sortOrder: 3,
+    outletKind: 'SPA',
   },
   {
     key: 'events',
@@ -118,6 +127,7 @@ const BENEFITS: BenefitSeed[] = [
     terms:
       'Minimum 20 people. 20% discount applies to outside catering. Benefits are subject to change; you will be notified of significant changes.',
     sortOrder: 4,
+    outletKind: 'EVENTS',
   },
   {
     key: 'lifestyle',
@@ -133,6 +143,7 @@ const BENEFITS: BenefitSeed[] = [
     terms:
       'Complimentary valet parking and wifi included. Benefits are subject to change; you will be notified of significant changes.',
     sortOrder: 5,
+    outletKind: 'OTHER',
   },
 ];
 
@@ -174,10 +185,32 @@ const MEMBERS = [
 const CONSENT_WORDING_VERSION = 'v1-2026-07';
 
 async function main(): Promise<void> {
-  const outletIds = new Map<string, string>();
+  /**
+   * Never in production.
+   *
+   * This creates an administrator whose password is a constant printed a few
+   * lines above and committed to the repository. DEPLOYMENT.md says seeding is
+   * for development — but a document is not a control, and running the wrong
+   * npm script against the wrong DATABASE_URL is an ordinary mistake to make at
+   * the end of a long deployment.
+   *
+   * The failure it prevents is silent: the seed would succeed, and the hotel
+   * would have a live administrator account with a publicly known password and
+   * nothing on any screen to say so.
+   *
+   * `--force` exists for the deliberate case of seeding a staging environment
+   * that happens to run with NODE_ENV=production.
+   */
+  if (process.env['NODE_ENV'] === 'production' && !process.argv.includes('--force')) {
+    throw new Error(
+      'Refusing to seed with NODE_ENV=production: this creates accounts with a known ' +
+        'password. Create the first administrator through the dashboard instead, or pass ' +
+        '--force if you genuinely mean to seed this database.',
+    );
+  }
 
   for (const outlet of OUTLETS) {
-    const row = await prisma.outlet.upsert({
+    await prisma.outlet.upsert({
       where: { id: `seed-outlet-${outlet.key}` },
       update: { name: outlet.name, kind: outlet.kind, active: true },
       create: {
@@ -187,7 +220,6 @@ async function main(): Promise<void> {
         active: true,
       },
     });
-    outletIds.set(outlet.key, row.id);
   }
 
   const passwordHash = await hashPassword(DEV_PASSWORD);
@@ -209,27 +241,6 @@ async function main(): Promise<void> {
     },
   });
 
-  const spaOutletId = outletIds.get('spa');
-  if (!spaOutletId) {
-    throw new Error('Spa outlet missing — cannot scope the outlet staff account.');
-  }
-
-  await prisma.staffUser.upsert({
-    where: { email: 'fatima.a@pgp.test' },
-    update: { passwordHash },
-    create: {
-      id: 'seed-staff-outlet',
-      fullName: 'Fatima A.',
-      email: 'fatima.a@pgp.test',
-      passwordHash,
-      role: 'OUTLET_STAFF',
-      // An outlet_staff account is bound to exactly one outlet; the database
-      // CHECK constraint rejects it otherwise.
-      outletId: spaOutletId,
-      status: 'ACTIVE',
-    },
-  });
-
   for (const benefit of BENEFITS) {
     const fields = {
       title: benefit.title,
@@ -246,6 +257,7 @@ async function main(): Promise<void> {
       terms: benefit.terms,
       published: true,
       sortOrder: benefit.sortOrder,
+      outletKind: benefit.outletKind,
       updatedByUserId: administrator.id,
     };
 
@@ -301,7 +313,7 @@ async function main(): Promise<void> {
   // §9: no member names, phone numbers or email addresses in log output —
   // membership numbers and counts only.
   console.log(
-    `Seeded ${OUTLETS.length} outlets, ${BENEFITS.length} benefits, 2 staff users, ` +
+    `Seeded ${OUTLETS.length} outlets, ${BENEFITS.length} benefits, 1 administrator, ` +
       `${MEMBERS.length} members (${MEMBERS.map((m) => m.memberNumber).join(', ')}).`,
   );
 }

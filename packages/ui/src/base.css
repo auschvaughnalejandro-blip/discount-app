@@ -96,7 +96,7 @@ button:disabled {
  * The primary action on a screen.
  *
  * `[type='submit']` rather than a class, so the member app's "Activate
- * membership" and the verify page's "Confirm and record" are emphatic without
+ * membership" and the administrator panel's "Confirm and record" are emphatic without
  * any JSX change. Both are the one action their screen exists for.
  */
 button[type='submit'] {
@@ -199,7 +199,7 @@ legend {
 
 /* ── Alerts and status ──────────────────────────────────────────────────
    Driven off the ARIA roles the apps already set. `role="alert"` is what the
-   member app uses for a failed sign-in and the verify page for a rejected
+   member app uses for a failed sign-in and the administrator panel for a rejected
    redemption, so styling the role means every one of them is covered — and a
    new one added later is covered automatically. */
 

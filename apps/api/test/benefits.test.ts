@@ -25,7 +25,6 @@ if (!ownerUrl) {
 let app: FastifyInstance;
 let env: Env;
 let adminToken: string;
-let managerToken: string;
 let memberToken: string;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
@@ -47,30 +46,6 @@ beforeAll(async () => {
     subjectType: 'STAFF',
     role: 'ADMINISTRATOR',
     tokenVersion: admin.tokenVersion,
-    ttlSeconds: 900,
-  });
-
-  // A manager token signed for the administrator's account would be resolved
-  // against the stored role, so a real manager account is needed to test the
-  // manager restriction honestly.
-  const manager = await ownerPrisma.staffUser.upsert({
-    where: { email: 'manager@pgp.test' },
-    update: {},
-    create: {
-      fullName: 'Test Manager',
-      email: 'manager@pgp.test',
-      passwordHash: 'unused-for-token-tests',
-      role: 'MANAGER',
-      status: 'ACTIVE',
-    },
-  });
-  managerToken = await issueAccessToken({
-    issuer: env.JWT_ISSUER,
-    audience: env.JWT_AUDIENCE_STAFF,
-    subject: manager.id,
-    subjectType: 'STAFF',
-    role: 'MANAGER',
-    tokenVersion: manager.tokenVersion,
     ttlSeconds: 900,
   });
 
@@ -159,6 +134,134 @@ describe('R14 — changing a discount is a database update, not a code change', 
     expect(byKey['fnb'].childRules).toEqual({ '6-12': 50, '0-6': 100 });
     expect(byKey['spa'].maxGuests).toBe(2);
     expect(byKey['events'].minGuests).toBe(20);
+  });
+});
+
+describe('the admin can edit every member-facing benefit value', () => {
+  it('updates primary, secondary and child rates and can clear optional rules', async () => {
+    const admin = await ownerPrisma.staffUser.findUniqueOrThrow({
+      where: { email: 'admin@pgp.test' },
+    });
+    const benefit = await ownerPrisma.benefit.create({
+      data: {
+        key: `test-editor-${Date.now()}`,
+        title: 'Editor Test',
+        category: 'Test',
+        discountPct: '10.00',
+        terms: 'Initial terms.',
+        sortOrder: 90,
+        published: false,
+        updatedByUserId: admin.id,
+      },
+    });
+
+    const updated = await request(app.server)
+      .patch(`/admin/benefits/${benefit.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Flexible Offer',
+        category: 'Dining',
+        discountPct: '17.50',
+        secondaryLabel: 'Special menu',
+        secondaryPct: '12.25',
+        childRules: { '6-12': 33.33, '0-5': 100 },
+        maxGuests: 8,
+        minGuests: 2,
+        reservationPhone: '5555 0101',
+        terms: 'These terms can change without a release.',
+        sortOrder: 7,
+        outletKind: 'DINING',
+      });
+
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({
+      title: 'Flexible Offer',
+      category: 'Dining',
+      discountPct: '17.5',
+      secondaryLabel: 'Special menu',
+      secondaryPct: '12.25',
+      childRules: { '6-12': 33.33, '0-5': 100 },
+      maxGuests: 8,
+      minGuests: 2,
+      reservationPhone: '5555 0101',
+      terms: 'These terms can change without a release.',
+      sortOrder: 7,
+      outletKind: 'DINING',
+      updatedBy: { id: admin.id, fullName: admin.fullName },
+    });
+    expect(updated.body.updatedAt).toBeTruthy();
+
+    const cleared = await request(app.server)
+      .patch(`/admin/benefits/${benefit.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        secondaryLabel: null,
+        secondaryPct: null,
+        childRules: null,
+        minGuests: null,
+        maxGuests: null,
+      });
+
+    expect(cleared.status).toBe(200);
+    expect(cleared.body).toMatchObject({
+      secondaryLabel: null,
+      secondaryPct: null,
+      childRules: null,
+      minGuests: null,
+      maxGuests: null,
+    });
+  });
+
+  it.each(['-1', '100.01', '999'])('rejects an out-of-range percentage (%s)', async (value) => {
+    const dining = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'fnb' } });
+
+    const response = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ discountPct: value });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('invalid_request');
+  });
+
+  it('rejects incomplete secondary rates, invalid child rates and inverted guest limits', async () => {
+    const dining = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'fnb' } });
+
+    const incompleteSecondary = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ secondaryLabel: 'Another rate' });
+    expect(incompleteSecondary.status).toBe(400);
+
+    const invalidChildRate = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ childRules: { '6-12': 101 } });
+    expect(invalidChildRate.status).toBe(400);
+
+    const overPreciseChildRate = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ childRules: { '6-12': 33.333 } });
+    expect(overPreciseChildRate.status).toBe(400);
+
+    const invertedLimits = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ minGuests: 7 });
+    expect(invertedLimits.status).toBe(400);
+
+    const blankTerms = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ terms: '   ' });
+    expect(blankTerms.status).toBe(400);
+
+    const blankReservationPhone = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reservationPhone: '   ' });
+    expect(blankReservationPhone.status).toBe(400);
   });
 });
 
@@ -278,6 +381,38 @@ describe('unpublished benefits are invisible to members', () => {
 // ── Versioning and attribution ─────────────────────────────────────────────
 
 describe('every change is versioned and attributed', () => {
+  it('atomically rejects a stale expected version without auditing it as content', async () => {
+    const dining = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'fnb' } });
+
+    const first = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      // The terms remain the same; this creates an intervening version without
+      // changing a fixture value that another test relies on.
+      .send({ expectedVersion: dining.version, terms: dining.terms });
+
+    expect(first.status).toBe(200);
+    expect(first.body.version).toBe(dining.version + 1);
+
+    const stale = await request(app.server)
+      .patch(`/admin/benefits/${dining.id}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ expectedVersion: dining.version, discountPct: '5.00' });
+
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe('version_conflict');
+
+    const after = await ownerPrisma.benefit.findUniqueOrThrow({ where: { id: dining.id } });
+    expect(after.version).toBe(dining.version + 1);
+    expect(after.discountPct.toString()).toBe(dining.discountPct.toString());
+
+    const audit = await ownerPrisma.auditLog.findFirstOrThrow({
+      where: { action: 'benefit.updated', subjectId: dining.id },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(audit.metadata).toMatchObject({ changed: ['terms'] });
+  });
+
   it('increments the version and records who made the change', async () => {
     const dining = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'fnb' } });
     const versionBefore = dining.version;
@@ -327,25 +462,25 @@ describe('every change is versioned and attributed', () => {
 // ── Authorization ──────────────────────────────────────────────────────────
 
 describe('benefit editing is administrator-only', () => {
-  it('refuses a manager, who may read but not edit', async () => {
+  it('does not accept a member-app session on administrator endpoints', async () => {
     const dining = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'fnb' } });
 
     const read = await request(app.server)
       .get('/admin/benefits')
-      .set('Authorization', `Bearer ${managerToken}`);
-    expect(read.status).toBe(200);
+      .set('Authorization', `Bearer ${memberToken}`);
+    expect(read.status).toBe(401);
 
     const write = await request(app.server)
       .patch(`/admin/benefits/${dining.id}`)
-      .set('Authorization', `Bearer ${managerToken}`)
+      .set('Authorization', `Bearer ${memberToken}`)
       .send({ discountPct: '5.00' });
-    expect(write.status).toBe(403);
+    expect(write.status).toBe(401);
 
     const publish = await request(app.server)
       .post(`/admin/benefits/${dining.id}/publish`)
-      .set('Authorization', `Bearer ${managerToken}`)
+      .set('Authorization', `Bearer ${memberToken}`)
       .send({ published: false });
-    expect(publish.status).toBe(403);
+    expect(publish.status).toBe(401);
   });
 
   it('refuses an unauthenticated request to the member endpoint', async () => {
