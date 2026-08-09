@@ -4,7 +4,7 @@
  *
  * ```
  * npm run mfa:code                    # admin@pgp.test
- * npm run mfa:code -- manager@pgp.test
+ * npm run mfa:code -- another-administrator@example.test
  * ```
  *
  * ── Why a script, and not an echo inside the server ───────────────────────
@@ -102,20 +102,18 @@ async function main(): Promise<number> {
       return 1;
     }
 
-    // OUTLET_STAFF signs in with a password alone — the verification page is not
-    // a dashboard (see the note at the top of src/security/mfa.ts). Saying so is
-    // more useful than spinning forever waiting for a secret that will never
-    // arrive.
+    // Non-administrator enum values survive only on suspended historical rows.
+    // They cannot sign in, so waiting for an MFA secret would never succeed.
     if (!roleRequiresMfa(staff.role)) {
       write([
-        'THIS ACCOUNT HAS NO SECOND FACTOR',
+        'THIS LEGACY ACCOUNT IS DISABLED',
         '',
         `account  ${staff.email}`,
-        `role     ${staff.role.toLowerCase()}`,
+        `historical role  ${staff.role.toLowerCase()}`,
         '',
-        'It signs in with a password alone. Nothing to print.',
+        'Only administrator accounts can sign in. Nothing to print.',
       ]);
-      return 0;
+      return 1;
     }
 
     write([

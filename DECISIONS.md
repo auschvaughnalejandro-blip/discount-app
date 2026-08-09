@@ -568,3 +568,304 @@ current data volume. Left as the obvious next addition rather than folded in her
 dark against a light OS. That is consistent with the app having no theme toggle, and it
 made the dark rendering awkward to verify — it needed the media block extracted and
 applied unconditionally. If a toggle is ever added, this asymmetry is the thing to fix.
+
+---
+
+**2026-08-06 — the discount rate is recorded on the redemption, not read back from the
+benefit.**
+
+`Redemption` gained `discountPctApplied` and `benefitVersion`
+(`migrations/20260806120000_redemption_rate_snapshot`), both NOT NULL and both written at
+the moment a redemption is recorded.
+
+Until now nothing stored what a member was actually given. `est_value_minor` computed
+`billAmountMinor * b."discountPct" / 100` through a join to `Benefit`, and both history
+screens read that same live percentage. R14 exists specifically so an administrator can
+change that percentage without a deployment — which means the two features were in direct
+conflict, and the conflict was silent:
+
+- Moving dining from 25% to 20% restated **every month already reported**. Nothing
+  errored; the numbers simply became different numbers.
+- A member's own history said they had been given 20% on a visit where they were given
+  25% — a figure they can check against a receipt, and the worst place to be wrong.
+
+The rate someone was given is a fact about that visit. Storing it as a property of the
+benefit's current configuration was the actual defect; the reporting query was only where
+it showed.
+
+**No default on the column, deliberately.** A default would let a creation site omit the
+rate and still write a row, which is exactly how the wrong rate gets stored. Every site
+that creates a redemption now has to state one, and the typecheck named all five when the
+column landed.
+
+**A reversal copies the original's rate rather than re-reading the benefit.** The negated
+amount only cancels the original if both are valued at the same percentage; re-reading a
+rate that changed in between would leave a residue in every total, and a reversal that
+does not fully reverse is worse than no reversal. Tested by changing the rate between the
+redemption and its reversal and asserting the pair sums to zero.
+
+**The backfill does not recover history.** Existing rows were filled from the benefit as
+it stood, which is the value the reports were already using — so no existing figure moved.
+This migration stops the *next* edit from rewriting the past; it cannot undo edits already
+made.
+
+**Still true, and out of reach from here:** nothing verifies the discount was applied at
+the till. The API records that a benefit was granted; the money is handled by the hotel's
+own POS, with no connection between the two. That is a POS integration, not a schema
+change — see the questions for hotel IT in this session's notes.
+
+---
+
+**2026-08-08 — the guest QR is removed, and a benefit request replaces it.**
+
+Q1 — open since Stage 1, and recorded in PROGRESS.md as blocking — is answered. The client
+does not want a scanned credential. A member asks for a benefit in the app, an
+administrator approves it, and the outlet applies the discount when the guest arrives and
+gives their name.
+
+**What was deleted.** `src/security/identity-codes.ts`, `src/routes/identity.ts`,
+`test/identity-codes.test.ts`, the `payload` branch of `POST /verify/resolve`, the QR on
+the member's card, the camera scanner on the verification page, `react-qr-code` from
+`web-member`, `@zxing/browser` from `web-verify`, and the `digital-card.css` that existed
+solely to give the symbol its quiet zone.
+
+**What was kept, deliberately.** `react-qr-code` stays in `web-admin`. It renders the
+`otpauth://` URI a staff member scans into their authenticator app at MFA enrollment —
+a different mechanism that happens to share a rendering library, and load-bearing for
+§3's mandatory second factor. Removing it because the word "QR" matched would have locked
+every administrator out of the dashboard.
+
+`IDENTITY_CODE_HMAC_SECRET` was renamed to `VERIFICATION_SESSION_HMAC_SECRET` rather than
+deleted: the verification session — which binds a recorded redemption to a member the
+staff account actually looked up — shared that key and still needs one. Keeping the old
+name would have left the config describing a feature that no longer exists.
+
+**A guard replaces the guard.** `client-invariants.test.ts` used to assert the QR had a
+quiet zone and error-correction level M. It now asserts the opposite: no guest-facing
+surface declares a QR or barcode dependency, renders a QR, or opens a camera, and no route
+exposes an identity code. `web-admin` is excluded by name, with the reason written down.
+Deleting a test because the feature went away leaves nothing to stop it coming back.
+
+**The new shape.** `BenefitRequest` — PENDING → APPROVED or DECLINED → FULFILLED.
+`Benefit.outletKind` routes an approval to the outlet that honours it, as data rather than
+a mapping in code, so reassigning a benefit is an UPDATE like changing its percentage
+(R14). Two CHECK constraints make the impossible states unrepresentable: a decided request
+must name its decider, and a fulfilled one must point at a redemption.
+
+**Three rules worth stating.**
+
+1. *A member cannot approve their own request.* `requests:create` is a MEMBER permission
+   and `requests:decide` is a STAFF one, so this is not a check inside the handler that
+   could be deleted — a member token cannot reach the decide route at all.
+2. *An approval cannot be spent twice.* Fulfilment is an `updateMany` conditional on
+   `status = 'APPROVED'`, and `redemptionId` is unique. Two counters submitting at once
+   cannot both win.
+3. *An approval is not a discount.* Fulfilment still writes a Redemption, which is still
+   the only record that a benefit was given, still immutable, and still carries the rate
+   that was actually applied.
+
+**The one place R11 was relaxed, and why it is not a relaxation.** `OUTLET_STAFF` gained
+`requests:read-outlet`, which returns member *names* — the only such list this role can
+reach. It is not the enumeration R11 forbids: it contains the handful of members who asked
+to come to this outlet and were approved by someone else. They put themselves on it. There
+is still no search, no browse, and no way to reach a member who did not.
+
+**Still open, and it is the client's to answer:** how often a member may use a benefit.
+Nothing limits it. "See if they already redeemed it" implies a limit that does not exist —
+once ever, once a year, once per stay are all representable and none is chosen. The queue
+shows an administrator what a member has asked for before, so the judgement is possible;
+the rule is not.
+
+---
+
+**2026-08-08 — the verification page is deleted. Two applications, not three.**
+
+The client confirmed there is no counter application: an administrator records every
+redemption from the dashboard. `apps/web-verify` is gone, along with `POST /verify/resolve`,
+`POST /verify/redemptions`, `GET /verify/requests`, the verification-session module and its
+secret, and the `verify.<domain>` host.
+
+**Recording moved to `POST /admin/redemptions`, and gained a required `outletId`.**
+The old endpoint took the outlet from the caller's token, which only worked because outlet
+staff are bound to one. An administrator is at a desk, not standing in the spa, so nothing
+can infer it — and a redemption attributed to the wrong outlet is worse than one attributed
+to none, because it is wrong in a report that looks right. An account that *is* bound to an
+outlet still records for that one and no other: the principal's binding is taken first, so a
+bound account cannot redirect a redemption by asking.
+
+**The verification session went with it, and that is a genuine reduction in control.**
+It existed to stop outlet staff acting on a member they had not just looked up, because that
+role cannot list members. Every role that can now record — administrator and manager — holds
+`members:read` outright, so the session was binding a caller to something they could reach
+anyway. Reinstating it would be theatre. If a counter application returns, the session must
+return with it.
+
+**`OUTLET_STAFF` holds no permissions at all.** Not filtered, not scoped — empty. The role
+and its accounts stay because `Redemption.staffUserId` on every historical row points at
+one, and dropping the enum value would orphan them. Granting it something "for later" is how
+a role with no users ends up holding member data.
+
+**MANAGER gained `redemptions:record`.** They could already approve a request; being unable
+to mark one used would leave a queue that one role fills and nobody can finish.
+
+**What the deletion cost, stated plainly.** Nobody at the outlet records anything now. The
+"used" entry is written by whoever is at the dashboard, from what they were told — so the
+timestamp is when it was *recorded*, not when the guest was served, and a redemption that
+nobody reports simply never gets written. That is the trade the client chose, and it is the
+right one for a programme this size; it stops being right the moment the volume makes
+second-hand reporting unreliable.
+
+**Still open, and now more pressing:** how often a member may use a benefit. Nothing limits
+it. With a counter that had a list in front of it, an obvious repeat was at least visible to
+someone; from a dashboard it is a query nobody runs.
+
+---
+
+**2026-08-08 — Stage 25: the four things that were documented as done and were not.**
+
+Four items, all of which had configuration, documentation or a database column already in
+place and no code reading them.
+
+**1. `/api` was proxied nowhere.** Both clients hardcode `const BASE = '/api'`; in
+development Vite proxies it. The production Caddyfile had exactly one `reverse_proxy`, on
+`api.<domain>`, while `my.` and `admin.` did `try_files → index.html` — so every API call
+in production would have returned the HTML document, and the apps would have appeared to
+load and then silently fail. The Dockerfile comment claimed "proxied by Caddy". It was not.
+
+Fixed with an `(api_proxy)` snippet imported by both client hosts. `handle` rather than a
+bare matcher, because `try_files` would otherwise win.
+
+*And a hole opened while fixing it:* proxying `/api/*` on `my.<domain>` would have exposed
+`/api/admin/*` from the public internet, making the CIDR restriction on `admin.<domain>`
+one URL away from decorative. The restriction now lives **inside the shared snippet**, so
+it is safe to import anywhere rather than safe only where somebody remembered to pair it
+with a guard.
+
+**2. `TRUST_PROXY` was set everywhere and read nowhere.** In `.env.example`, in
+`docker-compose.prod.yml`, called mandatory in DEPLOYMENT.md — and absent from
+`config/env.ts`, with Fastify's `trustProxy` left at its default. Behind Caddy that means
+every per-IP rate limit shares one bucket and every audited address is the proxy's. Both
+controls present in the code, neither doing anything.
+
+Off by default, deliberately: a directly-exposed API must *not* believe `X-Forwarded-For`,
+or a caller picks their own rate-limit bucket and forges their own audit trail.
+
+**3. The export was JSON.** §6 and §9 treat bulk export as the most sensitive action in the
+system, and it returned a payload the one audience it exists for — finance — could not
+open. Now `text/csv` with a `Content-Disposition` filename, carrying `discount_pct` (the
+rate applied on that visit, not the benefit's rate today) and a computed `discount_value`.
+Whole currency in the file, integer minor units in the database. Quoting is unconditional
+and there is a BOM, because an outlet called "Crust, Doha" would otherwise shift every
+column after it, and Excel reads a UTF-8 file without a BOM as the local codepage.
+
+**4. Staff management did not exist.** `StaffUser.tokenVersion` and `status` were the
+mechanism behind §3's "instant revocation from the dashboard", both worked, and no endpoint
+reached either — so offboarding somebody was a manual `UPDATE` against production. For a
+system whose threat model is a leaked membership list, that was the most serious thing in
+the repository.
+
+`/admin/staff` now covers create, suspend, reinstate, set-password and reset-MFA, plus
+`/auth/staff/password` for changing your own. Suspension bumps `tokenVersion` **and**
+revokes refresh tokens, so a live session dies immediately rather than surviving the
+remaining minutes of its access token — there is a test that holds a valid token across a
+suspension and asserts it stops working.
+
+**Three refusals worth stating.** You cannot suspend yourself, you cannot suspend the last
+active administrator, and you cannot reset your own second factor. The first two stop the
+dashboard being locked by one click. The third is the enforceable half of PROGRESS.md's
+"requires more than one administrator": a two-person approval flow means permanent lockout
+at a hotel with one administrator, which is the exact situation recovery codes exist for.
+Never-your-own achieves the part that matters — a stolen session cannot clear the factor
+protecting it, because clearing one always takes a different account.
+
+**Breached-password screening** (§3, "screened against a breached-password list") uses
+HIBP's k-anonymity range API: five characters of the SHA-1 leave this process, several
+hundred suffixes come back, the comparison happens locally. It **fails open** on a network
+error and logs that it did — an outage must not stop somebody changing a password, because
+the passwords people most urgently want to change are the ones already compromised.
+Verified against the live service: `Password123!` is refused.
+
+---
+
+**2026-08-08 — the refresh token moves to an httpOnly cookie.**
+
+§4 asked for `httpOnly; Secure; SameSite=Strict` and got a module-scoped variable, because
+the alternative on the table was `localStorage` — where a single XSS flaw becomes total
+account theft for every member who ever opened the app.
+
+Memory was the right call and it cost a sign-in on every page reload: a reload tears the
+page down and takes the variable with it. Members would have asked why it kept logging them
+out, and they would have been right.
+
+The cookie is held by the browser rather than the page, so it survives a reload and
+`document.cookie` cannot see it — persistence without giving up the property that made
+memory worth the friction. Both clients now call `resumeSession()` on mount; without that
+the cookie would sit unused and nothing would have changed.
+
+**No CSRF token, and why that is not an omission.** Three things close the gap together:
+`SameSite=Strict` means the browser does not send it cross-site at all; `Path=/auth/refresh`
+means no other route can be driven by holding it; and the refresh response is unreadable
+cross-origin. The worst remaining outcome is a forced rotation that logs somebody out — a
+nuisance, not a compromise. **A CSRF token becomes necessary the moment any state-changing
+route authenticates by cookie.** None does: everything else takes a bearer token in a
+header, which a cross-site request cannot set.
+
+`Secure` is off outside production, because on `http://localhost` the browser drops the
+cookie silently and development looks broken for a reason no error mentions.
+
+The body still carries the token as well, so a native shell with a keystore and no cookie
+jar keeps working — and so this change does not log out every existing session on deploy.
+
+---
+
+**2026-08-09 — PostgreSQL remains authoritative; Google Sheets is a sanitised,
+one-way operational mirror.**
+
+Hotel management wants a spreadsheet because filtering and sharing a familiar
+view is easier than operating a database. Replacing PostgreSQL was rejected:
+the programme depends on transactions, uniqueness, idempotency, immutable
+redemptions, relationships and security records that Sheets cannot enforce.
+
+The API instead publishes a repeatable-read full snapshot every five minutes,
+outside all request handlers. Google latency or failure can make the workbook
+stale but cannot fail a member creation, approval or redemption. Managed tabs
+are replaced atomically; manual edits are overwritten; unrelated tabs are left
+alone. PostgreSQL remains the recovery source and the Sheet is not a backup.
+
+This is treated as a standing bulk export. The existing export policy therefore
+holds: membership numbers may leave the system, member names/phones/emails may
+not. Request free text, consents, audit/IP records and every authentication or
+credential table are also excluded. Human workbook users are Viewers, link
+sharing is off, and only the dedicated service identity is an Editor. Every
+successful publication creates a system-attributed `report.exported` audit row
+with tab counts only.
+
+Automatic sync is disabled by default. Enabling production remains an
+operational/privacy decision: the hotel must approve its Google Workspace and
+data-residency arrangement, restrict workbook sharing, and place the service
+credential in its secret manager. The current in-process timer assumes the
+documented single API instance; horizontal scaling requires one external
+scheduler or leader election.
+
+---
+
+**2026-08-09 — the product has two applications and one hotel-facing account
+type.**
+
+The client confirmed the required product is the member guest app plus the
+administrator panel. Manager, support, outlet-staff and counter/verification
+surfaces are not required. This decision supersedes every earlier active-product
+role matrix and staff-verification design in this file and the older planning
+documents.
+
+Every account created from the panel is an `ADMINISTRATOR`, every administrator
+uses MFA, and only administrators may authenticate or refresh a hotel-facing
+session. The role selector is removed rather than merely hidden, and the server
+sets the role instead of trusting a request field.
+
+Legacy enum values and rows are retained only where deleting them would break
+historical attribution (for example, a redemption recorded by an old outlet
+account). A migration suspends those rows and revokes their sessions. Login,
+refresh, principal resolution, permissions and account-management routes also
+reject them independently. They are not converted into administrators, because
+doing so would turn a later reinstatement into privilege escalation.

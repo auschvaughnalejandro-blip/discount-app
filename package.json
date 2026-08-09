@@ -11,11 +11,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently --names api,member,verify,admin --prefix-colors cyan,green,yellow,magenta \"npm:dev:api\" \"npm:dev:member\" \"npm:dev:verify\" \"npm:dev:admin\"",
+    "dev": "concurrently --names api,member,admin --prefix-colors cyan,green,magenta \"npm:dev:api\" \"npm:dev:member\" \"npm:dev:admin\"",
     "dev:lan": "powershell -ExecutionPolicy Bypass -Command \"$env:DEV_HOST='0.0.0.0'; npm run dev\"",
     "dev:api": "npm run dev --workspace @pgp/api",
     "dev:member": "npm run dev --workspace @pgp/web-member",
-    "dev:verify": "npm run dev --workspace @pgp/web-verify",
     "dev:admin": "npm run dev --workspace @pgp/web-admin",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -25,6 +24,8 @@
     "migrate": "npm run migrate --workspace @pgp/api",
     "seed": "npm run seed --workspace @pgp/api",
     "mfa:code": "npm run mfa:code --workspace @pgp/api",
+    "otp:code": "npm run otp:code --workspace @pgp/api",
+    "sheets:sync": "npm run sheets:sync --workspace @pgp/api",
     "stop": "powershell -ExecutionPolicy Bypass -File ./scripts/stop.ps1",
     "predev": "powershell -ExecutionPolicy Bypass -File ./scripts/stop.ps1"
   },

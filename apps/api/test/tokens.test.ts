@@ -57,7 +57,7 @@ describe('a token with a modified role claim is rejected', () => {
       audience,
       subject: 'staff-subject-id',
       subjectType: 'STAFF',
-      role: 'OUTLET_STAFF',
+      role: 'ADMINISTRATOR',
       tokenVersion: 1,
       ttlSeconds: 600,
     });
@@ -71,8 +71,8 @@ describe('a token with a modified role claim is rejected', () => {
       string,
       unknown
     >;
-    expect(decoded['role']).toBe('OUTLET_STAFF');
-    decoded['role'] = 'ADMINISTRATOR';
+    expect(decoded['role']).toBe('ADMINISTRATOR');
+    decoded['role'] = 'MANAGER';
 
     const tamperedPayload = Buffer.from(JSON.stringify(decoded)).toString('base64url');
     // The original signature, kept as-is: an attacker without the signing

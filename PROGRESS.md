@@ -1,7 +1,14 @@
 # Progress
 
-Last updated: 2026-07-30
-Current stage: 19 (complete) — 309 tests passing.
+> **Scope correction — 2026-08-09:** the live product has two user-facing
+> applications and only Administrator accounts. Older stage notes about manager,
+> support, outlet-staff or verification access are historical, not current
+> requirements.
+
+Last updated: 2026-08-09
+Current stage: 27 (complete) — 369 tests passing.
+Surfaces: **two** — the member app and the admin dashboard. The verification
+page was deleted 2026-08-08; see DECISIONS.md.
 
 Stages 0–14 built the logic under BUILD-PLAN.md. Stages 15–24 are defined in
 ROADMAP.md, which continues the same numbering and rules. 16, 17, 18 and 19 are
@@ -36,6 +43,9 @@ See SECURITY-REVIEW.md for the §12 checklist: 22 confirmed, 3 partial,
 - [ ] 22 — Arabic and RTL
 - [~] 23 — Install (done), push and wallet (not built)
 - [ ] 24 — Pre-launch
+- [x] 25 — Administrator account management
+- [x] 26 — Google Sheets operational mirror
+- [x] 27 — Administrator-only hotel access
 
 ## Stage log
 
@@ -541,10 +551,15 @@ not routine open questions.
 The four items below carry forward from Stage 1, recorded per BUILD-PLAN §0
 rule 4, with `TODO(open-question)` comments where they touch code.
 
-- [ ] **Q1 — product-definition.md §11.1: what does the existing QR code do?**
-  Documented assumption implemented: the code identifies the *member* and is
-  scanned by staff (the second of the two possibilities), per §6 which states the
-  specification assumes it. Affects Stage 6 and Stage 7.
+- [x] **Q1 — ANSWERED 2026-08-08 by the client: there is no QR.** A member asks for
+  a benefit in the app, an administrator approves it, and the outlet applies the
+  discount when the guest arrives and gives their name. The scanned credential is
+  gone — module, route, renderer, camera and both dependencies — and
+  `BenefitRequest` replaces it. See DECISIONS.md.
+
+  Note for whoever reads the reference documents next: **§6 and the wireframes
+  describe the scanning model the client has now rejected.** They are stale on
+  this point, and possibly on others.
 
 - [ ] **Q2 — §11.3: will staff record bill amounts?**
   `billAmountMinor` is nullable and optional, so the build works either way. If the
@@ -593,3 +608,45 @@ rule 4, with `TODO(open-question)` comments where they touch code.
   all three surfaces — a single deployable. See DECISIONS.md.
 - Everything else built to spec. Q5 (MFA) and Q6 (SMS delivery) above are
   gaps, not silent deviations — both are flagged, not built around.
+
+## Stage 26 — Google Sheets operational mirror (2026-08-09)
+
+Implemented the hotel-requested Google Sheets view without replacing
+PostgreSQL. The API can now publish an opt-in, one-way, five-minute snapshot to
+five managed tabs: `_Sync`, `Members`, `Benefits`, `Outlets`, and `Redemptions`.
+
+- PostgreSQL remains authoritative and the only write path.
+- Member names, phones, emails, request free text, consent/audit records and all
+  credential/session/MFA/OTP data are excluded by explicit Prisma selects.
+- Snapshot reads use `RepeatableRead`; Google publication happens after the
+  transaction closes and is atomic across managed tabs.
+- Provider failure is isolated from API readiness and all business writes.
+- `npm run sheets:sync` performs the same reconciliation on demand.
+- Successful runs are audited as system exports with row counts only.
+- Added 9 focused tests (7 offline, 2 against the least-privileged database
+  role); focused suite and strict API typecheck pass.
+
+Local Google Sheets setup is complete and the one-shot sync has been verified.
+Production approval, data-residency confirmation and deployment-secret storage
+remain operational prerequisites. No credential is committed to the repository.
+
+## Stage 27 — Administrator-only hotel access (2026-08-09)
+
+Completed the client-confirmed simplification to two applications and one
+hotel-facing account type.
+
+- Removed Manager, Support and Outlet Staff choices from the panel and API
+  contract. New named accounts are always `ADMINISTRATOR` server-side.
+- Restricted login, MFA challenge completion, refresh, principal resolution,
+  permissions, query scopes and administrator-account actions to
+  `ADMINISTRATOR`.
+- Applied `20260809210000_administrator_only_accounts`: existing non-admin rows
+  are suspended, their token versions incremented and refresh sessions revoked.
+  Rows remain only to preserve historical attribution.
+- The panel now shows an **Administrators** section and no Role column.
+- The seed now creates one administrator and no other staff login.
+- Updated product/security/operations documents and marked old role/counter
+  plans as superseded history.
+- All 369 API tests passed across sequential runs; the final 106 role,
+  redemption and reporting regression tests passed together. All workspace
+  TypeScript checks and `git diff --check` pass.

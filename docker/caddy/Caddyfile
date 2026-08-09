@@ -27,7 +27,7 @@
 
 # ── Shared snippets ─────────────────────────────────────────────────────────
 
-# Headers for the three single-page apps.
+# Headers for both single-page apps.
 #
 # These matter more than the API's own headers: the API returns JSON and is a
 # defence-in-depth case, whereas these three documents are the actual XSS
@@ -71,12 +71,48 @@
 	header @volatile Cache-Control "no-cache"
 }
 
+# The API, same-origin, on a client's own hostname.
+#
+# Both clients call a relative `/api` path — which in development is Vite's
+# proxy, and here is this. Same-origin is the point: no CORS preflight, no
+# allowlist to keep in step with the hostnames, and `connect-src 'self'` in the
+# CSP above stays honest.
+#
+# `handle` rather than a bare matcher, because the `spa` snippet's `try_files`
+# would otherwise answer /api with index.html — the app would appear to load and
+# then quietly fail every call, which is a genuinely horrible thing to diagnose.
+# `handle` blocks are mutually exclusive, so the first one wins outright.
+(api_proxy) {
+	handle /api/* {
+		# The admin routes carry the same restriction here as they do on the API
+		# hostname. Without this the member app's own hostname would proxy
+		# /api/admin/* from anywhere on the internet, and the whole IP
+		# restriction would be one URL away from meaningless.
+		#
+		# Harmless where the host is already internal-only; the point is that
+		# this snippet is safe to import anywhere, rather than safe only where
+		# somebody remembered to pair it with a restriction.
+		@admin_external {
+			path /api/admin/*
+			not remote_ip {$INTERNAL_CIDR}
+		}
+		respond @admin_external "Not available from this network." 403 {
+			close
+		}
+
+		uri strip_prefix /api
+		reverse_proxy api:3000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+}
+
 # Staff surfaces: hotel network and VPN only.
 #
-# §9 — outlet staff can retrieve only the member in front of them, and no one
-# outside the building has business reaching either of these at all. Returns 403
-# rather than dropping the connection, so a legitimate user on the wrong network
-# gets an answer instead of a hang.
+# §9 — the dashboard reaches the whole membership list, and nobody outside the
+# building has business reaching it at all. Returns 403 rather than dropping the
+# connection, so a legitimate user on the wrong network gets an answer instead of
+# a hang.
 (internal_only) {
 	@external not remote_ip {$INTERNAL_CIDR}
 	respond @external "Not available from this network." 403 {
@@ -87,30 +123,14 @@
 # ── my.<domain> — the member app ────────────────────────────────────────────
 # Public. Members are not at the hotel.
 my.{$DOMAIN} {
-	root * /srv/member
 	import static_security
-	import spa
+	import api_proxy
 
-	log {
-		output stdout
-		format json
+	# Everything that is not /api is the app itself.
+	handle {
+		root * /srv/member
+		import spa
 	}
-}
-
-# ── verify.<domain> — the staff verification page ───────────────────────────
-# Internal only. See DEPLOYMENT.md §5.3: this restriction is what makes the
-# outlet-staff MFA exemption proportionate. Publish this host and MFA must be
-# extended to OUTLET_STAFF.
-verify.{$DOMAIN} {
-	import internal_only
-
-	root * /srv/verify
-	import static_security
-	import spa
-
-	# The scanner needs getUserMedia, which the shared Permissions-Policy denies.
-	# Granted for this host only, and only to itself.
-	header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
 
 	log {
 		output stdout
@@ -122,10 +142,13 @@ verify.{$DOMAIN} {
 # Internal only. This is the surface that reaches the whole membership list.
 admin.{$DOMAIN} {
 	import internal_only
-
-	root * /srv/admin
 	import static_security
-	import spa
+	import api_proxy
+
+	handle {
+		root * /srv/admin
+		import spa
+	}
 
 	log {
 		output stdout

@@ -43,6 +43,33 @@ interface GroupedRow {
   cohort: bigint | number | null;
 }
 
+/**
+ * Apply a stored percentage to integer minor units without passing through a
+ * binary float. PostgreSQL's numeric `round` sends halves away from zero, so
+ * the magnitude is rounded before restoring the sign for reversal rows.
+ */
+function discountValueMinor(billAmountMinor: number, discountPctApplied: unknown): bigint {
+  const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(String(discountPctApplied));
+  if (!match) {
+    throw new Error('Stored redemption percentage is invalid.');
+  }
+
+  const basisPoints = BigInt(Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0')));
+  const signedMinor = BigInt(billAmountMinor);
+  const magnitude = signedMinor < 0n ? -signedMinor : signedMinor;
+  const rounded = (magnitude * basisPoints + 5_000n) / 10_000n;
+  return signedMinor < 0n ? -rounded : rounded;
+}
+
+/** Exact two-decimal major-unit text for a CSV cell, e.g. 1000n -> `10.00`. */
+function formatMinorUnits(minorUnits: bigint): string {
+  const negative = minorUnits < 0n;
+  const magnitude = negative ? -minorUnits : minorUnits;
+  const whole = magnitude / 100n;
+  const fraction = (magnitude % 100n).toString().padStart(2, '0');
+  return `${negative ? '-' : ''}${whole}.${fraction}`;
+}
+
 const reportRoutes: FastifyPluginAsync = async (app) => {
   const env = app.env;
 
@@ -111,10 +138,9 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
       SELECT count(*)::bigint AS redemptions,
              coalesce(sum(r."partySize"), 0)::bigint AS guests,
              count(distinct r."memberId")::bigint AS cohort,
-             coalesce(sum(round(r."billAmountMinor" * b."discountPct" / 100.0)), 0)::bigint
+             coalesce(sum(round(r."billAmountMinor" * r."discountPctApplied" / 100.0)), 0)::bigint
                AS est_value_minor
       FROM "Redemption" r
-      JOIN "Benefit" b ON b."id" = r."benefitId"
       WHERE r."reversesId" IS NULL
       ${filter}
     `;
@@ -269,7 +295,10 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
   // §6: "Exports are a separate permission, administrator-only, rate-limited,
   // individually audited, and alerted in real time." §9 calls bulk export the
   // most sensitive action in the system.
-  app.get('/admin/reports/export', { config: { permission: 'reports:export' } }, async (request) => {
+  app.get(
+    '/admin/reports/export',
+    { config: { permission: 'reports:export' } },
+    async (request, reply) => {
     const query = rangeSchema.parse(request.query);
     const principal = request.principal;
     if (!principal) {
@@ -306,6 +335,7 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
         occurredAt: true,
         partySize: true,
         billAmountMinor: true,
+        discountPctApplied: true,
         reversesId: true,
         member: { select: { memberNumber: true } },
         benefit: { select: { key: true, title: true } },
@@ -322,25 +352,79 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
       ipAddress: request.ip,
     });
 
-    return {
-      exportedAt: new Date().toISOString(),
-      rows: rows.map((row) => ({
-        id: row.id,
-        occurredAt: row.occurredAt,
-        // The membership number, not the name: an export is the most
-        // sensitive artefact this system produces, and it should not be a
-        // ready-made list of named individuals.
-        memberNumber: row.member.memberNumber,
-        benefitKey: row.benefit.key,
-        benefitTitle: row.benefit.title,
-        outlet: row.outlet.name,
-        recordedBy: row.staffUser.fullName,
-        partySize: row.partySize,
-        billAmountMinor: row.billAmountMinor,
-        isReversal: row.reversesId !== null,
-      })),
-    };
-  });
+    /**
+     * A file a person can open, not a payload a program can parse.
+     *
+     * This is the one artefact that leaves the system for someone outside it —
+     * the finance team, reconciling against transactions their own till already
+     * recorded. It returned JSON, which meant the one audience it exists for
+     * could not read it.
+     */
+    const csv = toCsv(
+      [
+        'occurred_at',
+        'membership_number',
+        'benefit',
+        'outlet',
+        // The rate on this visit, not the benefit's rate today. An
+        // administrator changing a percentage must not restate a month that
+        // has already been reported.
+        'discount_pct',
+        'party_size',
+        'bill_total',
+        'discount_value',
+        'recorded_by',
+        'reversal',
+      ],
+      rows.map((row) => {
+        const bill = row.billAmountMinor;
+        return [
+          row.occurredAt.toISOString(),
+          // The membership number, not the name: an export is the most
+          // sensitive artefact this system produces, and it should not be a
+          // ready-made list of named individuals.
+          row.member.memberNumber,
+          row.benefit.title,
+          row.outlet.name,
+          row.discountPctApplied.toString(),
+          row.partySize === null ? '' : String(row.partySize),
+          // Whole currency in the file, integer minor units in the database.
+          // Finance reads QAR; nobody outside this system thinks in fils.
+          bill === null ? '' : (bill / 100).toFixed(2),
+          bill === null
+            ? ''
+            : formatMinorUnits(discountValueMinor(bill, row.discountPctApplied)),
+          row.staffUser.fullName,
+          row.reversesId !== null ? 'yes' : 'no',
+        ];
+      }),
+    );
+
+    const filename = `privilege-guest-redemptions-${new Date().toISOString().slice(0, 10)}.csv`;
+
+    return reply
+      .type('text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${filename}"`)
+      .send(csv);
+    },
+  );
+
+  /**
+   * Minimal RFC 4180. Quote every field and double any quote inside it.
+   *
+   * Quoting unconditionally rather than only when needed: a member's name never
+   * appears here, but an outlet called "Crust, Doha" or a staff member called
+   * O'Brien would otherwise shift every column after it, and a spreadsheet that
+   * is subtly wrong is worse than one that fails to open.
+   *
+   * A BOM, because Excel reads a UTF-8 file without one as the local codepage
+   * and mangles any non-ASCII outlet or staff name.
+   */
+  function toCsv(header: string[], rows: string[][]): string {
+    const escape = (field: string) => `"${field.replace(/"/g, '""')}"`;
+    const lines = [header, ...rows].map((row) => row.map(escape).join(','));
+    return `\ufeff${lines.join('\r\n')}\r\n`;
+  }
 
   function resolveMetric(value: string | undefined): MetricName {
     if (value === undefined) {

@@ -1,14 +1,11 @@
 /**
  * Signs a staff account in the way a real client has to, since Stage 19.
  *
- * A dashboard account no longer gets tokens from a password: it gets a
- * challenge, and must present a second factor. Tests that need an authenticated
- * administrator therefore have to walk the same path the admin client walks,
- * which is the point — a test that bypassed MFA would stop proving the journey
- * works.
- *
- * Outlet staff are returned straight through, because §3 does not require MFA
- * for an account that reaches only the verification page.
+ * A staff account no longer gets tokens from a password: it gets a challenge,
+ * and must present a second factor. Administrator is the only active staff
+ * role, so a password-only success would be a security regression. Tests that
+ * need an authenticated administrator therefore walk the same path the admin
+ * client walks.
  */
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
@@ -53,12 +50,7 @@ export async function signInStaff(
 ): Promise<StaffSession> {
   const login = await request(app.server).post('/auth/staff/login').send(credentials);
   expect(login.status).toBe(200);
-
-  // OUTLET_STAFF: password alone, no challenge.
-  if (!login.body.mfaRequired) {
-    expect(login.body.accessToken).toBeTruthy();
-    return { accessToken: login.body.accessToken, refreshToken: login.body.refreshToken };
-  }
+  expect(login.body.mfaRequired).toBe(true);
 
   const challengeToken = login.body.challengeToken as string;
   expect(challengeToken).toBeTruthy();

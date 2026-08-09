@@ -24,7 +24,13 @@
 import { createTransport, type Transporter } from 'nodemailer';
 
 import type { Env } from '../config/env.js';
-import type { CodeDelivery, CodeSender, DeliveryOutcome } from './code-sender.js';
+import type {
+  CodeDelivery,
+  CodeSender,
+  DeliveryOutcome,
+  LifecycleDelivery,
+  MemberDelivery,
+} from './code-sender.js';
 import type { FastifyBaseLogger } from 'fastify';
 
 /**
@@ -38,6 +44,29 @@ import type { FastifyBaseLogger } from 'fastify';
  * ignore it.
  */
 function body(delivery: CodeDelivery, ttlMinutes: number): { subject: string; text: string } {
+  // The invitation is a welcome, not a verification prompt. It arrives
+  // unprompted — the member did not ask for it and may not know the programme
+  // exists yet — so it has to say what it is before it says what to do.
+  if (delivery.purpose === 'invitation') {
+    return {
+      subject: 'Welcome to the Privilege Guest programme',
+      text: [
+        'You have been invited to join the Privilege Guest programme.',
+        '',
+        'Open the app, choose "Activate membership", and enter this invitation',
+        'code together with your mobile number:',
+        '',
+        `    ${delivery.code}`,
+        '',
+        `It can be used once, and is valid for ${delivery.validFor ?? 'a limited period'}.`,
+        '',
+        'You will then be sent a short passcode to finish signing in. We will',
+        'never ask you for a password, and nobody at the hotel can see either',
+        'code.',
+      ].join('\n'),
+    };
+  }
+
   const reason =
     delivery.purpose === 'activation'
       ? 'activate your Privilege Guest membership'
@@ -58,6 +87,73 @@ function body(delivery: CodeDelivery, ttlMinutes: number): { subject: string; te
       'the code without also having your phone number.',
     ].join('\n'),
   };
+}
+
+function qar(minor: number): string {
+  return new Intl.NumberFormat('en-QA', {
+    style: 'currency',
+    currency: 'QAR',
+    minimumFractionDigits: 2,
+  }).format(minor / 100);
+}
+
+function lifecycleBody(delivery: LifecycleDelivery): { subject: string; text: string } {
+  switch (delivery.purpose) {
+    case 'request-submitted':
+      return {
+        subject: 'Your Privilege Guest request was received',
+        text: [
+          `We received your request for ${delivery.benefitTitle}.`,
+          '',
+          'The hotel will review it. You can also follow its status in the app.',
+        ].join('\n'),
+      };
+    case 'request-approved':
+      return {
+        subject: 'Your Privilege Guest request was approved',
+        text: [
+          `Your request for ${delivery.benefitTitle} has been approved.`,
+          '',
+          'Open the app to view the approval and any reservation details for the benefit.',
+          ...(delivery.reason ? ['', `Hotel note: ${delivery.reason}`] : []),
+        ].join('\n'),
+      };
+    case 'request-declined':
+      return {
+        subject: 'Update on your Privilege Guest request',
+        text: [
+          `Your request for ${delivery.benefitTitle} was not approved.`,
+          ...(delivery.reason ? ['', `Reason: ${delivery.reason}`] : []),
+          '',
+          'Open the app to view the request status.',
+        ].join('\n'),
+      };
+    case 'redemption-recorded': {
+      const details = [
+        delivery.outletName ? `Outlet: ${delivery.outletName}` : null,
+        delivery.discountPct ? `Discount recorded: ${delivery.discountPct}%` : null,
+        delivery.savedMinor === null || delivery.savedMinor === undefined
+          ? null
+          : `Recorded saving: ${qar(delivery.savedMinor)}`,
+      ].filter((line): line is string => line !== null);
+      return {
+        subject: 'Your Privilege Guest benefit was recorded',
+        text: [
+          `Your use of ${delivery.benefitTitle} has been recorded.`,
+          ...(details.length ? ['', ...details] : []),
+          '',
+          'You can view this activity in the app. If anything looks incorrect, contact the hotel.',
+        ].join('\n'),
+      };
+    }
+  }
+}
+
+export function messageBody(
+  delivery: MemberDelivery,
+  ttlMinutes: number,
+): { subject: string; text: string } {
+  return 'code' in delivery ? body(delivery, ttlMinutes) : lifecycleBody(delivery);
 }
 
 export function createSmtpSender(env: Env, log: FastifyBaseLogger): CodeSender {
@@ -96,7 +192,7 @@ export function createSmtpSender(env: Env, log: FastifyBaseLogger): CodeSender {
       }
 
       const ttlMinutes = Math.max(1, Math.round(env.OTP_TTL_SECONDS / 60));
-      const { subject, text } = body(delivery, ttlMinutes);
+      const { subject, text } = messageBody(delivery, ttlMinutes);
 
       try {
         await ensureTransport().sendMail({

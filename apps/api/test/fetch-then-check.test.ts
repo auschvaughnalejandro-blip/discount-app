@@ -22,7 +22,13 @@ import { describe, expect, it } from 'vitest';
 const ROUTES_DIR = resolve(import.meta.dirname, '..', 'src', 'routes');
 
 /** Models whose rows belong to, or are visible to, only some principals. */
-const SCOPED_MODELS = ['member', 'redemption', 'consentRecord', 'claimCode'] as const;
+const SCOPED_MODELS = [
+  'member',
+  'redemption',
+  'consentRecord',
+  'claimCode',
+  'benefitRequest',
+] as const;
 
 const READ_METHODS = ['findFirst', 'findMany', 'findUnique', 'findUniqueOrThrow', 'findFirstOrThrow'];
 
@@ -71,37 +77,17 @@ const EXEMPT: { file: string; snippet: string; reason: string }[] = [
       'failure, so it discloses nothing about who holds that number.',
   },
   {
-    file: 'verify.ts',
-    snippet: 'prisma.member.findUnique({ where: { id: memberId }',
-    reason:
-      'POST /verify/resolve, by scanned payload. scopeForMember returns MATCHES_NOTHING for ' +
-      'outlet_staff by design (R11 — no member is reachable by browsing), so applying it here ' +
-      'would make the verification page unable to do the one thing it exists for. The ' +
-      'authorization is what §5 specifies for this endpoint instead: a valid, in-window HMAC ' +
-      'signature over the member reference, the verify:resolve permission, and a hard per-staff ' +
-      'rate limit. Both outcomes are audit-logged.',
-  },
-  {
-    file: 'verify.ts',
-    snippet: "prisma.member.findUnique({ where: { memberNumber: body.membershipNumber ?? '' }",
-    reason:
-      'POST /verify/resolve, by exact membership number — the printed-card path (wireframes ' +
-      'screen 9 note 2). Same reasoning as the payload lookup above. Exact equality only: no ' +
-      'contains, startsWith or case-insensitive match, any of which would turn this into the ' +
-      'search endpoint R11 forbids. Rate limited hard because the numbers are sequential, and ' +
-      'failures are logged as probing.',
-  },
-  {
-    file: 'verify.ts',
+    file: 'redemptions.ts',
     snippet: 'prisma.member.findUnique({ where: { id: body.memberId }',
     reason:
-      'POST /verify/redemptions. Reached only after verifyVerificationSession confirms an ' +
-      'unexpired HMAC binding this staff account to this member id, issued by /verify/resolve ' +
-      'minutes earlier — which is the "short-lived verification session" §5 requires. The scope ' +
-      'is that binding; scopeForMember would again resolve nothing for outlet_staff.',
+      'POST /admin/redemptions. The administrator is the only active staff role and also holds ' +
+      'members:read, so scopeForMember returns {} and adding it would compose an empty fragment ' +
+      'rather than a restriction. The read is exempt because the scope is vacuous here, not ' +
+      'because it was skipped: if a narrower staff role is ever introduced, this exemption ' +
+      'must be reviewed.',
   },
   {
-    file: 'verify.ts',
+    file: 'redemptions.ts',
     snippet: 'prisma.redemption.findUnique({ where: { reversesId: original.id }',
     reason:
       'Reversal. `original` was already fetched through scopeForRedemption, so this asks only ' +

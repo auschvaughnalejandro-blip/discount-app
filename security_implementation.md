@@ -1,3 +1,10 @@
+# Archived security specification
+
+> **Superseded on 2026-08-09.** The current specification is
+> `docs/security-implementation.md`. The live product has exactly two surfaces
+> and only Administrator accounts; legacy role and verification-page material
+> below is historical and grants no access.
+
 # Security Implementation Specification
 
 **Product:** Privilege Guest Program — member app, verification page, admin dashboard

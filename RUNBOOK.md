@@ -14,116 +14,81 @@ npm run db start
 npm run dev
 ```
 
-That starts four processes — one backend, three frontends, all sharing one
-database:
+That starts three processes — one backend, two frontends, sharing one database:
 
 | | URL | Who it is for |
 |---|---|---|
 | Backend API | http://localhost:3000 | Where everything is recorded |
-| Member app | http://localhost:5173 | Customers |
-| Verification page | http://localhost:5174 | Staff at the counter |
-| Admin dashboard | http://localhost:5175 | The business owner |
+| Member app | http://localhost:5173 | Guests |
+| Admin dashboard | http://localhost:5175 | The hotel |
 
-Give it about 20 seconds. The API and three Vite servers start together and
+Give it about 20 seconds. The API and both Vite servers start together and
 compete for CPU on first boot; an earlier check at 15 s reported the API down
-when it was simply still starting. Ctrl-C stops all four together.
+when it was simply still starting. Ctrl-C stops all three together.
 
 Seeded logins:
 
 | Who | Where | Sign in with |
 |---|---|---|
 | Owner | :5175 | `admin@pgp.test` / `privilege-guest-dev-only`, then an authenticator code (no app? `npm run mfa:code`) |
-| Outlet staff | :5174 | `fatima.a@pgp.test` / `privilege-guest-dev-only` |
 | Member | :5173 | phone `+97455550001` or `+97455550003`, then the code |
 
-## Testing a real QR scan
+There is no counter application and no manager, support or outlet-staff login.
+Every redemption is recorded by an administrator from the panel. A legacy
+non-administrator database row may remain only when an old redemption points to
+it; migrations suspend it, revoke its sessions and the application hides it.
 
-The obstacle is `getUserMedia`: **the camera only works in a secure context.**
-`http://127.0.0.1` counts as secure; `http://192.168.x.x` does not. So the
-verification page has to stay on localhost, or be behind real HTTPS.
+**Administrator accounts are managed from the panel** — the **Administrators**
+tab creates them, suspends them, resets a lost second factor and sets a
+password. Suspending takes effect immediately: it bumps `tokenVersion` and
+revokes the refresh tokens, so a session already open dies rather than lasting
+out its access token. You cannot suspend yourself, suspend the last
+administrator, or reset your own second factor.
 
-That rules out the obvious setup (both apps on a phone) and leaves three that
-work, cheapest first.
+**Sessions now survive a reload.** The refresh token is an httpOnly cookie, so
+closing a tab no longer means signing in again — a member sees a passcode about
+once a month rather than every visit.
 
-### 1. No camera — paste the payload (30 seconds, zero setup)
+## Walking the request flow end to end
 
-Tests the whole credential path: signing, freshness, resolution, entitlements,
-guest caps. Everything except the lens.
+There is no QR and no camera. A member asks for a benefit in the app, an
+administrator approves it, and the outlet applies the discount when the guest
+arrives. Both user-facing apps are open at once on this machine, so the whole loop
+takes about a minute.
 
-1. Member app on :5173 → **Show card**. The payload is the small grey text under
-   the QR (`v1.<uuid>.<unix>.<signature>`). Copy it.
-2. Verification page on :5174 → **Or paste the code** → **Look up scanned code**.
+1. **Member app on :5173** — sign in with `+97455550003`, take the passcode from
+   the `npm run otp:code` window. Open any benefit, add a note if you like, and
+   press **Ask to use this benefit**. It changes to *Waiting for approval*.
+2. **Admin dashboard on :5175** — sign in, open **Requests**. The ask is at the
+   top of the queue, oldest first, with the member's number and note. Press
+   **Approve**.
+3. **Still on :5175** — switch the queue to **Approved, not yet used**. When the
+   guest turns up, press **Mark as used**, choose the outlet, and fill in the
+   guests and the bill total.
+4. **Record it.** The request moves to *Used* and the redemption appears in the
+   Redemptions log carrying the rate that was actually applied.
 
-The server treats a pasted payload and a scanned one identically, so if this
-works the scanner has nothing left to prove but optics.
+Two things worth trying because they are the rules that matter:
 
-### 2. Laptop webcam pointed at a phone (the real scan)
+- **Approve, then try to record the same approval twice.** The second attempt is
+  refused — `approval_not_valid`. One approval, one discount.
+- **Fill in the bill total.** Optional to the API, load-bearing for everything
+  downstream: without it, finance has nothing to match the row against in their
+  own system.
 
-The member app does **not** need a camera, so it can live on a plain-HTTP LAN
-address. Only the verification page needs the secure context, and it keeps
-localhost.
-
-1. Start the stack with the dev servers open to the network:
-   ```
-   npm run dev:lan
-   ```
-   **Use the script, not `DEV_HOST=0.0.0.0 npm run dev`.** That form is bash
-   syntax; in PowerShell — the default shell here — it does not set the variable
-   and the stack comes up loopback-only, with no error to tell you so. The phone
-   then simply cannot connect and the cause is invisible.
-
-   `DEV_HOST` is opt-in and defaults to loopback (see the note in each
-   `vite.config.ts`). It serves seeded member data, so don't leave it running on
-   a network you don't trust.
-
-   To confirm it worked, look for a `Network:` line in the Vite output — if you
-   only see `Local:`, the variable didn't take.
-2. Find this machine's address: `Get-NetIPAddress -AddressFamily IPv4`
-3. **On the phone**, open `http://<that-address>:5173`, sign in, open the card.
-4. **On the laptop**, open `http://127.0.0.1:5174`, sign in as outlet staff, press
-   **Scan with camera**, and hold the phone up to the webcam.
-
-If the camera button is missing, the page decided it is not in a secure context —
-check you used `127.0.0.1` and not the LAN address.
-
-### 3. A real tablet at a counter (needs HTTPS)
-
-The only way to run the verification page on the device staff will actually use.
-`DEV_HOST` alone is not enough — the tablet needs a valid certificate.
-
-Quickest route is a tunnel, which supplies a real certificate and avoids the
-self-signed warnings iOS makes painful:
-
-```
-cloudflared tunnel --url http://127.0.0.1:5174
-```
-
-Open the `https://…trycloudflare.com` URL it prints on the tablet. `mkcert` plus
-Vite's `server.https` also works if you can install a local CA on the device.
-
-This is worth doing once before launch: it is the only test that exercises a real
-rear camera, real reception lighting, and a real member's screen brightness — the
-three things that actually make scans fail.
-
-### When a scan will not read
-
-- **Phone dimmed.** The most common cause by a distance. The card requests a
-  screen wake lock, but brightness itself is not something a web page can set.
-- **Phone in dark mode with a tinted QR.** Cannot happen here — `digital-card.css`
-  pins the quiet zone to `#ffffff` and a test enforces it — but it is the first
-  thing to check if the styling is ever changed.
-- **Glossy screen protector** throwing the webcam's own reflection back.
-- **Payload older than `IDENTITY_CODE_WINDOW_HOURS`.** The card regenerates every
-  60 seconds while open; a screenshot from yesterday is *meant* to fail.
+A member who never asked is still served — record a redemption with no
+`requestId` and it stands on its own.
 
 **Signing in to the dashboard (Stage 19).** The password is step one of two.
-`admin@pgp.test` reaches more than the verification page, so §3 requires a second
-factor and the password alone returns a challenge, not tokens.
+Every administrator account requires a second factor, so the password alone
+returns a challenge, not tokens.
 
-First time: the dashboard shows a QR. Scan it with any authenticator app (Google
-Authenticator, 1Password, Aegis), enter the six-digit code, and **save the ten
-recovery codes it then shows** — only their hashes are stored, so that screen is
-the only time they exist. After that, sign-in asks for a code each time.
+First time: the dashboard shows a QR. **This is the one QR left in the product** —
+it carries an `otpauth://` URI for an authenticator app, and has nothing to do
+with members. Scan it with any authenticator (Google Authenticator, 1Password,
+Aegis), enter the six-digit code, and **save the ten recovery codes it then
+shows** — only their hashes are stored, so that screen is the only time they
+exist. After that, sign-in asks for a code each time.
 
 A code works once. Presenting the same one twice inside its 30-second window is
 refused, so if you fat-finger a login, wait for the next code rather than
@@ -133,7 +98,6 @@ retrying the same one.
 
 ```
 npm run mfa:code                     # admin@pgp.test
-npm run mfa:code -- manager@pgp.test
 ```
 
 It reads the account's stored secret, decrypts it and prints a fresh code every
@@ -153,8 +117,8 @@ And it is **not** available outside development: the script exits unless
 `NODE_ENV=development`, and being a script nobody invokes, it cannot be left
 switched on by accident the way a flag can.
 
-Outlet staff on :5174 are unaffected — `fatima.a@pgp.test` still signs in with a
-password alone, because the verification page is not a dashboard.
+Every administrator account needs a second factor. No other staff role can sign
+in or receive a session.
 
 If you get locked out in development, clear the enrollment and start over:
 
@@ -211,7 +175,7 @@ like the application being broken.
 npm run stop
 ```
 
-Frees ports 3000, 5173, 5174 and 5175, then start again. It targets the process
+Frees ports 3000, 5173 and 5175, then start again. It targets the process
 actually holding each port rather than killing every node.exe on the machine.
 
 ## 1b. Verify it
@@ -222,6 +186,65 @@ npm test
 
 **Everything green = the build is sound.** That is the real verification; the
 manual checks below exist to catch what tests cannot see.
+
+---
+
+## 1c. Google Sheets mirror (optional)
+
+PostgreSQL is the authoritative record. The workbook is a read-only convenience
+for hotel administrators and is rebuilt in full; edits to its five managed tabs
+are overwritten. Normal API writes never wait for Google.
+
+The integration is off by default. Before enabling it:
+
+1. Confirm the hotel approves Google Workspace for member-number and movement
+   data, including the applicable data-residency arrangement.
+2. Create a dedicated workbook with link sharing off. Share it directly with
+   named administrators as **Viewer**, and with the dedicated service account as
+   **Editor**. Do not use "anyone with the link".
+3. Enable the Google Sheets API for that service account's Cloud project.
+4. Put the workbook ID, service-account email and base64 private key in
+   `apps/api/.env`. Never commit the JSON key or paste it into a log or ticket.
+
+PowerShell can extract the two values from Google's downloaded JSON key without
+trying to preserve a multiline PEM value in `.env`:
+
+```powershell
+$account = Get-Content -Raw C:\secure\pgp-sheets-service-account.json | ConvertFrom-Json
+$account.client_email
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($account.private_key))
+```
+
+Set the three `GOOGLE_SHEETS_*` credential values, then test one reconciliation
+from the repository root:
+
+```text
+npm run sheets:sync
+```
+
+It should report counts for `_Sync`, `Members`, `Benefits`, `Outlets` and
+`Redemptions`. Check `_Sync` has a current UTC time, then set
+`GOOGLE_SHEETS_SYNC_ENABLED=true` to run immediately at API readiness and every
+five minutes thereafter. A second identical run replaces the same managed
+ranges; it never appends duplicates or changes unrelated worksheets.
+
+The mirror intentionally excludes member names, phones, emails, request notes,
+consents, audit/IP data, claim codes, OTPs, password hashes, MFA data and tokens.
+Use the authenticated admin dashboard to view personal details or make changes.
+
+Common failures:
+
+- `permission` / HTTP 403: share the workbook with the exact service-account
+  email as Editor.
+- `spreadsheet_not_found` / HTTP 404: copy only the ID between `/d/` and `/edit`.
+- `quota` / HTTP 429: leave the existing workbook alone and retry later.
+- Invalid base64/PEM: encode the JSON document's `private_key` value, not the
+  whole JSON file.
+
+A sync failure makes the workbook stale and logs a category only; PostgreSQL and
+the application remain available. Re-run `npm run sheets:sync` after correcting
+the cause. With more than one API replica, disable the in-process schedule and
+run this command from one external scheduler to prevent competing publishers.
 
 ---
 

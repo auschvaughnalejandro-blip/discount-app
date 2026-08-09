@@ -2,7 +2,7 @@
  * Stage 9 acceptance — audit logging and log redaction.
  *
  *   - viewing a member record writes an audit entry naming the viewer
- *   - a failed verification lookup is recorded
+ *   - recording a redemption is attributed to whoever did it
  *   - grepping application log output for a seeded member's name returns nothing
  *   - audit rows cannot be updated or deleted by the application role
  */
@@ -27,7 +27,6 @@ if (!appUrl || !ownerUrl) {
 let app: FastifyInstance;
 let env: Env;
 let adminToken: string;
-let staffToken: string;
 let memberId: string;
 let memberName: string;
 let memberNumber: string;
@@ -50,18 +49,6 @@ beforeAll(async () => {
     subjectType: 'STAFF',
     role: 'ADMINISTRATOR',
     tokenVersion: admin.tokenVersion,
-    ttlSeconds: 900,
-  });
-
-  const staff = await ownerPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } });
-  staffToken = await issueAccessToken({
-    issuer: env.JWT_ISSUER,
-    audience: env.JWT_AUDIENCE_STAFF,
-    subject: staff.id,
-    subjectType: 'STAFF',
-    role: 'OUTLET_STAFF',
-    ...(staff.outletId ? { outletId: staff.outletId } : {}),
-    tokenVersion: staff.tokenVersion,
     ttlSeconds: 900,
   });
 
@@ -119,61 +106,37 @@ describe('viewing a member record writes an entry naming the viewer', () => {
   });
 });
 
-describe('a failed verification lookup is recorded', () => {
-  it('writes an entry for a lookup against a non-existent number', async () => {
-    const before = await ownerPrisma.auditLog.count({
-      where: { action: 'verification.lookup.failure' },
-    });
+describe('recording a redemption is attributed', () => {
+  it('names who recorded it, and the benefit, but never the member by name', async () => {
+    const before = await ownerPrisma.auditLog.count({ where: { action: 'redemption.recorded' } });
 
-    await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: 'PG-8888' });
+    const spaOutlet = await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } });
+    const spaBenefit = await ownerPrisma.benefit.findUniqueOrThrow({ where: { key: 'spa' } });
 
-    const after = await ownerPrisma.auditLog.count({
-      where: { action: 'verification.lookup.failure' },
-    });
+    const recorded = await request(app.server)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        outletId: spaOutlet.id,
+        memberId,
+        benefitId: spaBenefit.id,
+        partySize: 1,
+        idempotencyKey: `audit-${Date.now()}`,
+      });
+    expect(recorded.status).toBe(201);
 
-    // A run of these is someone walking the sequence (§5).
-    expect(after).toBe(before + 1);
-  });
-
-  it('records the successful lookups too', async () => {
-    const before = await ownerPrisma.auditLog.count({
-      where: { action: 'verification.lookup.success' },
-    });
-
-    await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${staffToken}`)
-      .send({ membershipNumber: memberNumber });
-
-    expect(
-      await ownerPrisma.auditLog.count({ where: { action: 'verification.lookup.success' } }),
-    ).toBe(before + 1);
-  });
-});
-
-describe('every authorization denial is logged', () => {
-  it('records a refused route with the permission that was missing', async () => {
-    const before = await ownerPrisma.auditLog.count({
-      where: { action: 'authorization.denied' },
-    });
-
-    // outlet_staff holds no members:list.
-    await request(app.server)
-      .get('/admin/members')
-      .set('Authorization', `Bearer ${staffToken}`);
+    expect(await ownerPrisma.auditLog.count({ where: { action: 'redemption.recorded' } })).toBe(
+      before + 1,
+    );
 
     const entry = await ownerPrisma.auditLog.findFirstOrThrow({
-      where: { action: 'authorization.denied' },
+      where: { action: 'redemption.recorded' },
       orderBy: { occurredAt: 'desc' },
     });
 
-    expect(await ownerPrisma.auditLog.count({ where: { action: 'authorization.denied' } })).toBe(
-      before + 1,
-    );
-    expect(entry.metadata).toMatchObject({ permission: 'members:list', role: 'OUTLET_STAFF' });
+    // §9: an entry identifies the actor and the subject, and carries no name.
+    expect(entry.actorId).toBeTruthy();
+    expect(JSON.stringify(entry.metadata)).not.toContain(memberName);
   });
 });
 
@@ -285,6 +248,9 @@ describe('the redaction layer keeps personal data out of application logs', () =
         refreshToken: 'opaque-token',
         authorization: 'Bearer abc',
         mfaSecret: 'JBSWY3DP',
+        privateKey: '-----BEGIN PRIVATE KEY-----secret',
+        GOOGLE_SHEETS_PRIVATE_KEY_BASE64: 'base64-service-account-key',
+        client_secret: 'oauth-client-secret',
       }),
     );
 
@@ -295,6 +261,9 @@ describe('the redaction layer keeps personal data out of application logs', () =
       'opaque-token',
       'Bearer abc',
       'JBSWY3DP',
+      '-----BEGIN PRIVATE KEY-----',
+      'base64-service-account-key',
+      'oauth-client-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }

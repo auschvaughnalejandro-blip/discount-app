@@ -1,5 +1,11 @@
 # Security Review
 
+> **Scope correction — 2026-08-09:** only `ADMINISTRATOR` accounts may use the
+> hotel-facing application. Manager, support and outlet-staff values are inert
+> historical database values: they cannot log in, refresh, resolve as a
+> principal or hold permissions. Any role/verification-page confirmations below
+> describe the superseded design and are not approvals for active access.
+
 Every item in `docs/security-implementation.md` §12, with its status and where
 it is enforced. Confirmed items cite the file that enforces them and the test
 that proves it. Deferred items say what is missing and why, without hedging.
@@ -439,7 +445,7 @@ any reference document. `PASSWORD_PEPPER` is an environment variable — at leas
 not colocated with the hashes it protects, which is the property the pepper
 exists for, but not the mechanism §3 asks for.
 
-The same applies to `IDENTITY_CODE_HMAC_SECRET` (§7) and `JWT_SIGNING_KEY`.
+The same applies to `VERIFICATION_SESSION_HMAC_SECRET` (§7) and `JWT_SIGNING_KEY`.
 
 ### ☐ Key rotation with `kid` so old tokens verify during rollover
 **DEFERRED.** §4 requires keys "rotated on schedule, with a `kid`". Single
@@ -522,3 +528,42 @@ In order, if this were going to production:
 
 Items 2 and 3 are ordinary deployment work. Item 1 is a conflict between the
 build plan and the security specification, and needs someone to resolve it.
+
+---
+
+## Conditional external surface: Google Sheets mirror (2026-08-09)
+
+**Code controls confirmed; production activation not yet approved.** The mirror
+is disabled by default and PostgreSQL remains authoritative. It exports only
+membership number/status/usage, benefit/outlet configuration and the existing
+privacy-limited redemption projection. Explicit selects exclude member names,
+phones, emails, request free text, consents, audit/IP records and every
+credential, token, OTP and MFA table. Literal cell values prevent formula
+injection, managed tabs are replaced atomically, and every successful run is
+audited with counts only.
+
+Enabling it creates a standing bulk export outside Fastify RBAC. Before that is
+acceptable, the hotel/privacy owner must approve Google Workspace and its data
+residency, disable link sharing, restrict named humans to Viewer access, grant
+Editor only to the dedicated service identity, and store/rotate its key through
+the deployment secret manager. Those are operational controls and have **not**
+been verified in this repository. Local development sync is configured and
+tested; production sync must remain off until those approvals and deployment
+controls are complete.
+
+---
+
+## Administrator-only access addendum (2026-08-09)
+
+**Confirmed.** `ADMINISTRATOR` is the only active staff role. The account API
+sets it server-side and rejects legacy role/outlet fields. Login, refresh, MFA
+challenge resolution and principal resolution independently reject Manager,
+Support and Outlet Staff rows; their permission lists and query scopes are
+empty as a final fail-closed layer.
+
+Migration `20260809210000_administrator_only_accounts` suspends existing legacy
+rows, increments their token version, revokes live refresh tokens and adds a
+database constraint preventing those roles from becoming active. It retains the
+rows so historic redemptions still name the actor who recorded them. Tests cover
+correct-password login denial, stale/forged-role token denial, account-creation
+payload denial and administrator-only account management.

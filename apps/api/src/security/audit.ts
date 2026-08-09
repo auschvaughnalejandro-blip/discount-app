@@ -34,6 +34,12 @@ export type AuditAction =
   | 'verification.lookup.failure'
   | 'redemption.recorded'
   | 'redemption.reversed'
+  // A benefit request and its decision. The decision is the accountable act:
+  // "who approved 40% off for whom" is the question this programme will be
+  // asked first, and the reason a member cannot approve their own.
+  | 'request.created'
+  | 'request.approved'
+  | 'request.declined'
   | 'report.viewed'
   | 'report.exported'
   | 'report.export.throttled'
@@ -48,6 +54,15 @@ export type AuditAction =
   | 'member.claim_code_issued'
   | 'member.claimed'
   | 'member.consent_changed'
+  // Stage 25. Who was granted an account, who lost one, and who cleared
+  // somebody else's second factor — the three questions asked after an
+  // incident, and none of them answerable before these routes existed.
+  | 'staff.created'
+  | 'staff.suspended'
+  | 'staff.reinstated'
+  | 'staff.mfa_reset'
+  | 'staff.password_set'
+  | 'staff.password_changed'
   | 'auth.login.success'
   | 'auth.login.failure'
   // Stage 19. A password accepted but a second factor still outstanding is not

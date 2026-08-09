@@ -6,9 +6,8 @@
  *   - claim codes are not derivable from the membership number
  *   - consent is stored per channel with a timestamp
  *   - suspension blocks redemption but preserves history
- *   - GET /admin/members is unreachable by outlet_staff (R11)
+ *   - retired staff account types cannot enter administrator routes (R11)
  */
-import { createHmac } from 'node:crypto';
 
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
@@ -90,33 +89,88 @@ async function createMember(phone?: string): Promise<{
   };
 }
 
-const KNOWN_OTP = '123456';
 
-/**
- * The plaintext OTP is never persisted or returned by the API, and there is
- * no SMS provider in this build to receive it (PROGRESS.md Q6). Rather than
- * weaken the endpoint to make testing easier, the test overwrites the stored
- * hash with the hash of a code it chose — the same knowledge an SMS gateway
- * would have had.
- *
- * The endpoint still runs its real verification path against that hash:
- * constant-time comparison, single-use consumption and attempt counting are
- * all exercised exactly as in production.
- */
-async function setKnownOtp(phone: string): Promise<string> {
-  const secret = process.env['OTP_CODE_HMAC_SECRET'] ?? '';
-  const codeHash = createHmac('sha256', secret).update(KNOWN_OTP).digest('hex');
 
-  const updated = await ownerPrisma.otpCode.updateMany({
-    where: { phone, usedAt: null },
-    data: { codeHash },
+// ── Creation ───────────────────────────────────────────────────────────────
+
+describe('a membership nobody could activate is refused at creation', () => {
+  it('requires an email when passcodes are delivered by email', async () => {
+    // The delivery channel is read at startup, so this drives the rule through
+    // a second app built with the channel switched on rather than mutating the
+    // running one.
+    const smtpApp = await buildApp({
+      env: {
+        ...env,
+        OTP_DELIVERY_CHANNEL: 'smtp',
+        SMTP_HOST: 'smtp.example.test',
+        SMTP_USER: 'test@example.test',
+        SMTP_PASSWORD: 'not-a-real-password',
+        SMTP_FROM: 'test@example.test',
+      },
+    });
+    await smtpApp.ready();
+
+    try {
+      const withoutEmail = await request(smtpApp.server)
+        .post('/admin/members')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ fullName: 'No Way To Reach Them' });
+
+      expect(withoutEmail.status).toBe(400);
+      expect(withoutEmail.body.error).toBe('email_required');
+
+      // Deliberately not asserting the happy path here. Creation now sends the
+      // invitation, and this app is pointed at a hostname that does not exist —
+      // so a successful create would sit waiting on an SMTP connection that can
+      // only time out. Every other test in the suite covers the 201.
+    } finally {
+      await smtpApp.close();
+    }
   });
 
-  // Guards against a silent pass if the endpoint stopped issuing an OTP.
-  expect(updated.count).toBeGreaterThan(0);
+  it('says which membership already holds a phone number, rather than failing', async () => {
+    // Clicking "create" twice with the same details used to raise an unmapped
+    // unique-constraint violation — a 500 that read as a broken server when the
+    // truth was that the first click had worked.
+    const phone = `+9745551${Date.now().toString().slice(-3)}`;
+    const first = await request(app.server)
+      .post('/admin/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ fullName: 'Duplicate Phone Test', phone });
 
-  return KNOWN_OTP;
-}
+    expect(first.status).toBe(201);
+    createdMemberIds.push(first.body.id);
+
+    const second = await request(app.server)
+      .post('/admin/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ fullName: 'Someone Else Entirely', phone });
+
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe('phone_already_used');
+    // The message has to name the membership, or an administrator cannot act
+    // on it without going to look.
+    expect(second.body.memberNumber).toBe(first.body.memberNumber);
+
+    // And nothing was written on the second attempt.
+    const named = await ownerPrisma.member.count({
+      where: { fullName: 'Someone Else Entirely' },
+    });
+    expect(named).toBe(0);
+  });
+
+  it('does not require one when no channel is configured', async () => {
+    // Development, where the terminal echo stands in for delivery. A rule with
+    // no reason behind it is a rule people work around.
+    const response = await request(app.server)
+      .post('/admin/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ fullName: 'Dev Only Member' });
+
+    expect(response.status).toBe(201);
+    createdMemberIds.push(response.body.id);
+  });
+});
 
 // ── Claim codes ────────────────────────────────────────────────────────────
 
@@ -174,23 +228,15 @@ describe('R1 — a claim code cannot be used twice', () => {
     const phone = `+9745555${Date.now().toString().slice(-4)}`;
     const member = await createMember(phone);
 
-    // Phase 1 — request the OTP.
-    const phaseOne = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
-    expect(phaseOne.status).toBe(200);
-
-    const otp = await setKnownOtp(phone);
-
-    // Phase 2 — complete the claim.
-    const phaseTwo = await request(app.server).post('/member/claim').send({
+    // Activation is one call: the invitation code arrived in the member's
+    // inbox, which is already proof they hold that address.
+    const activated = await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
       phone,
-      otp,
       consent: { email: true, sms: false },
     });
-    expect(phaseTwo.status).toBe(200);
-    expect(phaseTwo.body.accessToken).toBeTruthy();
+    expect(activated.status).toBe(200);
+    expect(activated.body.accessToken).toBeTruthy();
 
     const consumed = await ownerPrisma.claimCode.findFirstOrThrow({
       where: { memberId: member.id },
@@ -199,10 +245,11 @@ describe('R1 — a claim code cannot be used twice', () => {
 
     // Second attempt, same code.
     resetRateLimits();
-    const replay = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
-
+    const replay = await request(app.server).post('/member/claim').send({
+      claimCode: member.claimCode,
+      phone,
+      consent: { email: true, sms: false },
+    });
     expect(replay.status).toBe(400);
     expect(replay.body.error).toBe('invalid_claim');
   });
@@ -211,18 +258,15 @@ describe('R1 — a claim code cannot be used twice', () => {
     const phone = `+9745556${Date.now().toString().slice(-4)}`;
     const member = await createMember(phone);
 
-    await request(app.server).post('/member/claim').send({ claimCode: member.claimCode, phone });
-    const otp = await setKnownOtp(phone);
-
     // Fired together: the consuming UPDATE carries `usedAt: null`, so exactly
     // one can match. A read-then-write would let both through.
     const [first, second] = await Promise.all([
       request(app.server)
         .post('/member/claim')
-        .send({ claimCode: member.claimCode, phone, otp, consent: { email: false, sms: false } }),
+        .send({ claimCode: member.claimCode, phone, consent: { email: false, sms: false } }),
       request(app.server)
         .post('/member/claim')
-        .send({ claimCode: member.claimCode, phone, otp, consent: { email: false, sms: false } }),
+        .send({ claimCode: member.claimCode, phone, consent: { email: false, sms: false } }),
     ]);
 
     const statuses = [first.status, second.status].sort();
@@ -243,10 +287,11 @@ describe('an expired claim code is rejected', () => {
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    const response = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
-
+    const response = await request(app.server).post('/member/claim').send({
+      claimCode: member.claimCode,
+      phone,
+      consent: { email: false, sms: false },
+    });
     expect(response.status).toBe(400);
     expect(response.body.error).toBe('invalid_claim');
   });
@@ -259,13 +304,16 @@ describe('an expired claim code is rejected', () => {
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    const expired = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
-
-    const unknown = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: generateClaimCode().plaintext, phone });
+    const expired = await request(app.server).post('/member/claim').send({
+      claimCode: member.claimCode,
+      phone,
+      consent: { email: false, sms: false },
+    });
+    const unknown = await request(app.server).post('/member/claim').send({
+      claimCode: generateClaimCode().plaintext,
+      phone,
+      consent: { email: false, sms: false },
+    });
 
     // Which part was wrong is exactly what someone holding a discarded
     // invitation letter would want to learn.
@@ -288,15 +336,17 @@ describe('resend-claim supersedes the outstanding code', () => {
     const replacement = resent.body.claimCode.code;
     expect(replacement).not.toBe(member.claimCode);
 
-    const oldCode = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
+    const oldCode = await request(app.server).post('/member/claim').send({
+      claimCode: member.claimCode,
+      phone,
+      consent: { email: false, sms: false },
+    });
     expect(oldCode.status).toBe(400);
 
     resetRateLimits();
     const newCode = await request(app.server)
       .post('/member/claim')
-      .send({ claimCode: replacement, phone });
+      .send({ claimCode: replacement, phone, consent: { email: false, sms: false } });
     expect(newCode.status).toBe(200);
   });
 });
@@ -308,13 +358,9 @@ describe('R15 — consent is recorded per channel with a timestamp', () => {
     const phone = `+9745560${Date.now().toString().slice(-4)}`;
     const member = await createMember(phone);
 
-    await request(app.server).post('/member/claim').send({ claimCode: member.claimCode, phone });
-    const otp = await setKnownOtp(phone);
-
     await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
       phone,
-      otp,
       consent: { email: true, sms: false },
     });
 
@@ -343,12 +389,9 @@ describe('R15 — consent is recorded per channel with a timestamp', () => {
     const phone = `+9745561${Date.now().toString().slice(-4)}`;
     const member = await createMember(phone);
 
-    await request(app.server).post('/member/claim').send({ claimCode: member.claimCode, phone });
-    const otp = await setKnownOtp(phone);
     const claimed = await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
       phone,
-      otp,
       consent: { email: true, sms: true },
     });
 
@@ -383,12 +426,9 @@ describe('R16 — members are suspended, never deleted', () => {
     const phone = `+9745562${Date.now().toString().slice(-4)}`;
     const member = await createMember(phone);
 
-    await request(app.server).post('/member/claim').send({ claimCode: member.claimCode, phone });
-    const otp = await setKnownOtp(phone);
     const claimed = await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
       phone,
-      otp,
       consent: { email: true, sms: true },
     });
 
@@ -459,41 +499,42 @@ describe('R16 — members are suspended, never deleted', () => {
       .send({});
 
     resetRateLimits();
-    const response = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: member.claimCode, phone });
-
+    const response = await request(app.server).post('/member/claim').send({
+      claimCode: member.claimCode,
+      phone,
+      consent: { email: false, sms: false },
+    });
     expect(response.status).toBe(400);
   });
 });
 
 // ── R11 ────────────────────────────────────────────────────────────────────
 
-describe('R11 — GET /admin/members is unreachable by outlet_staff', () => {
-  it('refuses the member list', async () => {
-    const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
+describe('retired staff accounts cannot enter the administrator panel', () => {
+  it('refuses member list and detail access', async () => {
+    const retiredStaff = await ownerPrisma.staffUser.findFirstOrThrow({
       where: { role: 'OUTLET_STAFF' },
     });
     const token = await issueAccessToken({
       issuer: env.JWT_ISSUER,
       audience: env.JWT_AUDIENCE_STAFF,
-      subject: outletStaff.id,
+      subject: retiredStaff.id,
       subjectType: 'STAFF',
-      role: outletStaff.role,
-      ...(outletStaff.outletId ? { outletId: outletStaff.outletId } : {}),
-      tokenVersion: outletStaff.tokenVersion,
+      role: retiredStaff.role,
+      ...(retiredStaff.outletId ? { outletId: retiredStaff.outletId } : {}),
+      tokenVersion: retiredStaff.tokenVersion,
       ttlSeconds: 300,
     });
 
     const list = await request(app.server)
       .get('/admin/members')
       .set('Authorization', `Bearer ${token}`);
-    expect(list.status).toBe(403);
+    expect(list.status).toBe(401);
 
     const detail = await request(app.server)
       .get(`/admin/members/${(await ownerPrisma.member.findFirstOrThrow()).id}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(detail.status).toBe(403);
+    expect(detail.status).toBe(401);
   });
 
   it('cannot reach any endpoint that returns more than one member', async () => {
@@ -503,17 +544,17 @@ describe('R11 — GET /admin/members is unreachable by outlet_staff', () => {
     // *rendering*, which broke the moment a route was added at `/` — and which
     // had never actually checked the property it claimed to. This drives every
     // enumerating endpoint and asserts none of them answers.
-    const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
+    const retiredStaff = await ownerPrisma.staffUser.findFirstOrThrow({
       where: { role: 'OUTLET_STAFF' },
     });
     const token = await issueAccessToken({
       issuer: env.JWT_ISSUER,
       audience: env.JWT_AUDIENCE_STAFF,
-      subject: outletStaff.id,
+      subject: retiredStaff.id,
       subjectType: 'STAFF',
-      role: outletStaff.role,
-      ...(outletStaff.outletId ? { outletId: outletStaff.outletId } : {}),
-      tokenVersion: outletStaff.tokenVersion,
+      role: retiredStaff.role,
+      ...(retiredStaff.outletId ? { outletId: retiredStaff.outletId } : {}),
+      tokenVersion: retiredStaff.tokenVersion,
       ttlSeconds: 300,
     });
 
@@ -534,7 +575,7 @@ describe('R11 — GET /admin/members is unreachable by outlet_staff', () => {
         .get(path)
         .set('Authorization', `Bearer ${token}`);
 
-      expect(response.status, `${path} answered ${response.status}`).not.toBe(200);
+      expect(response.status, path).toBe(401);
     }
   });
 });

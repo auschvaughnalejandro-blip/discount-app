@@ -27,7 +27,6 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/ui/package.json packages/ui/
 COPY apps/api/package.json apps/api/
 COPY apps/web-member/package.json apps/web-member/
-COPY apps/web-verify/package.json apps/web-verify/
 COPY apps/web-admin/package.json apps/web-admin/
 RUN npm ci
 
@@ -49,10 +48,9 @@ RUN npx prisma generate --schema apps/api/prisma/schema.prisma
 # first request in production.
 RUN npm run typecheck
 
-# The three clients are static after this. Vite inlines nothing secret — the
-# API is reached at a relative /api path, proxied by Caddy.
+# Both clients are static after this. Vite inlines nothing secret — the API is
+# reached at a relative /api path, proxied by Caddy.
 RUN npm run build --workspace @pgp/web-member \
- && npm run build --workspace @pgp/web-verify \
  && npm run build --workspace @pgp/web-admin
 
 
@@ -101,6 +99,5 @@ CMD ["node", "--import", "tsx", "apps/api/src/server.ts"]
 FROM caddy:2-alpine AS web
 # Each client is served from its own hostname; see docker/caddy/Caddyfile.
 COPY --from=build /app/apps/web-member/dist /srv/member
-COPY --from=build /app/apps/web-verify/dist /srv/verify
 COPY --from=build /app/apps/web-admin/dist  /srv/admin
 COPY docker/caddy/Caddyfile /etc/caddy/Caddyfile

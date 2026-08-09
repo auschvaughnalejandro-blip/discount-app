@@ -10,8 +10,6 @@ export interface AccessTokenClaims {
   sub: string;
   subjectType: SubjectType;
   role?: string;
-  /** Outlet the token is scoped to. Present only for OUTLET_STAFF. */
-  oid?: string;
   /** Token version. Compared against the subject's current value on every
    * request; incrementing the stored value invalidates every outstanding
    * access token (security-implementation.md §4). */
@@ -24,7 +22,7 @@ export class TokenVerificationError extends Error {}
 /**
  * security-implementation.md §4: "EdDSA (Ed25519) or RS256. HS256 acceptable
  * only within a single deployable." This build is one Fastify process serving
- * all three surfaces (member app, verification page, admin dashboard) — a
+ * both surfaces (member guest app and administrator panel) — a
  * single deployable — so HS256 applies. See DECISIONS.md.
  *
  * The algorithm is a constant, never read from the token: `jwtVerify` is
@@ -48,7 +46,6 @@ export interface IssueAccessTokenInput {
   subject: string;
   subjectType: SubjectType;
   role?: string;
-  outletId?: string;
   tokenVersion: number;
   ttlSeconds: number;
 }
@@ -60,7 +57,6 @@ export async function issueAccessToken(input: IssueAccessTokenInput): Promise<st
     subjectType: input.subjectType,
     tv: input.tokenVersion,
     ...(input.role !== undefined ? { role: input.role } : {}),
-    ...(input.outletId !== undefined ? { oid: input.outletId } : {}),
   })
     .setProtectedHeader({ alg: ACCESS_TOKEN_ALGORITHM })
     .setIssuer(input.issuer)
@@ -108,12 +104,8 @@ export async function verifyAccessToken(
       throw new TokenVerificationError('Missing tv claim.');
     }
     const role = payload['role'];
-    const oid = payload['oid'];
     if (role !== undefined && typeof role !== 'string') {
       throw new TokenVerificationError('Invalid role claim.');
-    }
-    if (oid !== undefined && typeof oid !== 'string') {
-      throw new TokenVerificationError('Invalid oid claim.');
     }
 
     return {
@@ -124,7 +116,6 @@ export async function verifyAccessToken(
       tv,
       jti,
       ...(role !== undefined ? { role } : {}),
-      ...(oid !== undefined ? { oid } : {}),
     };
   } catch (error) {
     if (error instanceof TokenVerificationError) {

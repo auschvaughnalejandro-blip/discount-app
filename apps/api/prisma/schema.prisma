@@ -31,6 +31,9 @@ enum UserStatus {
 
 enum Role {
   ADMINISTRATOR
+  // Historical values only. Existing rows keep them so foreign-key-backed
+  // member/redemption attribution is not rewritten. They are forced suspended
+  // by a database CHECK and cannot authenticate or receive permissions.
   MANAGER
   OUTLET_STAFF
   SUPPORT
@@ -42,6 +45,17 @@ enum OutletKind {
   ROOMS
   EVENTS
   OTHER
+}
+
+/// A member's request to use a benefit, and what happened to it.
+///
+/// DECLINED and FULFILLED are both terminal. PENDING and APPROVED are the two
+/// states a member can be waiting in, and the only two an outlet ever acts on.
+enum BenefitRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  FULFILLED
 }
 
 enum Channel {
@@ -57,11 +71,10 @@ enum SubjectType {
 /// Members are suspended, never deleted (R16) — deleting one destroys the
 /// redemption history reporting depends on.
 model Member {
-  /// Opaque internal reference. This is what the identity payload carries (R3);
-  /// `memberNumber` never appears in a code.
+  /// Opaque internal reference, used for joins and never shown to anyone.
   id              String       @id @default(uuid())
-  /// Public, sequential, printed on the physical card: "PG-0003". Guessable by
-  /// design, which is exactly why it is not the identity payload's subject.
+  /// Public, sequential, printed on the physical card and shown in the app:
+  /// "PG-0003". This is what a member reads out and what staff type in.
   memberNumber    String       @unique
   fullName        String
   phone           String?      @unique
@@ -82,6 +95,7 @@ model Member {
   claimCodes  ClaimCode[]
   redemptions Redemption[]
   consents    ConsentRecord[]
+  requests    BenefitRequest[]
 
   @@index([status])
   @@index([claimedAt])
@@ -110,9 +124,11 @@ model StaffUser {
   fullName     String
   email        String     @unique
   passwordHash String
+  /// New accounts are always ADMINISTRATOR. Other values survive only on
+  /// suspended historical actors and cannot be selected by account creation.
   role         Role
-  /// Required when role = OUTLET_STAFF. Enforced by a CHECK constraint in the
-  /// migration, not only in application code.
+  /// Retained only to describe historical OUTLET_STAFF actors. New
+  /// administrator accounts always store null.
   outletId     String?
   /// Incrementing this invalidates every outstanding access token for the user
   /// — the mechanism behind logout-everywhere, role change and offboarding.
@@ -137,6 +153,7 @@ model StaffUser {
   redemptions    Redemption[]
   benefitsEdited Benefit[]
   mfaRecoveryCodes MfaRecoveryCode[]
+  requestsDecided  BenefitRequest[]
 
   @@index([role])
   @@index([outletId])
@@ -190,6 +207,11 @@ model Benefit {
   terms           String
   published       Boolean  @default(false)
   sortOrder       Int
+  /// Which kind of outlet honours this benefit, so an approved request reaches
+  /// the spa's list and not the restaurant's. Null means every outlet sees it —
+  /// the honest default for a benefit nobody has assigned yet, since a request
+  /// nobody can see is worse than one seen too widely.
+  outletKind      OutletKind?
   /// Incremented on every change, with the editing user recorded, because
   /// "who changed the spa discount, and when" is a question that will be asked.
   version         Int      @default(1)
@@ -198,6 +220,7 @@ model Benefit {
 
   updatedBy   StaffUser?   @relation(fields: [updatedByUserId], references: [id])
   redemptions Redemption[]
+  requests    BenefitRequest[]
 
   @@index([published, sortOrder])
 }
@@ -214,6 +237,14 @@ model Redemption {
   /// Minor units (fils) as an integer. Never a float — money does not survive
   /// binary floating point.
   billAmountMinor Int?
+  /// The rate this member was actually given, copied from the benefit at the
+  /// moment of recording. Not read back through `benefit` — R14 lets an
+  /// administrator change that percentage at any time, and doing so must not
+  /// rewrite what happened on a past visit.
+  discountPctApplied Decimal @db.Decimal(5, 2)
+  /// Which revision of the benefit's terms and caps was in force, so the rate
+  /// above can be traced to the edit that set it.
+  benefitVersion  Int
   /// Client-supplied; a retried submission must not double-record (R8).
   idempotencyKey String   @unique
   /// Set on a reversing entry. The row it points at is never touched.
@@ -226,11 +257,50 @@ model Redemption {
   staffUser StaffUser   @relation(fields: [staffUserId], references: [id])
   reverses  Redemption? @relation("Reversal", fields: [reversesId], references: [id])
   reversedBy Redemption? @relation("Reversal")
+  request   BenefitRequest?
 
   @@index([memberId, occurredAt])
   @@index([outletId, occurredAt])
   @@index([benefitId, occurredAt])
   @@index([occurredAt])
+}
+
+/// A member asks to use a benefit; a person decides; an outlet fulfils it.
+///
+/// The member never grants themselves anything — this row is the request, and
+/// only a staff decision moves it out of PENDING. Nothing here applies a
+/// discount either: fulfilment writes a Redemption, and that is still the only
+/// record of a benefit having been given.
+model BenefitRequest {
+  id          String               @id @default(uuid())
+  memberId    String
+  benefitId   String
+  status      BenefitRequestStatus @default(PENDING)
+  requestedAt DateTime             @default(now())
+  /// Free text from the member — "Friday evening, four of us". Advisory only;
+  /// no rule reads it.
+  note        String?
+
+  decidedAt       DateTime?
+  decidedByUserId String?
+  /// Shown to the member, so a decline is never silent.
+  decisionReason  String?
+
+  /// The redemption this request authorised, set when an outlet fulfils it.
+  /// Unique: one approval cannot be spent twice, enforced by the database
+  /// rather than by the handler remembering to check.
+  redemptionId String?   @unique
+  fulfilledAt  DateTime?
+
+  member     Member      @relation(fields: [memberId], references: [id])
+  benefit    Benefit     @relation(fields: [benefitId], references: [id])
+  decidedBy  StaffUser?  @relation(fields: [decidedByUserId], references: [id])
+  redemption Redemption? @relation(fields: [redemptionId], references: [id])
+
+  /// The admin queue reads (PENDING, oldest first); an outlet reads
+  /// (APPROVED, today). Both are this index.
+  @@index([status, requestedAt])
+  @@index([memberId, requestedAt])
 }
 
 /// Consent is per channel, unticked by default, stored with timestamp and

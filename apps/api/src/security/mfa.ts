@@ -4,22 +4,10 @@
  *
  * ## Which accounts this applies to
  *
- * `security-implementation.md` §3 says two things that look contradictory:
- *
- * - "MFA is mandatory on every dashboard account, without exception."
- * - "MFA for any staff account that can reach more than the verification page."
- *
- * The second is the specific one and it resolves the first: a `OUTLET_STAFF`
- * account reaches only the verification page and is therefore not a dashboard
- * account. `ADMINISTRATOR`, `MANAGER` and `SUPPORT` all reach more than that,
- * so all three require MFA. §3 already covers outlet staff separately with
- * named individual accounts, no shared logins, shift-length session expiry and
- * instant revocation.
- *
- * This reading was recorded in DECISIONS.md rather than decided silently,
- * because BUILD-PLAN §0 rule 4 requires it and because the alternative — TOTP
- * on a shared counter tablet every shift — is the kind of control that gets
- * worked around rather than followed.
+ * The product has one staff surface: the administrator dashboard. Every active
+ * staff account is therefore an administrator account and MFA is mandatory.
+ * Legacy role values remain only on suspended historical rows and are rejected
+ * by authentication before this module can issue a challenge.
  *
  * ## Why TOTP and not SMS
  *
@@ -48,11 +36,8 @@ import { generateSecret, generateURI, verify as verifyOtpToken } from 'otplib';
 
 import { hashPassword, verifyPassword } from './password.js';
 
-/** Roles that reach more than the verification page. See the note above. */
-const MFA_REQUIRED_ROLES = new Set(['ADMINISTRATOR', 'MANAGER', 'SUPPORT']);
-
 export function roleRequiresMfa(role: string): boolean {
-  return MFA_REQUIRED_ROLES.has(role);
+  return role === 'ADMINISTRATOR';
 }
 
 // ── Secret encryption ────────────────────────────────────────────────────
@@ -232,7 +217,7 @@ export async function verifyTotp(input: {
 /**
  * Ten codes, each 10 characters from an unambiguous alphabet.
  *
- * A hotel manager locked out of the dashboard at 2am needs a route in that is
+ * An administrator locked out of the dashboard at 2am needs a route in that is
  * not "telephone the developer". The alphabet excludes 0/O and 1/I/L because
  * these get read aloud and typed from a printout.
  */

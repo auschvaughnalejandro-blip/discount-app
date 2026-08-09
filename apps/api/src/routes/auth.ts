@@ -1,4 +1,3 @@
-import type { Role } from '@prisma/client';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -17,7 +16,6 @@ import {
   generateRecoveryCodes,
   hashRecoveryCode,
   mfaEnrollmentUri,
-  roleRequiresMfa,
   verifyRecoveryCode,
   verifyTotp,
 } from '../security/mfa.js';
@@ -26,6 +24,11 @@ import {
   verifyMfaChallenge,
   type MfaChallengeStage,
 } from '../security/mfa-challenge.js';
+import {
+  clearRefreshCookie,
+  readRefreshToken,
+  setRefreshCookie,
+} from '../security/session-cookie.js';
 import { issueAccessToken, TokenVerificationError } from '../security/tokens.js';
 import {
   identifyRefreshToken,
@@ -61,7 +64,7 @@ const verifyOtpSchema = z.object({
 }).strict();
 
 const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
 }).strict();
 
 /** Stage 19. A TOTP code, or a recovery code in place of one. */
@@ -88,20 +91,8 @@ const mfaEnrollConfirmSchema = z.object({
 }).strict();
 
 const logoutSchema = z.object({
-  refreshToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
 }).strict();
-
-/**
- * security-implementation.md §4's TTL table is keyed by surface (dashboard /
- * verification page / member app), not directly by role. `OUTLET_STAFF` is
- * the only role that reaches the verification page; every other staff role
- * reaches the dashboard — so the surface is a function of role.
- */
-function staffAccessTokenTtlSeconds(role: string, env: Env): number {
-  return role === 'OUTLET_STAFF'
-    ? env.ACCESS_TOKEN_TTL_STAFF_VERIFY_SECONDS
-    : env.ACCESS_TOKEN_TTL_STAFF_DASHBOARD_SECONDS;
-}
 
 function sendTooManyRequests(reply: FastifyReply, retryAfterSeconds: number): void {
   reply.header('Retry-After', String(retryAfterSeconds));
@@ -111,18 +102,16 @@ function sendTooManyRequests(reply: FastifyReply, retryAfterSeconds: number): vo
 /**
  * The tokens a completed staff sign-in yields.
  *
- * Extracted in Stage 19 so the password-only path (outlet staff) and the
- * post-second-factor path (dashboard accounts) cannot drift apart. If one grew
- * a shorter TTL or forgot an audit entry, the other would silently keep the old
- * behaviour, and the difference would be invisible until someone compared them.
+ * Called only after an administrator completes the second factor. Historical
+ * staff roles are rejected before a challenge or token is issued.
  */
 async function completeStaffSignIn(
   app: Parameters<FastifyPluginAsync>[0],
   env: Env,
-  staff: { id: string; role: Role; outletId: string | null; tokenVersion: number },
+  staff: { id: string; role: 'ADMINISTRATOR'; tokenVersion: number },
   ipAddress: string,
 ): Promise<{ accessToken: string; accessTokenExpiresIn: number; refreshToken: string }> {
-  const ttlSeconds = staffAccessTokenTtlSeconds(staff.role, env);
+  const ttlSeconds = env.ACCESS_TOKEN_TTL_STAFF_DASHBOARD_SECONDS;
 
   const accessToken = await issueAccessToken({
     issuer: env.JWT_ISSUER,
@@ -130,7 +119,6 @@ async function completeStaffSignIn(
     subject: staff.id,
     subjectType: 'STAFF',
     role: staff.role,
-    ...(staff.outletId ? { outletId: staff.outletId } : {}),
     tokenVersion: staff.tokenVersion,
     ttlSeconds,
   });
@@ -184,7 +172,12 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       ? await verifyPassword(body.password, staff.passwordHash)
       : await verifyAgainstDummy();
 
-    if (!staff || !passwordOk || staff.status !== 'ACTIVE') {
+    if (
+      !staff ||
+      !passwordOk ||
+      staff.status !== 'ACTIVE' ||
+      staff.role !== 'ADMINISTRATOR'
+    ) {
       // §9: every authentication event. The email is not recorded — a failed
       // login against a non-existent account would otherwise write the
       // attacker's guess into the audit trail.
@@ -198,46 +191,32 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(401).send({ error: 'invalid_credentials', message: 'Invalid credentials.' });
     }
 
-    /**
-     * Stage 19 (Q5). §3: MFA on every account that reaches more than the
-     * verification page. The password alone gets no tokens for those accounts —
-     * only a challenge, which authorises nothing but the attempt to present a
-     * second factor.
-     *
-     * `enroll` when the account has never completed enrollment, so "without
-     * exception" cannot be satisfied by simply never enrolling. There is no
-     * path from an un-enrolled dashboard account to an access token.
-     */
-    if (roleRequiresMfa(staff.role)) {
-      const stage: MfaChallengeStage = staff.mfaEnrolledAt === null ? 'enroll' : 'verify';
+    // Password alone never yields an administrator token. A fresh account must
+    // enrol; an enrolled one must verify its existing second factor.
+    const stage: MfaChallengeStage = staff.mfaEnrolledAt === null ? 'enroll' : 'verify';
 
-      const challengeToken = await issueMfaChallenge({
-        issuer: env.JWT_ISSUER,
-        audience: env.JWT_AUDIENCE_STAFF,
-        staffUserId: staff.id,
-        stage,
-        ttlSeconds: env.MFA_CHALLENGE_TTL_SECONDS,
-      });
+    const challengeToken = await issueMfaChallenge({
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE_STAFF,
+      staffUserId: staff.id,
+      stage,
+      ttlSeconds: env.MFA_CHALLENGE_TTL_SECONDS,
+    });
 
-      await writeAudit(app.prisma, {
-        action: 'auth.mfa.challenged',
-        principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
-        subjectType: 'StaffUser',
-        subjectId: staff.id,
-        ipAddress: request.ip,
-      });
+    await writeAudit(app.prisma, {
+      action: 'auth.mfa.challenged',
+      principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
+      subjectType: 'StaffUser',
+      subjectId: staff.id,
+      ipAddress: request.ip,
+    });
 
-      return reply.code(200).send({
-        mfaRequired: true,
-        stage,
-        challengeToken,
-        challengeExpiresIn: env.MFA_CHALLENGE_TTL_SECONDS,
-      });
-    }
-
-    // OUTLET_STAFF only, by the branch above: the verification page is not a
-    // dashboard, and §3 covers it with named accounts and shift-length expiry.
-    return reply.code(200).send(await completeStaffSignIn(app, env, staff, request.ip));
+    return reply.code(200).send({
+      mfaRequired: true,
+      stage,
+      challengeToken,
+      challengeExpiresIn: env.MFA_CHALLENGE_TTL_SECONDS,
+    });
   });
 
   // ── MFA (Stage 19) ────────────────────────────────────────────────────
@@ -258,9 +237,8 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         ok: true;
         staff: {
           id: string;
-          role: Role;
+          role: 'ADMINISTRATOR';
           email: string;
-          outletId: string | null;
           tokenVersion: number;
           mfaSecret: string | null;
           mfaEnrolledAt: Date | null;
@@ -291,7 +269,6 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         id: true,
         role: true,
         email: true,
-        outletId: true,
         tokenVersion: true,
         status: true,
         mfaSecret: true,
@@ -302,11 +279,11 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     // Suspended between password and second factor: no tokens. §3's "instant
     // revocation from the dashboard" has to hold inside this window too.
-    if (!staff || staff.status !== 'ACTIVE' || !roleRequiresMfa(staff.role)) {
+    if (!staff || staff.status !== 'ACTIVE' || staff.role !== 'ADMINISTRATOR') {
       return { ok: false };
     }
 
-    return { ok: true, staff };
+    return { ok: true, staff: { ...staff, role: 'ADMINISTRATOR' } };
   }
 
   /** One shape for every MFA rejection — never "wrong code" versus "expired". */
@@ -404,6 +381,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const tokens = await completeStaffSignIn(app, env, resolved.staff, request.ip);
+    setRefreshCookie(reply, env, tokens.refreshToken, env.REFRESH_TOKEN_TTL_STAFF_SECONDS);
     return reply.code(200).send({ ...tokens, recoveryCodes });
   });
 
@@ -508,6 +486,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const tokens = await completeStaffSignIn(app, env, resolved.staff, request.ip);
+    setRefreshCookie(reply, env, tokens.refreshToken, env.REFRESH_TOKEN_TTL_STAFF_SECONDS);
     const remaining = await app.prisma.mfaRecoveryCode.count({
       where: { staffUserId: resolved.staff.id, usedAt: null },
     });
@@ -632,24 +611,34 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       ttlSeconds: env.REFRESH_TOKEN_TTL_MEMBER_SECONDS,
     });
 
+    setRefreshCookie(reply, env, refresh.token, env.REFRESH_TOKEN_TTL_MEMBER_SECONDS);
+
     return reply.code(200).send({
       accessToken,
       accessTokenExpiresIn: env.ACCESS_TOKEN_TTL_MEMBER_SECONDS,
+      // Still in the body as well, for a native shell with a keystore and no
+      // cookie jar. A browser client should ignore it and let the cookie work.
       refreshToken: refresh.token,
     });
   });
 
   // ── POST /auth/refresh ─────────────────────────────────────────────────
   app.post('/auth/refresh', PUBLIC_ROUTE, async (request, reply) => {
-    const body = refreshSchema.parse(request.body);
+    const body = refreshSchema.parse(request.body ?? {});
+    const presented = readRefreshToken(request, body);
+    if (!presented) {
+      return reply.code(401).send({ error: 'invalid_refresh_token', message: 'Session expired.' });
+    }
 
-    const identity = await identifyRefreshToken(app.prisma, body.refreshToken);
+    const identity = await identifyRefreshToken(app.prisma, presented);
     if (!identity) {
+      // The cookie is spent, forged or revoked. Clearing it stops the browser
+      // replaying a dead token on every subsequent load.
+      clearRefreshCookie(reply, env);
       return reply.code(401).send({ error: 'invalid_refresh_token', message: 'Session expired.' });
     }
 
     let subjectRole: string | undefined;
-    let subjectOutletId: string | undefined;
     let currentTokenVersion: number;
     let ttlSeconds: number;
     let accessTtlSeconds: number;
@@ -657,17 +646,15 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     if (identity.subjectType === 'STAFF') {
       const staff = await app.prisma.staffUser.findUnique({ where: { id: identity.subjectId } });
-      if (!staff || staff.status !== 'ACTIVE') {
+      if (!staff || staff.status !== 'ACTIVE' || staff.role !== 'ADMINISTRATOR') {
         await revokeAllForSubject(app.prisma, identity.subjectId, identity.subjectType);
+        clearRefreshCookie(reply, env);
         return reply.code(401).send({ error: 'invalid_refresh_token', message: 'Session expired.' });
       }
       subjectRole = staff.role;
-      if (staff.outletId) {
-        subjectOutletId = staff.outletId;
-      }
       currentTokenVersion = staff.tokenVersion;
       ttlSeconds = env.REFRESH_TOKEN_TTL_STAFF_SECONDS;
-      accessTtlSeconds = staffAccessTokenTtlSeconds(staff.role, env);
+      accessTtlSeconds = env.ACCESS_TOKEN_TTL_STAFF_DASHBOARD_SECONDS;
       audience = env.JWT_AUDIENCE_STAFF;
     } else {
       const member = await app.prisma.member.findUnique({ where: { id: identity.subjectId } });
@@ -683,7 +670,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     let rotated;
     try {
-      rotated = await rotateRefreshToken(app.prisma, body.refreshToken, ttlSeconds);
+      rotated = await rotateRefreshToken(app.prisma, presented, ttlSeconds);
     } catch (error) {
       if (error instanceof RefreshTokenError) {
         if (error.reason === 'reuse_detected') {
@@ -714,8 +701,14 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       tokenVersion: currentTokenVersion,
       ttlSeconds: accessTtlSeconds,
       ...(subjectRole !== undefined ? { role: subjectRole } : {}),
-      ...(subjectOutletId !== undefined ? { outletId: subjectOutletId } : {}),
     });
+
+    // Rotation issues a new token and revokes the old one, so the cookie has
+    // to carry the replacement. Missing this would leave the browser holding a
+    // token that is already spent — and presenting a spent token is what
+    // triggers family revocation, logging the member out on their next visit
+    // for what looks like no reason at all.
+    setRefreshCookie(reply, env, rotated.token, ttlSeconds);
 
     return reply.code(200).send({
       accessToken,
@@ -726,19 +719,25 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
   // ── POST /auth/logout ──────────────────────────────────────────────────
   app.post('/auth/logout', PUBLIC_ROUTE, async (request, reply) => {
-    const body = logoutSchema.parse(request.body);
+    const body = logoutSchema.parse(request.body ?? {});
+    const presented = readRefreshToken(request, body);
     // Always 200, whether or not the token was valid — its validity is not
     // something this endpoint discloses.
-    await revokeToken(app.prisma, body.refreshToken);
+    if (presented) {
+      await revokeToken(app.prisma, presented);
+    }
+    clearRefreshCookie(reply, env);
     await writeAudit(app.prisma, { action: 'auth.logout', ipAddress: request.ip });
     return reply.code(200).send({ success: true });
   });
 
   // ── POST /auth/logout-all ──────────────────────────────────────────────
   app.post('/auth/logout-all', PUBLIC_ROUTE, async (request, reply) => {
-    const body = logoutSchema.parse(request.body);
+    const body = logoutSchema.parse(request.body ?? {});
+    const presented = readRefreshToken(request, body);
+    clearRefreshCookie(reply, env);
 
-    const identity = await identifyRefreshToken(app.prisma, body.refreshToken);
+    const identity = presented ? await identifyRefreshToken(app.prisma, presented) : null;
 
     if (identity) {
       await revokeAllForSubject(app.prisma, identity.subjectId, identity.subjectType);

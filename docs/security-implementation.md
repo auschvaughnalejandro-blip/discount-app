@@ -1,7 +1,7 @@
 # Security Implementation Specification
 
-**Product:** Privilege Guest Program — member app, verification page, admin dashboard
-**Version:** 2 — revised for confirmed scope
+**Product:** Privilege Guest Program — member guest app and administrator panel
+**Version:** 3 — revised for administrator-only hotel access
 **Audience:** Engineering
 
 ---
@@ -24,7 +24,9 @@ Every access-control decision below follows from that.
 
 **Never trust the client.** Not the body, not a header, not a value inside a token the client could have influenced. Role and scope are resolved server-side on every request.
 
-**Authorize at the object, not the route.** Confirming a caller holds the *manager* role is not the same as confirming this record is one they may see. Nearly every real-world data leak lives in that gap.
+**Authorize at the object, not the route.** Confirming that a caller is an
+administrator is not the same as confirming that the requested record and
+operation are valid. Nearly every real-world data leak lives in that gap.
 
 **Minimum exposure.** Nobody sees a member record they do not need for the task in front of them. This is a small membership; there is no operational reason for broad access.
 
@@ -89,12 +91,14 @@ The invitation code that activates a membership.
 - Bound to a specific member record on issue.
 - Strict rate limiting on the activation endpoint, since a guessable claim code grants a genuine membership.
 
-## Staff accounts
+## Administrator accounts
 
-- Named individual accounts. **No shared outlet logins ever** — an unattributed redemption record is worthless for both audit and deterrence.
+- Named individual accounts. **No shared logins** — an unattributed action is worthless for both audit and deterrence.
 - Sessions expire on a shift-length timer.
-- Instant revocation from the dashboard.
-- MFA for any staff account that can reach more than the verification page.
+- Instant revocation from the administrator panel.
+- MFA on every administrator account, without exception.
+- `MANAGER`, `SUPPORT` and `OUTLET_STAFF` are retired historical database
+  values only. They cannot authenticate, refresh a session or hold a permission.
 
 ## Account enumeration
 
@@ -113,7 +117,7 @@ A JWT cannot be individually revoked without building the server-side state it w
 | | Access token | Refresh token |
 |---|---|---|
 | Format | Signed JWT | Opaque random string |
-| Lifetime | 10 min (dashboard), 15 min (verification page), 30 min (member app) | 30 days sliding (member), 12 hours (staff) |
+| Lifetime | 10 min (administrator panel), 30 min (member app) | 30 days sliding (member), 12 hours (administrator) |
 | Server state | None | Hashed, with family ID |
 | Revocable | By expiry and token version | Immediately |
 
@@ -132,8 +136,7 @@ Staff refresh lifetimes are deliberately short. A member's session persisting is
   "iss": "privilege-guest",
   "aud": "admin-api",
   "sub": "usr_01H...",
-  "role": "outlet_staff",
-  "oid": "out_spa",
+  "role": "ADMINISTRATOR",
   "tv":  4,
   "jti": "jwt_01H...",
   "iat": 1753800000,
@@ -153,7 +156,9 @@ Every refresh issues a new token and invalidates the old one; each chain carries
 
 ## Client storage
 
-- **Dashboard and verification page:** `httpOnly; Secure; SameSite=Strict` cookies. **Never `localStorage`** — any XSS flaw becomes total account theft. Cookie auth requires CSRF protection: SameSite plus a double-submit token on state-changing requests.
+- **Administrator panel:** `httpOnly; Secure; SameSite=Strict` refresh cookie.
+  **Never `localStorage`** — any XSS flaw becomes total account theft. The
+  access token remains in memory and state-changing routes use its bearer header.
 - **Member app:** iOS Keychain, Android Keystore. Never plain preferences.
 - No tokens in URLs. They reach logs, history and referrer headers.
 
@@ -182,24 +187,21 @@ route.get('/members/:id', {
 
 This is the single highest-value control here. The realistic failure is not a broken check — it is a new endpoint shipped under deadline with no check at all.
 
-## Role matrix
+## Account/permission matrix
 
-| Role | Can reach | Explicitly cannot |
-|---|---|---|
-| `administrator` | Everything: members, benefits, reports, staff, exports | — |
-| `manager` | Member list, member detail, reports | Edit benefits, manage staff, export |
-| `outlet_staff` | Verification page only | **Member list, search, reports, any member not just scanned** |
-| `support` | Single member by exact ID | Listing, browsing, exporting |
+| Account type | Can reach |
+|---|---|
+| `ADMINISTRATOR` | Members, requests, redemptions, benefits, reports, exports and administrator-account management |
+| Member | That member's own guest-app data and actions |
 
-## The staff restriction, implemented
+## Retired staff roles, implemented
 
-Outlet staff must never be able to enumerate the membership. This needs real enforcement, not a hidden menu item:
-
-- **There is no list endpoint available to the `outlet_staff` role.** Not filtered — absent.
-- Lookup requires an **exact** membership number or a scanned code. No partial matching, no wildcard, no name search.
-- The result is bound to a **short-lived verification session** — staff can act on that member for a few minutes, then the context expires.
-- **Rate limited hard**: a handful of lookups per staff member per hour. Membership numbers are sequential and printed on cards, so an unlimited lookup endpoint is an enumeration tool.
-- Failed lookups against non-existent numbers are logged and alerted — that pattern is someone probing.
+The UI never offers a role choice. The account-creation endpoint always stores
+`ADMINISTRATOR`. Pre-existing non-administrator rows are suspended and retained
+only when historical records point to them. Login, MFA challenge resolution,
+refresh, principal resolution, permissions and administrator-account actions all
+reject those rows independently, so hiding them in the menu is not the security
+boundary.
 
 ## Never derive authority from the request
 
@@ -250,22 +252,12 @@ Without this, aggregate reporting becomes an indirect route to individual member
 
 ---
 
-# 7. Codes
+# 7. Member identifiers and requests
 
-## Member identity payload
-
-```
-v1.<member_ref>.<issued_at>.<hmac>
-```
-
-- `member_ref` is an **opaque random identifier**, never the printed PG number, which is sequential and guessable.
-- HMAC over the full payload, keyed from the key management service.
-- `issued_at` refreshed whenever the app regenerates the code. The verification page rejects payloads older than a configured window — defeating forwarded screenshots.
-- **Identifies only.** Entitlement is resolved server-side against the member record. Possession of the code never itself applies a discount.
-
-## Why rotation matters here
-
-A 40% spa discount and 30% off room rates are worth real money. A static code circulated in a group chat would be used. The rotation window is a **tunable setting**, not a hardcoded constant: start around 24 hours, monitor verification failures at outlets, and adjust.
+The guest app displays the member name and printed membership number; it does
+not emit a QR credential. Possession of a membership number never authorises a
+discount. A signed-in member submits a benefit request for their own account,
+and an administrator makes the decision and records fulfilment server-side.
 
 ## Redemption records
 
@@ -325,16 +317,16 @@ That last point is easy to miss and worth stating in review.
 
 # 11. Testing
 
-**An authorization matrix in CI: every role against every endpoint**, with declared expected outcomes. The build fails on any deviation.
+**An authorization matrix in CI: administrator and member principals against
+every endpoint**, with declared expected outcomes. The build fails on any
+deviation. Retired database role values are also tested as universal denials.
 
 Also automated:
 
-- `outlet_staff` attempting any list or search endpoint — must 404 or 403 on every one
-- Member lookup by sequential enumeration — must rate-limit and alert
+- Every retired staff role attempting login, refresh or a protected endpoint — must be denied
 - Token manipulation: `alg: none`, altered `role`, expired, wrong audience, tampered signature
 - Refresh reuse triggering family revocation
 - Claim code reuse — must fail on second attempt
-- Stale identity payload — must be rejected by verification
 - Small-cohort suppression on every reporting endpoint
 - Redemption idempotency under duplicate submission
 
@@ -359,10 +351,8 @@ Also automated:
 
 **Authorization**
 - [ ] Every route declares a permission; undeclared routes fail at startup
-- [ ] No list or search endpoint reachable by `outlet_staff`
-- [ ] Lookup requires an exact identifier; no partial matching
-- [ ] Verification sessions expire within minutes
-- [ ] Lookup rate limits enforced and alerting on failures
+- [ ] Only `ADMINISTRATOR` may authenticate to the hotel-facing surface
+- [ ] Retired historical staff rows have no permission and no reusable session
 - [ ] Queries scoped in `WHERE`; out-of-scope returns 404
 - [ ] Authorization matrix passing in CI
 

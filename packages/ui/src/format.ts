@@ -83,3 +83,36 @@ export function formatDate(value: string | Date): string {
   const date = parse(value);
   return date === null ? String(value) : dateOnly.format(date);
 }
+
+/**
+ * Money, from integer minor units.
+ *
+ * Every amount in this system is stored and transported as fils — an integer —
+ * because money does not survive binary floating point, and the division by 100
+ * belongs at the point of display rather than anywhere a value is added up.
+ *
+ * `maximumFractionDigits: 0` is a deliberate reading of what these figures are
+ * for. A member glancing at what their membership has saved them wants the
+ * magnitude; two decimal places of fils on a four-figure total is noise
+ * pretending to be precision. The exact fils are in the record, not the glance.
+ */
+const qar = new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: 'QAR',
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Returns null for a null amount rather than "QAR 0".
+ *
+ * A redemption may legitimately carry no bill — recording one never required an
+ * amount — and rendering that absence as a zero tells a member they saved
+ * nothing on a visit where nobody wrote the total down. The caller decides what
+ * an unknown looks like; this refuses to invent one.
+ */
+export function formatMoney(minorUnits: number | null | undefined): string | null {
+  if (minorUnits === null || minorUnits === undefined || !Number.isFinite(minorUnits)) {
+    return null;
+  }
+  return qar.format(minorUnits / 100);
+}

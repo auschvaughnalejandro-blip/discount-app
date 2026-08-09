@@ -111,7 +111,7 @@ table {
  *
  * `:focus-visible` rather than `:focus`, so a mouse click does not leave a ring
  * behind, but every keyboard user gets one. Removing this is not an option —
- * the verify page is operated under time pressure and staff do use the keyboard.
+ * the administrator panel is operated under time pressure and administrators use the keyboard.
  */
 :focus-visible {
   outline: none;

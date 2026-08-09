@@ -12,7 +12,7 @@ Written to be followed in order. Stage numbers refer to `ROADMAP.md`.
 
 # 0. The shape of it
 
-Four things run. Three of them are static files.
+Three things run. Two of them are static files.
 
 ```
                          Internet
@@ -22,11 +22,10 @@ Four things run. Three of them are static files.
                      └──────┬───────┘
     my.<domain>   ──────────┤   public          member app (static)
     api.<domain>  ──────────┤   public          Fastify — /admin/* restricted
-    verify.<domain> ────────┤   internal only   verification page (static)
     admin.<domain>  ────────┤   internal only   dashboard (static)
                             │
                      ┌──────┴───────┐
-                     │  Fastify API │  one process, three audiences
+                     │  Fastify API │  one process, two audiences
                      └──────┬───────┘
                      ┌──────┴───────┐
                      │  PostgreSQL  │  never published, on any address
@@ -43,7 +42,7 @@ plane, from another country. What is restricted is not "the backend" but which
 
 These have lead times and block a launch more often than code does.
 
-- [ ] **A domain.** Four hostnames come off it (`my`, `api`, `verify`, `admin`).
+- [ ] **A domain.** Three hostnames come off it (`my`, `api`, `admin`).
 - [ ] **A hosting account in a Doha region.** Azure Qatar Central or Google Cloud
       `me-central1`. §9 of the product definition is blunt about why in-region
       matters: the membership list is "a record of named, prominent individuals
@@ -56,8 +55,6 @@ These have lead times and block a launch more often than code does.
 - [ ] **Privacy policy and terms, at a public URL.** The member profile screen
       links to both and the content does not exist. Also required by both app
       stores.
-- [ ] **Decide the verification page's exposure.** See §5.3 — it changes whether
-      outlet staff need MFA.
 
 ---
 
@@ -81,12 +78,11 @@ sudo usermod -aG docker "$USER"    # log out and back in
 
 ## DNS
 
-Four A records, all pointing at the VM:
+Three A records, all pointing at the VM:
 
 ```
 my.<domain>      A    <server-ip>
 api.<domain>     A    <server-ip>
-verify.<domain>  A    <server-ip>
 admin.<domain>   A    <server-ip>
 ```
 
@@ -159,7 +155,7 @@ development values:
 openssl rand -hex 32   # JWT_SIGNING_KEY
 openssl rand -hex 32   # PASSWORD_PEPPER
 openssl rand -hex 32   # OTP_CODE_HMAC_SECRET
-openssl rand -hex 32   # IDENTITY_CODE_HMAC_SECRET
+openssl rand -hex 32   # VERIFICATION_SESSION_HMAC_SECRET
 openssl rand -hex 32   # MFA_SECRET_ENCRYPTION_KEY  (must be exactly 64 hex chars)
 ```
 
@@ -172,6 +168,45 @@ Settings that differ from development, and why:
 | `OTP_DELIVERY_CHANNEL` | `smtp` | Otherwise no member can sign in |
 | `TRUST_PROXY` | `true` | **See below** |
 | `API_HOST` | `0.0.0.0` | So Caddy can reach it inside the compose network |
+
+## Google Sheets mirror (optional)
+
+This is an outbound, derived reporting surface, not a database replacement and
+not a backup. Leave `GOOGLE_SHEETS_SYNC_ENABLED=false` until all of these are
+true:
+
+- the hotel has approved Google Workspace for member-number and movement data,
+  including any cross-border/data-residency implications;
+- a dedicated production workbook exists with link sharing disabled;
+- named hotel administrators have Viewer access, and only the dedicated service
+  account has Editor access;
+- the Google Sheets API is enabled in the service account's Cloud project; and
+- the private key is held in the deployment secret store, not committed or
+  baked into the image.
+
+Use a different workbook and service identity in staging. Set the five
+`GOOGLE_SHEETS_*` variables documented in `.env.example`. The private-key value
+is base64 of the downloaded JSON credential's `private_key` field, not of the
+whole JSON document; base64 is an encoding, not protection.
+
+Before enabling the schedule, perform one reconciliation using Compose's
+environment (the production image deliberately contains no `.env` file):
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm api \
+  node --import tsx apps/api/scripts/sheets-sync.ts
+```
+
+Verify all five managed tabs and their row counts, confirm `_Sync` has a current
+UTC timestamp, and confirm no member name, phone or email appears. Then set
+`GOOGLE_SHEETS_SYNC_ENABLED=true` and redeploy. The current single API process
+runs one reconciliation immediately and then at the configured interval. If the
+API is horizontally scaled, use one external scheduler instead; otherwise every
+replica will publish the same workbook.
+
+The API requires outbound HTTPS to Google's OAuth and Sheets endpoints. Failure
+is isolated: application writes continue in PostgreSQL, the prior workbook stays
+visible, and the worker retries on its next interval.
 
 ## `TRUST_PROXY` is not optional behind Caddy
 
@@ -193,7 +228,7 @@ Caddy does, and which a directly-exposed API does not.
 
 ## 5.2 What is internal
 
-`verify.<domain>`, `admin.<domain>`, and `/admin/*` on the public API host.
+`admin.<domain>`, and `/admin/*` on the public API host.
 
 Set `INTERNAL_CIDR` in `.env` to the hotel's network range, plus your VPN range:
 
@@ -205,20 +240,12 @@ INTERNAL_CIDR=203.0.113.0/24 10.8.0.0/24
 Restricting only the frontend leaves the endpoints it calls answering the whole
 internet, and the restriction becomes decorative. The Caddyfile does both.
 
-## 5.3 The decision that changes MFA scope
+## 5.3 Every administrator account needs a second factor
 
-Stage 19 exempted `OUTLET_STAFF` from MFA, following §3's "MFA for any staff
-account that can reach more than the verification page". **That exemption assumes
-the verification page is not on the open internet.**
-
-- **Verify page internal-only** → the exemption stands. §3's named accounts,
-  shift-length expiry and instant revocation are proportionate.
-- **Verify page public for any reason** → **extend MFA to `OUTLET_STAFF`.** Add
-  it to `MFA_REQUIRED_ROLES` in `src/security/mfa.ts`. Password-only
-  authentication on a public endpoint reaching member records is a materially
-  worse position than the one that decision was made in.
-
-Choose deliberately now rather than discovering later which one you are in.
+There is one hotel-facing account type: `ADMINISTRATOR`, and every such account
+requires MFA. Manager, support and outlet-staff accounts are not created or
+accepted by the application. Any legacy rows are suspended and retained only so
+historical redemptions keep their original attribution.
 
 ---
 
@@ -251,8 +278,8 @@ operation. That is suggested Stage 25 and it should land before launch, because
 Not a checklist to skim. Each of these has failed silently in a real system.
 
 ```bash
-# 1. TLS on all four hosts, valid certificate
-for h in my api verify admin; do
+# 1. TLS on all three hosts, valid certificate
+for h in my api admin; do
   curl -sS -o /dev/null -w "$h %{http_code} %{ssl_verify_result}\n" \
     "https://$h.<domain>/"
 done
@@ -278,9 +305,6 @@ Then, by hand:
 - [ ] **R7 holds** — the raw `UPDATE` in §3 is refused.
 - [ ] **A member can sign in.** A real handset receives a real code.
 - [ ] **An administrator can complete MFA** and lands on the dashboard.
-- [ ] **The camera works on a real counter tablet.** This is the first point at
-      which it can be tested at all — `getUserMedia` needs a secure context, so
-      until now the scanner has only run on `localhost`.
 - [ ] **The full Stage 13 acceptance journey passes against the deployed
       instance**, not just locally.
 - [ ] **No member name, phone or email appears in the container logs.** Grep for
@@ -290,9 +314,10 @@ Then, by hand:
 
 # 8. Backups
 
-The database is the programme's only record. Redemptions are immutable and audit
-logs are append-only, which protects against tampering and does nothing about a
-lost disk.
+PostgreSQL is the programme's authoritative record. The Google Sheet is
+rebuildable derived data and must never be treated as a backup. Redemptions are
+immutable and audit logs are append-only, which protects against tampering and
+does nothing about a lost disk.
 
 ```bash
 # Nightly, encrypted, off the box.
@@ -312,7 +337,9 @@ Retention has no answer in code yet — see the pre-launch list in `ROADMAP.md`.
 
 **Monitoring.** Alert on `/health` and `/health/ready` *separately*. They were
 built to distinguish a dead process from a dead database, which is only useful if
-they are watched independently.
+they are watched independently. When the Sheets mirror is enabled, also alert if
+`_Sync.last_successful_sync_utc` is older than twice the configured interval or
+the API repeatedly logs `Google Sheets mirror update failed`.
 
 **Logs.** `docker compose logs -f api`. The §9 redaction layer strips names,
 phones and emails — verify that in production output, not only in tests.
@@ -348,7 +375,7 @@ Deployment does not close these. They are tracked where they belong.
 | Arabic and RTL | Stage 22 |
 | App Store and Play Store | Stage 23 |
 
-The Caddyfile in this repository sets security headers on the three **static**
+The Caddyfile in this repository sets security headers on both **static**
 hosts. Stage 20's helmet configuration covers the API. Both are needed: the API
-serves JSON and is a defence-in-depth case, while the three single-page apps are
+serves JSON and is a defence-in-depth case, while the two single-page apps are
 the actual XSS surface.

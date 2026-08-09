@@ -1,55 +1,198 @@
 /**
- * The member app's palette — Stage 17.
+ * The member app's palette — retuned to the Privilege Guest design system.
  *
- * Deep navy and brass. This is the only surface a member ever sees, and the
- * thing it replaces is a printed letter from the Cluster General Manager and an
- * engraved numbered card. It should feel closer to that than to a loyalty app:
- * quiet, dark, warm metal rather than bright accent colours.
+ * This replaces the earlier "Refined Obsidian & Brass" reading (#0c0c0f canvas,
+ * #c9a84c accent). The new direction is warmer and browner: a #221C1B base with
+ * a sand accent, taken from the seven design boards and verified against them —
+ * every hex below appears verbatim in the exported artwork.
  *
- * Only semantic tokens are overridden. The spacing scale, type scale and status
- * meanings come from @pgp/ui unchanged, which is why the verify page and the
- * dashboard still agree with this app about what "suspended" looks like.
+ * Two layers live here, and the distinction matters:
+ *
+ *   1. **Brand tokens** (--base, --sand, --gold-line …) are the design system's
+ *      own names. Components written for these screens use these.
+ *   2. **Semantic remaps** (--c-surface, --c-primary …) point the shared
+ *      @pgp/ui element styling at the brand palette, so a `<button>` or an
+ *      `[role="alert"]` that nothing here restyles still lands in the palette
+ *      rather than the neutral dashboard default.
+ *
+ * The spacing, radius and status scales still come from @pgp/ui unchanged,
+ * which is why the dashboard and this app continue to agree about what
+ * "suspended" means.
  */
 
+/**
+ * The wordmark face — Fairplex Narrow OT Book.
+ *
+ * Declared before the file exists, deliberately. Fairplex is a commercial
+ * Emigre typeface and no copy is in this repository; once a licensed webfont
+ * is dropped into `public/fonts/` under one of the names below, the wordmark
+ * picks it up on the next reload with no code change. Until then the browser
+ * fails these requests quietly and `--font-wordmark` falls through to its
+ * serif stack — `font-display: swap` means text paints immediately either way,
+ * so a missing file costs a 404 in the console and nothing on screen.
+ *
+ * Self-hosted rather than a CDN because the CSP is `font-src 'self'`
+ * (docker/caddy/Caddyfile) — a hosted font URL would be blocked in production
+ * while working perfectly in development, which is the worst way to find out.
+ *
+ * woff2 first: roughly half the bytes of the OTF, and every browser this app
+ * supports reads it. The OTF is there so a desktop-format purchase also works.
+ */
+@font-face {
+  font-family: 'Fairplex Narrow OT';
+  src:
+    url('/fonts/FairplexNarrowOT-Book.woff2') format('woff2'),
+    url('/fonts/FairplexNarrowOT-Book.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --c-canvas: #0d1420;
-  --c-surface: #141d2c;
-  --c-surface-sunken: #0a1017;
-  --c-surface-raised: #1b2637;
-  --c-panel-header: #1b2637;
+  /* ── Brand colour ──────────────────────────────────────────────────────
+     Exact values from the design boards. `--paper` is the one addition: the
+     artwork uses it as the light ground behind the card's code block, and it
+     had no name in the token table. */
+  --base: #221c1b;
+  --surface: #382f2d;
+  --surface-2: #4a4240;
+  --paper: #edeae4;
 
-  --c-text: #f2f4f8;
-  --c-text-muted: #9aa7bd;
-  --c-text-faint: #6b7893;
-  --c-text-inverse: #0d1420;
+  --text: #f5f1ea;
+  --text-muted: rgb(245 241 234 / 0.6);
+  --text-faint: rgb(245 241 234 / 0.42);
 
-  --c-border: #24314a;
-  --c-border-strong: #33425f;
+  --sand: #ecd7a3;
+  --gold-line: #b4954f;
+  --gold-bright: #ebd79b;
+  --gold-soft: #d6be8a;
 
-  /* Brass, not gold — a gold that bright on a dark navy reads as a casino.
-     Passes AA against both --c-canvas and --c-surface. */
-  --c-primary: #c9a86a;
-  --c-primary-hover: #d9bc85;
-  --c-primary-ink: #17110a;
-  --c-primary-soft: #241d10;
+  --mint: #bfe1db;
+  --peach: #edbab4;
+  --grey: #c1c6c8;
 
-  --c-focus: #8fb4e8;
+  --hairline: rgb(245 241 234 / 0.12);
+  --divider: rgb(245 241 234 / 0.1);
+  --scrim: rgb(34 28 27 / 0.72);
 
-  /* Status hues lifted for a dark canvas, matching the dark-mode ramp in
-     tokens.css — a member reading "suspended" needs it legible here too. */
-  --c-ok: #35b899;
-  --c-ok-soft: #0d2f28;
-  --c-ok-ink: #8fdcc9;
-  --c-critical: #f26060;
-  --c-critical-soft: #391414;
-  --c-critical-ink: #f8a4a4;
-  --c-warn: #e8c53d;
-  --c-warn-soft: #322a08;
-  --c-warn-ink: #f2dd8b;
+  --card-gradient: linear-gradient(135deg, #221c1b 0%, #4a4240 100%);
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.5);
-  --shadow-md: 0 2px 10px rgb(0 0 0 / 0.5);
-  --shadow-lg: 0 10px 34px rgb(0 0 0 / 0.6);
+  /* ── Type ──────────────────────────────────────────────────────────────
+     Futura Std is a licensed Adobe face and no webfont file ships in this
+     repository, so the stack below is doing real work rather than sitting
+     behind a download. Jost is the closest metric relative in the free
+     ecosystem and Century Gothic covers Windows; both keep the geometric
+     single-storey `a` the design depends on.
+
+     If a licensed FuturaStd-Book/Medium/Bold .woff2 is ever added under
+     public/fonts, wire it with @font-face + font-display: swap here — the CSP
+     is `font-src 'self'` (docker/caddy/Caddyfile), so a font CDN is not an
+     option and the file has to be served from this origin. */
+  --font-display:
+    'Futura Std', 'Futura PT', Futura, Jost, 'Century Gothic', 'URW Gothic', var(--font-sans);
+
+  /**
+   * The wordmark only — "STEIGENBERGER". See the @font-face above :root.
+   *
+   * Until the licensed file is in place this falls through to a narrow serif,
+   * which will not match. That is the intent: Fairplex is a serif and
+   * --font-display is geometric sans, so the wordmark reads as a visible
+   * stand-in rather than silently borrowing the body font and looking correct
+   * while being wrong.
+   */
+  --font-wordmark:
+    'Fairplex Narrow OT', 'Fairplex Narrow', 'PT Serif Caption', 'Noto Serif Display', Georgia,
+    serif;
+
+  /* Sizes are literal pixels, not rem steps. The boards are drawn at a fixed
+     390px artboard and the type is part of the artwork — a 9.5px tracked
+     eyebrow beside a 52px figure is a specific relationship, and expressing it
+     through the shared 1.2 modular scale would round every value. */
+  --t-title: 30px;
+  --t-title-auth: 26px;
+  --t-hero: 52px;
+  --t-card-title: 17px;
+  --t-body: 13px;
+  --t-body-sm: 12.5px;
+  --t-body-xs: 12px;
+  --t-meta: 11.5px;
+  --t-meta-sm: 10.5px;
+  --t-eyebrow: 9.5px;
+  --t-label: 9px;
+  --t-micro: 8px;
+
+  --tr-title: -0.3px;
+  --tr-title-auth: -0.2px;
+  --tr-hero: -1px;
+  --tr-card-title: 0.2px;
+  --tr-eyebrow: 2px;
+  --tr-label: 1.8px;
+  --tr-micro: 1.2px;
+
+  --w-light: 300;
+  --w-book: 400;
+  --w-medium: 500;
+  --w-bold: 700;
+
+  /* ── Layout ────────────────────────────────────────────────────────────
+     342px of content inside a 390px board is a 24px gutter each side. The
+     column is capped rather than fluid above 390px: these are phone screens
+     and stretching them to a desktop width would be a different design. */
+  --gutter: 24px;
+  --column: 342px;
+
+  --r-card: 16px;
+  --r-input: 12px;
+  --r-pill: 999px;
+
+  --h-input: 48px;
+  --h-button: 52px;
+  --h-tabbar: 62px;
+  --h-tabbar-offers: 82px;
+
+  /* ── Semantic remaps ───────────────────────────────────────────────────
+     Everything @pgp/ui's base.css styles, pointed at the brand palette. */
+  --c-canvas: var(--base);
+  --c-surface: var(--surface);
+  --c-surface-sunken: var(--base);
+  --c-surface-raised: var(--surface-2);
+  --c-panel-header: var(--surface);
+
+  --c-text: var(--text);
+  --c-text-muted: var(--text-muted);
+  --c-text-faint: var(--text-faint);
+  --c-text-inverse: var(--surface);
+
+  --c-border: var(--hairline);
+  --c-border-strong: rgb(245 241 234 / 0.22);
+  --c-border-gold: rgb(236 215 163 / 0.14);
+
+  --c-primary: var(--sand);
+  --c-primary-hover: var(--gold-bright);
+  /* Sand is a light fill, so its label is the dark surface colour — not white.
+     19.5:1 against --sand, which is the whole reason the CTA reads as solid. */
+  --c-primary-ink: var(--surface);
+  --c-primary-soft: rgb(236 215 163 / 0.1);
+
+  /* The design's own focus treatment is a sand border, so the focus token is
+     sand rather than the shared blue. Kept as one token so it cannot drift. */
+  --c-focus: var(--sand);
+
+  /* Status hues for a warm dark ground. The mint and peach above are category
+     colours, not status — a declined request must not read as "spa". */
+  --c-ok: #7fc9a9;
+  --c-ok-soft: rgb(127 201 169 / 0.12);
+  --c-ok-ink: #a8dcc5;
+  --c-warn: #e2c268;
+  --c-warn-soft: rgb(226 194 104 / 0.12);
+  --c-warn-ink: #edd694;
+  --c-critical: #e88f86;
+  --c-critical-soft: rgb(232 143 134 / 0.12);
+  --c-critical-ink: #f0b3ac;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 2px 10px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 12px 36px rgb(0 0 0 / 0.55);
 }
 
 /**
@@ -61,4 +204,15 @@
  */
 :root {
   color-scheme: dark;
+}
+
+body {
+  font-family: var(--font-display);
+  font-size: var(--t-body);
+  font-weight: var(--w-book);
+  background: var(--base);
+  color: var(--text);
+  /* The board's type is drawn as outlines, so it carries no hinting decisions.
+     Geometric sans at 9–13px needs the grayscale rendering to stay even. */
+  -webkit-font-smoothing: antialiased;
 }

@@ -115,7 +115,7 @@
      Four levels, and their meanings are fixed across all three apps: a
      redemption recorded is `ok` everywhere, a suspended membership is
      `critical` everywhere. Hues follow the dashboard reference — teal, yellow,
-     orange, red — so the admin charts and the verify page agree.
+     orange, red — so the administrator charts agree.
 
      Every status is also carried by an icon, a border weight or a word in the
      markup. Colour is never the only signal; see base.css. */
@@ -162,7 +162,7 @@
   --c-primary-soft: #e5f5f1;
 
   /* Focus ring. One token, so it cannot drift between apps — a keyboard user
-     on the verify page needs the same affordance as on the dashboard. */
+     on the administrator panel needs the same affordance as elsewhere. */
   --c-focus: #1d6fd0;
   --ring: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-focus);
 }

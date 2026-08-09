@@ -8,7 +8,6 @@
  * The point is the whole path, not the individual rules — those have their own
  * tests. If this passes, the product works.
  */
-import { createHmac } from 'node:crypto';
 
 import { PrismaClient } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
@@ -38,8 +37,7 @@ const journey: {
   phone?: string;
   claimCode?: string;
   memberToken?: string;
-  identityPayload?: string;
-  verificationSession?: string;
+  spaOutletId?: string;
   spaBenefitId?: string;
   diningBenefitId?: string;
   redemptionId?: string;
@@ -82,17 +80,6 @@ afterAll(async () => {
   await ownerPrisma.$disconnect();
 });
 
-/** The knowledge an SMS gateway would have had. See PROGRESS.md Q6. */
-async function setKnownOtp(phone: string): Promise<string> {
-  const secret = process.env['OTP_CODE_HMAC_SECRET'] ?? '';
-  const codeHash = createHmac('sha256', secret).update('123456').digest('hex');
-  const updated = await ownerPrisma.otpCode.updateMany({
-    where: { phone, usedAt: null },
-    data: { codeHash },
-  });
-  expect(updated.count).toBeGreaterThan(0);
-  return '123456';
-}
 
 describe('the primary acceptance journey', () => {
   it('1. an administrator creates a member and a claim code is issued', async () => {
@@ -121,23 +108,14 @@ describe('the primary acceptance journey', () => {
   it('2. the member activates with the code, verifies the OTP, and grants email consent', async () => {
     resetRateLimits();
 
-    const phaseOne = await request(app.server)
-      .post('/member/claim')
-      .send({ claimCode: journey.claimCode, phone: journey.phone });
-    expect(phaseOne.status).toBe(200);
-
-    const otp = await setKnownOtp(journey.phone ?? '');
-
-    const phaseTwo = await request(app.server).post('/member/claim').send({
+const activated = await request(app.server).post('/member/claim').send({
       claimCode: journey.claimCode,
       phone: journey.phone,
-      otp,
-      email: 'journey@pgp.test',
       consent: { email: true, sms: false },
     });
 
-    expect(phaseTwo.status).toBe(200);
-    journey.memberToken = phaseTwo.body.accessToken;
+    expect(activated.status).toBe(200);
+    journey.memberToken = activated.body.accessToken;
 
     const memberId = journey.memberId;
     expect(memberId).toBeDefined();
@@ -174,45 +152,40 @@ describe('the primary acceptance journey', () => {
     expect(byKey['lifestyle'].discountPct).toBe('30');
   });
 
-  it('4. the member opens the digital card and obtains an identity payload', async () => {
+  it('4. the member opens their card and reads their membership number', async () => {
     const response = await request(app.server)
-      .get('/member/me/identity-code')
+      .get('/member/me')
       .set('Authorization', `Bearer ${journey.memberToken}`);
 
     expect(response.status).toBe(200);
-    journey.identityPayload = response.body.payload;
-
-    // R3/§7: the opaque reference, never the printed number.
-    expect(journey.identityPayload).toContain(journey.memberId);
-    expect(journey.identityPayload).not.toContain(journey.memberNumber);
+    // The number on screen is the number staff will type. If these two ever
+    // diverge, every lookup at a counter fails and nothing else catches it.
+    expect(response.body.memberNumber).toBe(journey.memberNumber);
   });
 
-  it('5. staff resolve that payload at the spa', async () => {
-    const login = await request(app.server)
-      .post('/auth/staff/login')
-      .send({ email: 'fatima.a@pgp.test', password: 'privilege-guest-dev-only' });
-    expect(login.status).toBe(200);
-    journey.staffToken = login.body.accessToken;
-
-    const resolved = await request(app.server)
-      .post('/verify/resolve')
-      .set('Authorization', `Bearer ${journey.staffToken}`)
-      .send({ payload: journey.identityPayload });
-
-    expect(resolved.status).toBe(200);
-    expect(resolved.body.member.memberNumber).toBe(journey.memberNumber);
-    expect(resolved.body.member.valid).toBe(true);
-    expect(resolved.body.entitlements.length).toBeGreaterThan(0);
-
-    journey.verificationSession = resolved.body.verificationSession;
-  });
-
-  it('6. staff record a spa redemption with 2 guests — accepted', async () => {
+  it('5. the administrator finds them by that number', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${journey.staffToken}`)
+      .get(`/admin/members?limit=100`)
+      .set('Authorization', `Bearer ${journey.adminToken}`);
+
+    expect(response.status).toBe(200);
+    const row = response.body.members.find(
+      (m: { memberNumber: string }) => m.memberNumber === journey.memberNumber,
+    );
+    expect(row).toBeDefined();
+    expect(row.status).toBe('ACTIVE');
+
+    journey.spaOutletId = (
+      await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } })
+    ).id;
+  });
+
+  it('6. the administrator records a spa redemption with 2 guests — accepted', async () => {
+    const response = await request(app.server)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${journey.adminToken}`)
       .send({
-        verificationSession: journey.verificationSession,
+        outletId: journey.spaOutletId,
         memberId: journey.memberId,
         benefitId: journey.spaBenefitId,
         partySize: 2,
@@ -224,12 +197,12 @@ describe('the primary acceptance journey', () => {
     journey.redemptionId = response.body.id;
   });
 
-  it('7. staff attempt a spa redemption with 3 guests — rejected', async () => {
+  it('7. a spa redemption with 3 guests — rejected', async () => {
     const response = await request(app.server)
-      .post('/verify/redemptions')
-      .set('Authorization', `Bearer ${journey.staffToken}`)
+      .post('/admin/redemptions')
+      .set('Authorization', `Bearer ${journey.adminToken}`)
       .send({
-        verificationSession: journey.verificationSession,
+        outletId: journey.spaOutletId,
         memberId: journey.memberId,
         benefitId: journey.spaBenefitId,
         partySize: 3,
@@ -256,9 +229,11 @@ describe('the primary acceptance journey', () => {
     expect(row.benefit.key).toBe('spa');
   });
 
-  it('9. it appears in the admin member detail, attributed to the staff member', async () => {
+  it('9. it appears in the admin member detail, attributed to whoever recorded it', async () => {
+    // The administrator who recorded it in step 6 — there is no counter
+    // account any more, so attribution points at whoever was at the dashboard.
     const staff = await ownerPrisma.staffUser.findUniqueOrThrow({
-      where: { email: 'fatima.a@pgp.test' },
+      where: { email: 'admin@pgp.test' },
     });
 
     const response = await request(app.server)
@@ -331,7 +306,7 @@ describe('every business rule has a test', () => {
     },
     R3: {
       rule: 'Membership numbers are sequential and public; the internal reference is opaque',
-      where: ['data-model.test.ts', 'member-lifecycle.test.ts', 'identity-codes.test.ts'],
+      where: ['data-model.test.ts', 'member-lifecycle.test.ts'],
     },
     R4: { rule: 'Only an ACTIVE member may have a benefit recorded', where: ['redemption.test.ts'] },
     R5: { rule: 'Party size must not exceed maxGuests', where: ['redemption.test.ts'] },
@@ -345,19 +320,19 @@ describe('every business rule has a test', () => {
       where: ['redemption.test.ts'],
     },
     R9: {
-      rule: 'The identity payload rotates and is rejected once stale',
-      where: ['identity-codes.test.ts'],
+      rule: 'A benefit request is approved by a person; nothing self-authorises',
+      where: ['requests.test.ts'],
     },
     R10: {
-      rule: 'The identity payload identifies only; it never authorises a discount',
-      where: ['identity-codes.test.ts', 'redemption.test.ts'],
+      rule: 'A lookup identifies only; it never authorises a discount',
+      where: ['redemption.test.ts'],
     },
     R11: {
-      rule: 'outlet_staff has no endpoint that lists, searches or enumerates members',
-      where: ['authorization.test.ts', 'member-lifecycle.test.ts', 'redemption.test.ts'],
+      rule: 'Only Administrator accounts can enter the administrator panel',
+      where: ['authorization.test.ts', 'mfa.test.ts', 'member-lifecycle.test.ts'],
     },
     R12: {
-      rule: 'Member lookup requires an exact membership number or a scanned payload',
+      rule: 'Member lookup requires an exact membership number',
       where: ['redemption.test.ts'],
     },
     R13: { rule: 'Reporting suppresses any cohort smaller than 5', where: ['reporting.test.ts'] },

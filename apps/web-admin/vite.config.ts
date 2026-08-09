@@ -9,7 +9,7 @@ export default defineConfig({
      * and a dev server should not be reachable from the network by accident.
      *
      * `DEV_HOST=0.0.0.0` opens it to the LAN, which is what testing a QR scan
-     * needs — the member app has to be on a phone the verification page's
+     * needs — the member app has to be on a phone while the administrator panel's
      * camera can point at. Opt-in, and never the default, because this serves
      * seeded member data.
      */

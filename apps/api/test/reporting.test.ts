@@ -34,11 +34,19 @@ if (!ownerUrl) {
 let app: FastifyInstance;
 let env: Env;
 let adminToken: string;
-let managerToken: string;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
 /** A benefit and members created only for this file, so the cohort is exact. */
-let narrowBenefitId: string;
+// Empty until setup creates the fixture. The sentinel matters: if setup is
+// interrupted, Prisma strips an `undefined` filter and `deleteMany({ id:
+// undefined })` becomes an unscoped delete. An empty string can match no UUID.
+let narrowBenefitId = '';
+/**
+ * The rate every fixture redemption below is recorded at. Redemptions carry
+ * their own rate now, so a fixture that writes one has to state it — the same
+ * obligation the API has, and for the same reason.
+ */
+const NARROW_DISCOUNT_PCT = '50.00';
 const narrowMemberIds: string[] = [];
 
 beforeAll(async () => {
@@ -59,27 +67,6 @@ beforeAll(async () => {
     ttlSeconds: 900,
   });
 
-  const manager = await ownerPrisma.staffUser.upsert({
-    where: { email: 'manager@pgp.test' },
-    update: {},
-    create: {
-      fullName: 'Test Manager',
-      email: 'manager@pgp.test',
-      passwordHash: 'unused-for-token-tests',
-      role: 'MANAGER',
-      status: 'ACTIVE',
-    },
-  });
-  managerToken = await issueAccessToken({
-    issuer: env.JWT_ISSUER,
-    audience: env.JWT_AUDIENCE_STAFF,
-    subject: manager.id,
-    subjectType: 'STAFF',
-    role: 'MANAGER',
-    tokenVersion: manager.tokenVersion,
-    ttlSeconds: 900,
-  });
-
   // A benefit nothing else touches, used by exactly three members — the
   // scenario §6 describes, where a narrow filter describes almost nobody.
   const benefit = await ownerPrisma.benefit.create({
@@ -87,7 +74,7 @@ beforeAll(async () => {
       key: `report-narrow-${Date.now()}`,
       title: 'Narrow Cohort Test Benefit',
       category: 'Test',
-      discountPct: '50.00',
+      discountPct: NARROW_DISCOUNT_PCT,
       terms: 'Test only.',
       sortOrder: 900,
       published: true,
@@ -96,7 +83,6 @@ beforeAll(async () => {
   narrowBenefitId = benefit.id;
 
   const outlet = await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } });
-  const staff = await ownerPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } });
 
   for (let i = 0; i < 3; i += 1) {
     const member = await ownerPrisma.member.create({
@@ -116,10 +102,12 @@ beforeAll(async () => {
         memberId: member.id,
         benefitId: narrowBenefitId,
         outletId: outlet.id,
-        staffUserId: staff.id,
+        staffUserId: admin.id,
         partySize: 2,
         // 100.00 QAR in fils, at 50% → 5000 fils of value given.
         billAmountMinor: 10_000,
+        discountPctApplied: NARROW_DISCOUNT_PCT,
+        benefitVersion: 1,
         idempotencyKey: `report-narrow-${Date.now()}-${i}`,
       },
     });
@@ -131,9 +119,13 @@ afterEach(() => {
 });
 
 afterAll(async () => {
-  await ownerPrisma.redemption.deleteMany({ where: { benefitId: narrowBenefitId } });
+  if (narrowBenefitId !== '') {
+    await ownerPrisma.redemption.deleteMany({ where: { benefitId: narrowBenefitId } });
+  }
   await ownerPrisma.member.deleteMany({ where: { id: { in: narrowMemberIds } } });
-  await ownerPrisma.benefit.deleteMany({ where: { id: narrowBenefitId } });
+  if (narrowBenefitId !== '') {
+    await ownerPrisma.benefit.deleteMany({ where: { id: narrowBenefitId } });
+  }
   await app.close();
   await ownerPrisma.$disconnect();
 });
@@ -245,7 +237,6 @@ describe('R13 — cohorts below the minimum return insufficient data', () => {
       where: { email: 'admin@pgp.test' },
     });
     const outlet = await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } });
-    const staff = await ownerPrisma.staffUser.findFirstOrThrow({ where: { role: 'OUTLET_STAFF' } });
     const extra: string[] = [];
 
     try {
@@ -268,9 +259,11 @@ describe('R13 — cohorts below the minimum return insufficient data', () => {
             memberId: member.id,
             benefitId: narrowBenefitId,
             outletId: outlet.id,
-            staffUserId: staff.id,
+            staffUserId: admin.id,
             partySize: 1,
             billAmountMinor: 10_000,
+            discountPctApplied: NARROW_DISCOUNT_PCT,
+            benefitVersion: 1,
             idempotencyKey: `report-threshold-${Date.now()}-${i}`,
           },
         });
@@ -341,17 +334,39 @@ describe('estimated value is computed from integer minor units', () => {
     }
   });
 
-  it('computes the discount exactly, with no floating point drift', async () => {
-    // 10000 fils at 50% = 5000, five times over = 25000. A float pipeline
-    // would land near but not exactly on this.
-    const [row] = await ownerPrisma.$queryRaw<{ total: bigint }[]>`
-      SELECT coalesce(sum(round(r."billAmountMinor" * b."discountPct" / 100.0)), 0)::bigint AS total
-      FROM "Redemption" r
-      JOIN "Benefit" b ON b."id" = r."benefitId"
-      WHERE r."benefitId" = ${narrowBenefitId}
-    `;
+  it('uses the recorded rate, so a later benefit edit cannot rewrite history', async () => {
+    // These three rows were each recorded as 10000 fils at 50% = 5000. The
+    // live offer is deliberately changed afterwards; the historical total
+    // must remain 15000 rather than being recalculated at today's rate.
+    await ownerPrisma.benefit.update({
+      where: { id: narrowBenefitId },
+      data: { discountPct: '10.00' },
+    });
 
-    expect(Number(row?.total)).toBe(15_000);
+    try {
+      const [row] = await ownerPrisma.$queryRaw<{ total: bigint }[]>`
+        SELECT coalesce(
+          sum(round(r."billAmountMinor" * r."discountPctApplied" / 100.0)),
+          0
+        )::bigint AS total
+        FROM "Redemption" r
+        WHERE r."benefitId" = ${narrowBenefitId}
+      `;
+
+      expect(Number(row?.total)).toBe(15_000);
+
+      const source = readFileSync(
+        resolve(import.meta.dirname, '..', 'src', 'routes', 'reports.ts'),
+        'utf8',
+      );
+      expect(source).toContain('r."billAmountMinor" * r."discountPctApplied"');
+      expect(source).not.toContain('r."billAmountMinor" * b."discountPct"');
+    } finally {
+      await ownerPrisma.benefit.update({
+        where: { id: narrowBenefitId },
+        data: { discountPct: NARROW_DISCOUNT_PCT },
+      });
+    }
   });
 
   it('excludes reversals from totals', async () => {
@@ -373,20 +388,6 @@ describe('estimated value is computed from integer minor units', () => {
 // ── Export ─────────────────────────────────────────────────────────────────
 
 describe('export is administrator-only, rate-limited and audited', () => {
-  it('rejects a manager and records the denial', async () => {
-    const before = await ownerPrisma.auditLog.count();
-
-    const response = await request(app.server)
-      .get('/admin/reports/export')
-      .set('Authorization', `Bearer ${managerToken}`);
-
-    expect(response.status).toBe(403);
-
-    // Stage 9 adds the authorization-denial audit path; what is asserted here
-    // is that the refusal happened at all. See PROGRESS.md.
-    expect(await ownerPrisma.auditLog.count()).toBeGreaterThanOrEqual(before);
-  });
-
   it('allows an administrator, and writes an audit entry naming them', async () => {
     const admin = await ownerPrisma.staffUser.findUniqueOrThrow({
       where: { email: 'admin@pgp.test' },
@@ -397,7 +398,10 @@ describe('export is administrator-only, rate-limited and audited', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
-    expect(Array.isArray(response.body.rows)).toBe(true);
+    // A file finance can open, not a payload they cannot.
+    expect(response.headers['content-type']).toMatch(/text\/csv/);
+    expect(response.headers['content-disposition']).toMatch(/attachment; filename=".*\.csv"/);
+    expect(response.text).toMatch(/^﻿?"occurred_at","membership_number"/);
 
     const entry = await ownerPrisma.auditLog.findFirstOrThrow({
       where: { action: 'report.exported' },
@@ -406,17 +410,89 @@ describe('export is administrator-only, rate-limited and audited', () => {
     expect(entry.actorId).toBe(admin.id);
   });
 
+  it('carries the rate that was applied, and the value it was worth', async () => {
+    const response = await request(app.server)
+      .get('/admin/reports/export')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    const [header, ...rows] = response.text.trim().split('\r\n');
+    expect(header).toContain('"discount_pct"');
+    expect(header).toContain('"discount_value"');
+
+    // Without a value column there is nothing for finance to reconcile
+    // against the shortfall their own till already shows.
+    const priced = rows
+      .map((line) => line.split('","').map((cell) => cell.replace(/^"|"$/g, '')))
+      .filter((cells) => cells[6] !== '' && cells[6] !== undefined);
+
+    for (const cells of priced) {
+      const bill = Number(cells[6]);
+      const pct = Number(cells[4]);
+      const value = Number(cells[7]);
+      expect(value).toBeCloseTo((bill * pct) / 100, 2);
+    }
+  });
+
+  it('rounds an exported half-fil exactly for a fractional rate', async () => {
+    const memberId = narrowMemberIds[0];
+    if (!memberId) {
+      throw new Error('Narrow report fixture member was not created.');
+    }
+    const [member, outlet, staff] = await Promise.all([
+      ownerPrisma.member.findUniqueOrThrow({ where: { id: memberId } }),
+      ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } }),
+      ownerPrisma.staffUser.findUniqueOrThrow({ where: { email: 'admin@pgp.test' } }),
+    ]);
+    const redemption = await ownerPrisma.redemption.create({
+      data: {
+        memberId: member.id,
+        benefitId: narrowBenefitId,
+        outletId: outlet.id,
+        staffUserId: staff.id,
+        billAmountMinor: 5_000,
+        discountPctApplied: '19.99',
+        benefitVersion: 1,
+        idempotencyKey: `report-half-fil-${Date.now()}`,
+      },
+    });
+
+    try {
+      const response = await request(app.server)
+        .get('/admin/reports/export')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(response.status).toBe(200);
+      const row = response.text
+        .trim()
+        .split('\r\n')
+        .slice(1)
+        .map((line) => line.split('","').map((cell) => cell.replace(/^"|"$/g, '')))
+        .find(
+          (cells) =>
+            cells[1] === member.memberNumber && cells[4] === '19.99' && cells[6] === '50.00',
+        );
+
+      // 50.00 QAR at 19.99% is 9.995 QAR: exact half-away-from-zero is 10.00.
+      expect(row?.[7]).toBe('10.00');
+    } finally {
+      await ownerPrisma.redemption.delete({ where: { id: redemption.id } });
+    }
+  });
+
   it('exports membership numbers, never names', async () => {
     const response = await request(app.server)
       .get('/admin/reports/export')
       .set('Authorization', `Bearer ${adminToken}`);
 
-    for (const row of response.body.rows) {
-      expect(row.memberNumber).toMatch(/^PG-/);
-      expect(row).not.toHaveProperty('fullName');
-      expect(row).not.toHaveProperty('phone');
-      expect(row).not.toHaveProperty('email');
+    // The whole file, not row by row: a name leaking through any column — a
+    // header, a benefit title, a future addition — is the failure this guards.
+    const names = await ownerPrisma.member.findMany({ select: { fullName: true } });
+    for (const { fullName } of names) {
+      expect(response.text).not.toContain(fullName);
     }
+
+    // And membership numbers are present, or the file identifies nobody.
+    expect(response.text).toMatch(/"PG-[^"]+"/);
   });
 
   it('rate-limits repeated exports', async () => {
@@ -437,16 +513,16 @@ describe('export is administrator-only, rate-limited and audited', () => {
 
 // ── Access ─────────────────────────────────────────────────────────────────
 
-describe('reports are readable by manager and administrator, nobody else', () => {
-  it('allows a manager to read reports', async () => {
+describe('reports are readable only in the administrator panel', () => {
+  it('allows an administrator to read reports', async () => {
     const response = await request(app.server)
       .get('/admin/reports/summary')
-      .set('Authorization', `Bearer ${managerToken}`);
+      .set('Authorization', `Bearer ${adminToken}`);
 
     expect(response.status).toBe(200);
   });
 
-  it('refuses outlet_staff every reporting endpoint', async () => {
+  it('refuses a retired outlet-staff account on every reporting endpoint', async () => {
     const staff = await ownerPrisma.staffUser.findFirstOrThrow({
       where: { role: 'OUTLET_STAFF' },
     });
@@ -456,7 +532,6 @@ describe('reports are readable by manager and administrator, nobody else', () =>
       subject: staff.id,
       subjectType: 'STAFF',
       role: 'OUTLET_STAFF',
-      ...(staff.outletId ? { outletId: staff.outletId } : {}),
       tokenVersion: staff.tokenVersion,
       ttlSeconds: 300,
     });
@@ -470,7 +545,7 @@ describe('reports are readable by manager and administrator, nobody else', () =>
       '/admin/reports/export',
     ]) {
       const response = await request(app.server).get(path).set('Authorization', `Bearer ${token}`);
-      expect(response.status, path).toBe(403);
+      expect(response.status, path).toBe(401);
     }
   });
 });

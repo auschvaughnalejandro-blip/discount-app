@@ -1,0 +1,262 @@
+/**
+ * Movement between screens.
+ *
+ * Built on the native View Transitions API rather than an animation library.
+ * React Router drives it — `<Link viewTransition>` and `navigate(to, {
+ * viewTransition: true })` wrap the DOM swap in `document.startViewTransition`
+ * — and a browser without support simply navigates instantly instead of
+ * breaking. That is the whole reason for choosing it over a JS animator on a
+ * phone-first PWA: the fallback is the app working, not the app janking.
+ *
+ * Direction is not something the API can infer. `AppShell` stamps
+ * `data-nav="push|pop|fade|modal"` on <html> immediately before navigating,
+ * from React Router's own navigation type, and every rule below keys off it.
+ *
+ * One shared element exists: the membership card. It carries
+ * `view-transition-name: membership-card` on both Profile and the card modal,
+ * so the browser pairs the two and the 342×216 card physically grows into the
+ * modal rather than one fading into the other.
+ */
+
+:root {
+  /* Screen-level movement is slower than the component-level --t-base (150ms)
+     that @pgp/ui already defines. 260ms is the point where a full-width slide
+     reads as deliberate without becoming something you wait for. */
+  --t-screen: 260ms;
+  --t-modal: 320ms;
+  /* Emphasised decelerate: leaves fast, settles slowly. A symmetric ease makes
+     a push feel like it is being dragged rather than thrown. */
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ── Screen transitions ─────────────────────────────────────────────────── */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--t-screen);
+  animation-timing-function: var(--ease-emphasized);
+  animation-fill-mode: both;
+  /* Both snapshots occupy the same space for the whole transition; without
+     this the outgoing screen's height collapses and the incoming one jumps. */
+  mix-blend-mode: normal;
+}
+
+@keyframes screen-enter-from-end {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes screen-exit-to-start {
+  to {
+    transform: translateX(-25%);
+    opacity: 0.4;
+  }
+}
+
+@keyframes screen-enter-from-start {
+  from {
+    transform: translateX(-25%);
+    opacity: 0.4;
+  }
+}
+
+@keyframes screen-exit-to-end {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Forward: the new screen arrives over the old one, which recedes rather than
+   leaving entirely — the parallax is what makes back feel reversible. */
+html[data-nav='push']::view-transition-new(root) {
+  animation-name: screen-enter-from-end;
+  z-index: 2;
+}
+
+html[data-nav='push']::view-transition-old(root) {
+  animation-name: screen-exit-to-start;
+  z-index: 1;
+}
+
+html[data-nav='pop']::view-transition-new(root) {
+  animation-name: screen-enter-from-start;
+  z-index: 1;
+}
+
+html[data-nav='pop']::view-transition-old(root) {
+  animation-name: screen-exit-to-end;
+  z-index: 2;
+}
+
+/* Arabic (Stage 22) mirrors the layout, so the direction of travel has to
+   mirror with it — otherwise back moves the wrong way. */
+html[dir='rtl'][data-nav='push']::view-transition-new(root),
+html[dir='rtl'][data-nav='pop']::view-transition-old(root) {
+  animation-direction: reverse;
+}
+
+/**
+ * Tabs cross-fade; they do not slide.
+ *
+ * Offers and Profile are peers. Sliding between them would imply one sits to
+ * the side of the other, which is the grammar of a hierarchy the tab bar does
+ * not have.
+ */
+html[data-nav='fade']::view-transition-new(root) {
+  animation: fade-in 120ms var(--ease) both;
+}
+
+html[data-nav='fade']::view-transition-old(root) {
+  animation: fade-out 120ms var(--ease) both;
+}
+
+/* ── The membership card, morphing into its modal ───────────────────────── */
+
+html[data-nav='modal']::view-transition-old(root),
+html[data-nav='modal']::view-transition-new(root) {
+  animation-duration: var(--t-modal);
+}
+
+html[data-nav='modal']::view-transition-new(root) {
+  animation-name: fade-in;
+}
+
+html[data-nav='modal']::view-transition-old(root) {
+  animation-name: fade-out;
+}
+
+/* The card itself is excluded from that cross-fade: it has its own group, so
+   the browser interpolates its position and size between the two screens. */
+::view-transition-group(membership-card) {
+  animation-duration: var(--t-modal);
+  animation-timing-function: var(--ease-emphasized);
+  z-index: 10;
+}
+
+/* Its contents scale with the frame rather than cross-fading inside it, which
+   is what stops the wordmark ghosting during the morph. */
+::view-transition-old(membership-card),
+::view-transition-new(membership-card) {
+  height: 100%;
+  overflow: clip;
+  animation-duration: var(--t-modal);
+}
+
+/* ── Entrances within a screen ──────────────────────────────────────────── */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+/**
+ * The benefits list, on first paint only.
+ *
+ * `--enter-index` is set per row and capped by the component at 6: a stagger
+ * that keeps counting past the fold delays rows nobody is looking at yet, and
+ * on a slow connection the last card would arrive visibly late.
+ */
+.enter-stagger {
+  animation: rise-in var(--t-screen) var(--ease-emphasized) both;
+  animation-delay: calc(var(--enter-index, 0) * 40ms);
+}
+
+/* Data replacing a skeleton cross-fades. The skeleton reserves the real height,
+   so nothing below it moves when the content lands. */
+@keyframes settle-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.settle-in {
+  animation: settle-in var(--t-base) var(--ease) both;
+}
+
+@keyframes shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(245 241 234 / 0.06) 25%,
+    rgb(245 241 234 / 0.12) 37%,
+    rgb(245 241 234 / 0.06) 63%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-input);
+}
+
+/* ── The passcode boxes ─────────────────────────────────────────────────── */
+
+@keyframes digit-in {
+  from {
+    transform: scale(0.85);
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  30%,
+  70% {
+    transform: translateX(4px);
+  }
+  50% {
+    transform: translateX(-4px);
+  }
+}
+
+.otp-box[data-filled='true'] {
+  animation: digit-in 120ms var(--ease-emphasized);
+}
+
+.otp-group[data-error='true'] {
+  animation: shake 240ms var(--ease);
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────
+   Not a softening — an off switch. Vestibular triggers are movement, so the
+   slides, the morph and the shake all stop entirely. Opacity is left alone
+   where it is the only thing carrying a state change. */
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .enter-stagger,
+  .otp-box[data-filled='true'],
+  .otp-group[data-error='true'] {
+    animation: none;
+  }
+
+  .skeleton {
+    animation: none;
+    background: rgb(245 241 234 / 0.08);
+  }
+}

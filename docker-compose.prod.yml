@@ -58,7 +58,7 @@ services:
       PASSWORD_PEPPER: ${PASSWORD_PEPPER:?Set PASSWORD_PEPPER in .env}
       OTP_CODE_HMAC_SECRET: ${OTP_CODE_HMAC_SECRET:?Set OTP_CODE_HMAC_SECRET in .env}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
-      IDENTITY_CODE_HMAC_SECRET: ${IDENTITY_CODE_HMAC_SECRET:?Set IDENTITY_CODE_HMAC_SECRET in .env}
+      VERIFICATION_SESSION_HMAC_SECRET: ${VERIFICATION_SESSION_HMAC_SECRET:?Set VERIFICATION_SESSION_HMAC_SECRET in .env}
       MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY:?Set MFA_SECRET_ENCRYPTION_KEY in .env}
 
       JWT_ISSUER: https://api.${DOMAIN:?Set DOMAIN in .env}
@@ -80,6 +80,15 @@ services:
       SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM in .env}
 
       MFA_ISSUER_LABEL: ${MFA_ISSUER_LABEL:-Privilege Guest}
+
+      # Optional, one-way hotel-facing mirror. Empty values are accepted only
+      # while disabled; startup validation requires all credentials when true.
+      # PostgreSQL remains authoritative and Google failures never fail writes.
+      GOOGLE_SHEETS_SYNC_ENABLED: ${GOOGLE_SHEETS_SYNC_ENABLED:-false}
+      GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
+      GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: ${GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL:-}
+      GOOGLE_SHEETS_PRIVATE_KEY_BASE64: ${GOOGLE_SHEETS_PRIVATE_KEY_BASE64:-}
+      GOOGLE_SHEETS_SYNC_INTERVAL_SECONDS: ${GOOGLE_SHEETS_SYNC_INTERVAL_SECONDS:-300}
 
       # Must stay false outside development. The dev echo prints passcodes to
       # the log, which is exactly the risk an OTP exists to avoid; the code also
