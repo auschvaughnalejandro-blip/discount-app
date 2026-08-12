@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { NotFoundError, RateLimitedError } from '../errors.js';
 import { writeAudit } from '../security/audit.js';
 import { hashClaimCode } from '../security/claim-codes.js';
-import { echoNoOtpForDevelopment } from '../security/dev-otp.js';
+import { issueCardCode } from '../security/identity-codes.js';
 import { normalizePhone } from '../security/phone.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { issueRefreshToken } from '../security/refresh-tokens.js';
@@ -93,10 +93,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     // Every failure below returns this same response. Which part was wrong —
     // unknown code, expired code, already used, wrong phone — is exactly what
     // an attacker holding a discarded letter would want to learn.
-    const invalid = (devReason: string) => {
-      // The HTTP body is identical for every failure (§3); this tells the
-      // developer which one it was, to the terminal only.
-      echoNoOtpForDevelopment(env, body.phone, devReason);
+    const invalid = () => {
       return reply.code(400).send({
         error: 'invalid_claim',
         message: 'That invitation code is not valid.',
@@ -126,26 +123,26 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     });
 
     if (!claimCode) {
-      return invalid('no such invitation code');
+      return invalid();
     }
     if (claimCode.usedAt !== null) {
-      return invalid('that invitation code has already been used');
+      return invalid();
     }
     if (claimCode.expiresAt.getTime() <= Date.now()) {
-      return invalid('that invitation code has expired');
+      return invalid();
     }
     if (claimCode.member.status !== 'ACTIVE') {
-      return invalid('that membership is suspended');
+      return invalid();
     }
     if (claimCode.member.claimedAt !== null) {
-      return invalid('that membership is already activated - use Sign in');
+      return invalid();
     }
 
     // Where the hotel already recorded a phone number, the one supplied must
     // match it. Where it did not, the member supplies it here and it becomes
     // their sign-in credential (wireframes screen 1 note 3).
     if (claimCode.member.phone !== null && claimCode.member.phone !== body.phone) {
-      return invalid('that invitation belongs to a different phone number');
+      return invalid();
     }
     if (claimCode.member.phone === null) {
       const takenBy = await app.prisma.member.findUnique({
@@ -153,7 +150,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
         select: { id: true },
       });
       if (takenBy && takenBy.id !== claimCode.memberId) {
-        return invalid('another membership already uses that phone number');
+        return invalid();
       }
     }
 
@@ -208,7 +205,7 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     });
 
     if (!claimed) {
-      return invalid('that invitation code was consumed by another request');
+      return invalid();
     }
 
     const accessToken = await issueAccessToken({
@@ -273,7 +270,18 @@ const memberRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { consents, ...rest } = member;
-    return { ...rest, consent: currentConsent(consents) };
+    return {
+      ...rest,
+      consent: currentConsent(consents),
+      // The code on the card. Derived from the opaque internal id and signed —
+      // never from the sequential membership number, which a member could use to
+      // generate a neighbour's payload (R3).
+      //
+      // The same value is printed on the back of the physical card, so this is
+      // what the app shows and what a scanner reads either way. It identifies and
+      // grants nothing; see security/identity-codes.ts.
+      cardCode: issueCardCode(member.id),
+    };
   });
 
   // ── PATCH /member/me/consent ──────────────────────────────────────────

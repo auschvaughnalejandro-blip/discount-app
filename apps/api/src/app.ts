@@ -5,17 +5,19 @@ import fp from 'fastify-plugin';
 import type { Env } from './config/env.js';
 import { REDACTED, REDACT_PATHS, redact } from './logging/redaction.js';
 import { createCodeSender, type CodeSender } from './notifications/code-sender.js';
-import { warnIfDevOtpEchoEnabled } from './security/dev-otp.js';
 import authorizationPlugin from './plugins/authorization.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import googleSheetsPlugin from './plugins/google-sheets.js';
 import prismaPlugin from './plugins/prisma.js';
+import requestExpiryPlugin from './plugins/request-expiry.js';
 import adminMemberRoutes from './routes/admin-members.js';
+import adminOutletRoutes from './routes/admin-outlets.js';
 import adminStaffRoutes from './routes/admin-staff.js';
 import authRoutes from './routes/auth.js';
 import benefitRoutes from './routes/benefits.js';
 import healthRoutes from './routes/health.js';
 import memberRoutes from './routes/member.js';
+import outletRoutes from './routes/outlet.js';
 import reportRoutes from './routes/reports.js';
 import requestRoutes from './routes/requests.js';
 import redemptionRoutes from './routes/redemptions.js';
@@ -75,6 +77,7 @@ export async function buildApp({ env, codeSender }: BuildAppOptions): Promise<Fa
   await app.register(errorHandlerPlugin);
   await app.register(prismaPlugin);
   await app.register(googleSheetsPlugin);
+  await app.register(requestExpiryPlugin);
 
   // Built once, before routes. `createCodeSender` throws on a channel that is
   // configured but incomplete, so a deployment meaning to send mail and unable
@@ -97,13 +100,13 @@ export async function buildApp({ env, codeSender }: BuildAppOptions): Promise<Fa
   await app.register(authRoutes);
   await app.register(adminMemberRoutes);
   await app.register(adminStaffRoutes);
+  await app.register(adminOutletRoutes);
   await app.register(memberRoutes);
   await app.register(benefitRoutes);
   await app.register(requestRoutes);
   await app.register(redemptionRoutes);
+  await app.register(outletRoutes);
   await app.register(reportRoutes);
-
-  warnIfDevOtpEchoEnabled(app.log, env);
 
   return app;
 }

@@ -3,15 +3,25 @@ import { z } from 'zod';
 
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import { logDeliveryOutcome } from '../notifications/code-sender.js';
+import {
+  recordRedemption,
+  savedMinor,
+  serializeRecorded,
+  type RecordRedemptionFailure,
+} from '../redemptions/record.js';
 import { writeAudit } from '../security/audit.js';
-import { scopeForBenefitRequest, scopeForRedemption, scopedWhere } from '../security/scope.js';
+import { scopeForRedemption, scopedWhere } from '../security/scope.js';
 
 /**
- * Redemptions — the record that a benefit was given.
+ * Redemptions — the record that a benefit was given, from the dashboard.
  *
- * There is no counter application. An administrator marks a benefit used from
- * the dashboard, either against an approval the member asked for or directly
- * for someone who simply turned up.
+ * Outlets record their own now (`routes/outlet.ts`), which is the normal path.
+ * This one remains for the cases an outlet cannot cover: a visit somebody forgot
+ * to confirm on the night, a correction, or a benefit given somewhere with no
+ * screen. Both call the same `recordRedemption`, so the rules cannot drift.
+ *
+ * Reversal lives only here. An outlet may record what happened; unwinding it is
+ * an administrator's decision (R7).
  *
  * The system records; it does not discount. The money stays on the hotel's own
  * till (product-definition.md §6), and nothing here computes or applies any.
@@ -29,9 +39,9 @@ const recordSchema = z
     // is at a desk rather than standing in the outlet, so nothing else can
     // infer it. Not a uuid: outlet ids are readable slugs.
     outletId: z.string().trim().min(1).max(64),
-    // The approval this redemption spends, where the member asked in advance.
-    // Optional: someone who simply turned up is still served, and that path
-    // records a redemption with no request behind it.
+    // The notice this redemption closes out, where the guest announced in
+    // advance. Optional: someone who simply turned up is still served, and that
+    // path records a redemption with no notice behind it.
     requestId: z.string().uuid().optional(),
     // R8 — supplied by the client so a retried submission does not
     // double-record.
@@ -48,80 +58,6 @@ const reverseSchema = z
 
 const idParamSchema = z.object({ id: z.string().uuid() }).strict();
 
-/**
- * What a recorded redemption returns.
- *
- * Written once because three call sites read it — the idempotent replay, the
- * creation, and the loser of a race — and a returned row that differs by which
- * path produced it is the kind of difference nothing catches.
- */
-const RECORDED_SELECT = {
-  id: true,
-  memberId: true,
-  benefitId: true,
-  outletId: true,
-  partySize: true,
-  billAmountMinor: true,
-  discountPctApplied: true,
-  benefitVersion: true,
-  occurredAt: true,
-} as const;
-
-/**
- * `Decimal` serialises as an object through JSON, so every percentage crossing
- * the wire is a string — the same shape the benefit endpoints already use.
- */
-function serializeRecorded<T extends { discountPctApplied: unknown }>(
-  row: T,
-): Omit<T, 'discountPctApplied'> & { discountPctApplied: string } {
-  return { ...row, discountPctApplied: String(row.discountPctApplied) };
-}
-
-/**
- * What a visit actually saved the member, in fils.
- *
- * The same arithmetic `reporting/metrics.ts` runs for the dashboard —
- * `billAmountMinor * discountPctApplied / 100`, rounded, in integer minor units
- * throughout, because money does not survive binary floating point. Stated
- * twice rather than shared because the dashboard's version is SQL executing
- * inside Postgres and this one is per row; the arithmetic is the contract and
- * a test holds them to it.
- *
- * Null when the bill was not captured. That is an ordinary outcome — recording
- * a redemption never required an amount — and it must stay distinguishable from
- * a genuine zero, so the member's screen can say "no amount recorded" rather
- * than claim they saved nothing.
- *
- * A reversal carries a negated bill, so its saving is negative and a total that
- * sums this column nets correctly without special-casing.
- *
- * `billAmountMinor` itself does not cross to the member. What they spent is the
- * hotel's record of a transaction; what they saved is theirs.
- */
-function savedMinor(row: {
-  billAmountMinor: number | null;
-  discountPctApplied: unknown;
-}): number | null {
-  if (row.billAmountMinor === null) {
-    return null;
-  }
-
-  const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(String(row.discountPctApplied));
-  if (!match) {
-    throw new Error('Stored redemption percentage is invalid.');
-  }
-
-  // Convert the decimal percentage to integer basis points before touching
-  // money. Besides avoiding binary floating-point drift (19.99 is not exactly
-  // representable), this rounds negative reversal rows symmetrically with
-  // PostgreSQL's numeric `round`: halves go away from zero in both directions.
-  const basisPoints = BigInt(Number(match[1]) * 100 + Number((match[2] ?? '').padEnd(2, '0')));
-  const signedMinor = BigInt(row.billAmountMinor);
-  const magnitude = signedMinor < 0n ? -signedMinor : signedMinor;
-  const rounded = (magnitude * basisPoints + 5_000n) / 10_000n;
-  return Number(signedMinor < 0n ? -rounded : rounded);
-}
-
 const redemptionRoutes: FastifyPluginAsync = async (app) => {
   const env = app.env;
 
@@ -137,6 +73,24 @@ const redemptionRoutes: FastifyPluginAsync = async (app) => {
     return { outlets };
   });
 
+  /**
+   * Maps a recording failure onto the HTTP shape this route has always returned.
+   *
+   * The status codes are the contract: 404 for a member that is not there, 409
+   * for a reused idempotency key, 422 for everything the caller could fix.
+   */
+  const FAILURE_STATUS: Record<RecordRedemptionFailure, number> = {
+    not_found: 404,
+    idempotency_key_reused: 409,
+    member_not_active: 422,
+    outlet_unavailable: 422,
+    benefit_unavailable: 422,
+    party_size_required: 422,
+    party_size_above_maximum: 422,
+    party_size_below_minimum: 422,
+    notice_not_valid: 422,
+  };
+
   // ── POST /admin/redemptions ───────────────────────────────────────────
   app.post(
     '/admin/redemptions',
@@ -148,239 +102,64 @@ const redemptionRoutes: FastifyPluginAsync = async (app) => {
         throw new ForbiddenError();
       }
 
-      // Administrators explicitly select the outlet. There is no counter or
-      // outlet-bound account from which this could be inferred.
-      const outletId = body.outletId;
-
-      // R8 first for a *repeat* of a completed call: returning the original
-      // is the correct answer to a retry, and must not depend on the rest of
-      // the validation still passing. A benefit unpublished between the
-      // original call and the retry must not turn a success into an error.
-      //
-      // Scoped: the key is client-supplied, so an unscoped lookup would let a
-      // guessed key disclose a redemption the caller may not see.
-      const existing = await app.prisma.redemption.findFirst({
-        where: scopedWhere(
-          { idempotencyKey: body.idempotencyKey },
-          scopeForRedemption(principal),
-        ),
-        select: RECORDED_SELECT,
+      // Administrators explicitly select the outlet. Unlike an outlet account,
+      // whoever records this is at a desk rather than standing in the outlet, so
+      // nothing else could infer it.
+      const result = await recordRedemption(app.prisma, principal, {
+        memberId: body.memberId,
+        benefitId: body.benefitId,
+        outletId: body.outletId,
+        partySize: body.partySize,
+        billAmountMinor: body.billAmountMinor,
+        requestId: body.requestId,
+        idempotencyKey: body.idempotencyKey,
       });
 
-      if (existing) {
-        // Same key, different content is a client bug, not a retry — and
-        // silently returning the original would hide it.
-        if (existing.memberId !== body.memberId || existing.benefitId !== body.benefitId) {
-          return reply.code(409).send({
-            error: 'idempotency_key_reused',
-            message: 'That idempotency key was used for a different redemption.',
-          });
+      if (!result.ok) {
+        if (result.failure === 'not_found') {
+          throw new NotFoundError();
         }
-        return reply.code(200).send({ ...serializeRecorded(existing), idempotent: true });
-      }
-
-      // Validation in the order BUILD-PLAN §Stage 7 specifies.
-
-      // 1. Member exists and is ACTIVE (R4).
-      const member = await app.prisma.member.findUnique({
-        where: { id: body.memberId },
-        select: { id: true, status: true, claimedAt: true, email: true, phone: true },
-      });
-      if (!member) {
-        throw new NotFoundError();
-      }
-      if (member.status !== 'ACTIVE') {
-        return reply.code(422).send({
-          error: 'member_not_active',
-          message: 'This membership is not active.',
+        return reply.code(FAILURE_STATUS[result.failure]).send({
+          error: result.failure,
+          message: result.message,
+          ...(result.detail ?? {}),
         });
       }
 
-      // 2. The outlet exists and is open. A redemption attributed to a closed
-      //    or invented outlet corrupts every report grouped by outlet, and the
-      //    foreign key alone would only catch the invented case.
-      const outlet = await app.prisma.outlet.findUnique({
-        where: { id: outletId },
-        select: { id: true, active: true, name: true },
-      });
-      if (!outlet || !outlet.active) {
-        return reply.code(422).send({
-          error: 'outlet_unavailable',
-          message: 'That outlet is not available.',
-        });
-      }
-
-      // 3. Benefit exists and is published.
-      const benefit = await app.prisma.benefit.findUnique({
-        where: { id: body.benefitId },
-        select: {
-          id: true,
-          key: true,
-          title: true,
-          published: true,
-          maxGuests: true,
-          minGuests: true,
-          // Snapshotted onto the redemption below. Read here, inside the same
-          // handler that writes the row, so the rate stored is the rate the
-          // caps were checked against.
-          discountPct: true,
-          version: true,
-        },
-      });
-      if (!benefit || !benefit.published) {
-        return reply.code(422).send({
-          error: 'benefit_unavailable',
-          message: 'That benefit is not available.',
-        });
-      }
-
-      // 4. partySize <= maxGuests where set (R5).
-      if (benefit.maxGuests !== null) {
-        if (body.partySize === undefined) {
-          return reply.code(422).send({
-            error: 'party_size_required',
-            message: 'Number of guests is required for this benefit.',
-            maxGuests: benefit.maxGuests,
-          });
-        }
-        if (body.partySize > benefit.maxGuests) {
-          return reply.code(422).send({
-            error: 'party_size_above_maximum',
-            message: `This benefit allows a maximum of ${benefit.maxGuests} guests.`,
-            maxGuests: benefit.maxGuests,
-          });
-        }
-      }
-
-      // 5. partySize >= minGuests where set (R6).
-      if (benefit.minGuests !== null) {
-        if (body.partySize === undefined) {
-          return reply.code(422).send({
-            error: 'party_size_required',
-            message: 'Number of guests is required for this benefit.',
-            minGuests: benefit.minGuests,
-          });
-        }
-        if (body.partySize < benefit.minGuests) {
-          return reply.code(422).send({
-            error: 'party_size_below_minimum',
-            message: `This benefit requires at least ${benefit.minGuests} guests.`,
-            minGuests: benefit.minGuests,
-          });
-        }
-      }
-
-      // 6. If this redemption spends an approval, the approval must be real,
-      //    still unspent, and belong to this member and this benefit. Checked
-      //    before the write so a bad reference never leaves a redemption
-      //    recorded against nothing.
-      if (body.requestId !== undefined) {
-        const approval = await app.prisma.benefitRequest.findFirst({
-          where: scopedWhere({ id: body.requestId }, scopeForBenefitRequest(principal)),
-          select: { id: true, memberId: true, benefitId: true, status: true },
-        });
-
-        // A spent approval fails on status; a wrong one fails on the member or
-        // benefit not matching. One message covers all three, so a guessed id
-        // learns nothing about which requests exist.
-        if (
-          !approval ||
-          approval.status !== 'APPROVED' ||
-          approval.memberId !== member.id ||
-          approval.benefitId !== benefit.id
-        ) {
-          return reply.code(422).send({
-            error: 'approval_not_valid',
-            message: 'That approval is not available for this member and benefit.',
-          });
-        }
-      }
-
-      // 7. Idempotency key unused — enforced by the unique index rather than
-      //    by the check above, which can lose a race.
-      let created;
-      try {
-        created = await app.prisma.redemption.create({
-          data: {
-            memberId: member.id,
-            benefitId: benefit.id,
-            outletId,
-            staffUserId: principal.subjectId,
-            partySize: body.partySize ?? null,
-            billAmountMinor: body.billAmountMinor ?? null,
-            // The rate this member was given, fixed here. Every figure derived
-            // from this visit reads it back from this row and never from the
-            // benefit, so an administrator exercising R14 tomorrow changes what
-            // members are offered next — not what this one was given today.
-            discountPctApplied: benefit.discountPct,
-            benefitVersion: benefit.version,
-            idempotencyKey: body.idempotencyKey,
-          },
-          select: RECORDED_SELECT,
-        });
-      } catch (error) {
-        // Two identical submissions in flight at once: the loser reads the
-        // winner's row and returns it, which is what a retry should see.
-        const raced = await app.prisma.redemption.findFirst({
-          where: scopedWhere(
-            { idempotencyKey: body.idempotencyKey },
-            scopeForRedemption(principal),
-          ),
-          select: RECORDED_SELECT,
-        });
-        if (raced) {
-          return reply.code(200).send({ ...serializeRecorded(raced), idempotent: true });
-        }
-        throw error;
-      }
-
-      // Spend the approval. Conditional on it still being APPROVED, so two
-      // administrators fulfilling the same one at the same moment cannot both
-      // succeed — and the unique index on `redemptionId` is the backstop if
-      // this check is ever removed.
-      //
-      // Deliberately after the redemption exists rather than before: a failure
-      // here leaves an approval that looks unspent, which is recoverable from
-      // the member's history. The reverse — an approval marked spent
-      // with no redemption behind it — leaves the guest with no discount and no
-      // way to ask for it again.
-      if (body.requestId !== undefined) {
-        await app.prisma.benefitRequest.updateMany({
-          where: { id: body.requestId, status: 'APPROVED' },
-          data: {
-            status: 'FULFILLED',
-            redemptionId: created.id,
-            fulfilledAt: new Date(),
-          },
-        });
+      if (result.idempotent) {
+        return reply
+          .code(200)
+          .send({ ...serializeRecorded(result.redemption), idempotent: true });
       }
 
       await writeAudit(app.prisma, {
         action: 'redemption.recorded',
         principal,
         subjectType: 'Redemption',
-        subjectId: created.id,
+        subjectId: result.redemption.id,
         metadata: {
-          benefitKey: benefit.key,
-          outletId,
-          partySize: created.partySize,
+          benefitKey: result.benefit.key,
+          outletId: result.redemption.outletId,
+          partySize: result.redemption.partySize,
           fulfilledRequestId: body.requestId ?? null,
         },
         ipAddress: request.ip,
       });
 
       const delivery = {
-        email: member.email,
-        phone: member.phone ?? '',
+        email: result.member.email,
+        phone: result.member.phone ?? '',
         purpose: 'redemption-recorded' as const,
-        benefitTitle: benefit.title,
-        outletName: outlet.name,
-        discountPct: String(created.discountPctApplied),
-        savedMinor: savedMinor(created),
+        benefitTitle: result.benefit.title,
+        outletName: result.outlet.name,
+        discountPct: String(result.redemption.discountPctApplied),
+        savedMinor: savedMinor(result.redemption),
       };
       logDeliveryOutcome(app.log, app.codeSender, delivery, await app.codeSender.send(delivery));
 
-      return reply.code(201).send({ ...serializeRecorded(created), idempotent: false });
+      return reply
+        .code(201)
+        .send({ ...serializeRecorded(result.redemption), idempotent: false });
     },
   );
 

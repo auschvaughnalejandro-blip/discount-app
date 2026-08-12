@@ -25,11 +25,12 @@ import { createTransport, type Transporter } from 'nodemailer';
 
 import type { Env } from '../config/env.js';
 import type {
+  AnyDelivery,
   CodeDelivery,
   CodeSender,
   DeliveryOutcome,
   LifecycleDelivery,
-  MemberDelivery,
+  OutletDelivery,
 } from './code-sender.js';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -99,33 +100,30 @@ function qar(minor: number): string {
 
 function lifecycleBody(delivery: LifecycleDelivery): { subject: string; text: string } {
   switch (delivery.purpose) {
+    // Nothing is pending here. The guest is entitled to the benefit already, so
+    // this says the outlet has been told and they can simply turn up — never
+    // that anyone is reviewing anything.
     case 'request-submitted':
       return {
-        subject: 'Your Privilege Guest request was received',
+        subject: 'Privilege Guest — the outlet has been told',
         text: [
-          `We received your request for ${delivery.benefitTitle}.`,
+          delivery.outletName
+            ? `${delivery.outletName} has been told you are coming for ${delivery.benefitTitle}.`
+            : `The outlet has been told you are coming for ${delivery.benefitTitle}.`,
           '',
-          'The hotel will review it. You can also follow its status in the app.',
+          'Nothing to wait for — just go and present your membership card. The',
+          'discount is applied at the outlet and recorded afterwards.',
         ].join('\n'),
       };
-    case 'request-approved':
+    case 'request-not-used':
       return {
-        subject: 'Your Privilege Guest request was approved',
+        subject: 'Privilege Guest — benefit not used',
         text: [
-          `Your request for ${delivery.benefitTitle} has been approved.`,
+          `${delivery.benefitTitle} was not used, so nothing has been recorded.`,
+          ...(delivery.reason ? ['', `Outlet note: ${delivery.reason}`] : []),
           '',
-          'Open the app to view the approval and any reservation details for the benefit.',
-          ...(delivery.reason ? ['', `Hotel note: ${delivery.reason}`] : []),
-        ].join('\n'),
-      };
-    case 'request-declined':
-      return {
-        subject: 'Update on your Privilege Guest request',
-        text: [
-          `Your request for ${delivery.benefitTitle} was not approved.`,
-          ...(delivery.reason ? ['', `Reason: ${delivery.reason}`] : []),
-          '',
-          'Open the app to view the request status.',
+          'Your benefit is untouched and you can use it whenever you like — this',
+          'is only a note that the visit did not happen.',
         ].join('\n'),
       };
     case 'redemption-recorded': {
@@ -149,10 +147,44 @@ function lifecycleBody(delivery: LifecycleDelivery): { subject: string; text: st
   }
 }
 
+/**
+ * The notice an outlet receives. Written for somebody standing up, mid-service:
+ * who is coming and what they get, in the first two lines.
+ *
+ * Carries the membership number and never the member's name — see the note on
+ * `OutletDelivery`. The guest's own note is included only when the hotel has
+ * agreed it may leave the system.
+ */
+function outletBody(delivery: OutletDelivery): { subject: string; text: string } {
+  const noteLines =
+    delivery.includeNote && delivery.note ? ['', `Guest note: ${delivery.note}`] : [];
+
+  return {
+    // The membership number is in the subject on purpose: an outlet works from a
+    // notification list, and a subject that reads the same for every guest means
+    // opening all of them to find the one at the door.
+    subject: `Privilege Guest ${delivery.memberNumber} — ${delivery.benefitTitle}`,
+    text: [
+      `${delivery.memberNumber} is coming to ${delivery.outletName}.`,
+      '',
+      `Benefit: ${delivery.benefitTitle}`,
+      `Discount: ${delivery.discountPct}%`,
+      ...noteLines,
+      '',
+      'Apply the discount on your own till as usual, then confirm it on the',
+      'outlet screen so it is recorded. If they do not arrive, mark it not used —',
+      'nothing is recorded either way until you confirm.',
+    ].join('\n'),
+  };
+}
+
 export function messageBody(
-  delivery: MemberDelivery,
+  delivery: AnyDelivery,
   ttlMinutes: number,
 ): { subject: string; text: string } {
+  if (delivery.purpose === 'outlet-request') {
+    return outletBody(delivery);
+  }
   return 'code' in delivery ? body(delivery, ttlMinutes) : lifecycleBody(delivery);
 }
 
@@ -182,7 +214,7 @@ export function createSmtpSender(env: Env, log: FastifyBaseLogger): CodeSender {
   return {
     name: 'smtp',
 
-    async send(delivery: CodeDelivery): Promise<DeliveryOutcome> {
+    async send(delivery: AnyDelivery): Promise<DeliveryOutcome> {
       // Email is optional at claim time, so this is a real state rather than a
       // defensive check. The caller keeps its response identical regardless,
       // so a member in this state sees the same screen as everyone else and

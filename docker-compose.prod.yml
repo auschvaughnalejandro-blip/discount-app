@@ -58,8 +58,11 @@ services:
       PASSWORD_PEPPER: ${PASSWORD_PEPPER:?Set PASSWORD_PEPPER in .env}
       OTP_CODE_HMAC_SECRET: ${OTP_CODE_HMAC_SECRET:?Set OTP_CODE_HMAC_SECRET in .env}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
-      VERIFICATION_SESSION_HMAC_SECRET: ${VERIFICATION_SESSION_HMAC_SECRET:?Set VERIFICATION_SESSION_HMAC_SECRET in .env}
       MFA_SECRET_ENCRYPTION_KEY: ${MFA_SECRET_ENCRYPTION_KEY:?Set MFA_SECRET_ENCRYPTION_KEY in .env}
+      # Keys the code printed on the back of every physical card. Rotating it
+      # invalidates every card at once — which is also the only recovery a printed
+      # credential has, so back this up before a print run.
+      IDENTITY_CODE_HMAC_SECRET: ${IDENTITY_CODE_HMAC_SECRET:?Set IDENTITY_CODE_HMAC_SECRET in .env}
 
       JWT_ISSUER: https://api.${DOMAIN:?Set DOMAIN in .env}
       JWT_AUDIENCE_MEMBER: pgp-member
@@ -90,10 +93,20 @@ services:
       GOOGLE_SHEETS_PRIVATE_KEY_BASE64: ${GOOGLE_SHEETS_PRIVATE_KEY_BASE64:-}
       GOOGLE_SHEETS_SYNC_INTERVAL_SECONDS: ${GOOGLE_SHEETS_SYNC_INTERVAL_SECONDS:-300}
 
-      # Must stay false outside development. The dev echo prints passcodes to
-      # the log, which is exactly the risk an OTP exists to avoid; the code also
-      # gates it on NODE_ENV, so this is the second of two locks.
-      DEV_OTP_ECHO: 'false'
+      # Outlet fulfilment. The guest announces, one outlet confirms.
+      REQUEST_THROTTLE_SECONDS: ${REQUEST_THROTTLE_SECONDS:-60}
+      REQUEST_EXPIRY_HOURS: ${REQUEST_EXPIRY_HOURS:-24}
+      REQUEST_EXPIRY_SWEEP_INTERVAL_SECONDS: ${REQUEST_EXPIRY_SWEEP_INTERVAL_SECONDS:-900}
+      # Off unless the hotel has agreed the guest's free text may leave the
+      # system. See DECISIONS.md — enabling it makes "we never send names" false,
+      # because a guest can type their own into that box.
+      OUTLET_NOTIFY_INCLUDE_NOTE: ${OUTLET_NOTIFY_INCLUDE_NOTE:-false}
+
+      # The counter lookup. A membership number is sequential and printed on the
+      # card, so this is metered no matter who holds the credential (§5).
+      RATE_LIMIT_RESOLVE_PER_ACCOUNT_MAX: ${RATE_LIMIT_RESOLVE_PER_ACCOUNT_MAX:-60}
+      RATE_LIMIT_RESOLVE_WINDOW_SECONDS: ${RATE_LIMIT_RESOLVE_WINDOW_SECONDS:-3600}
+      VERIFICATION_SESSION_TTL_SECONDS: ${VERIFICATION_SESSION_TTL_SECONDS:-600}
     networks: [internal, edge]
     # Nothing is written to disk at runtime. tmpfs covers anything that needs a
     # scratch path so the image itself stays immutable.
@@ -116,9 +129,9 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
-      # Space-separated CIDRs allowed to reach the dashboard, the verification
-      # page and /admin/*. See DEPLOYMENT.md §5 — and note §5.3, where this
-      # value is what makes the outlet-staff MFA exemption proportionate.
+      # Space-separated hotel staff/VPN CIDRs allowed to reach both the admin and
+      # outlet surfaces and APIs. Do not include guest Wi-Fi: network location is
+      # defence in depth, while authentication remains the primary control.
       INTERNAL_CIDR: ${INTERNAL_CIDR:?Set INTERNAL_CIDR in .env}
     ports:
       - '80:80'

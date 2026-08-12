@@ -5,6 +5,51 @@
 > historical database values: they cannot log in, refresh, resolve as a
 > principal or hold permissions. Any role/verification-page confirmations below
 > describe the superseded design and are not approvals for active access.
+>
+> **Partly reversed — 2026-08-12 (Stage 28).** `OUTLET_STAFF` is live again. The
+> first Stage 28 implementation used Google rather than a password; that
+> authentication choice is itself superseded by the device-token-only follow-up
+> below. MANAGER and SUPPORT remain inert, now enforced by
+> `StaffUser_only_live_roles_active` in place of the administrators-only
+> constraint. Read the outlet items below with three corrections:
+>
+> - **The permission names changed.** `verify:resolve` and the outlet's use of
+>   `redemptions:record` are gone. An outlet holds exactly `outlet:queue`,
+>   `outlet:fulfil` and `outlet:resolve`. It notably does **not** hold
+>   `redemptions:record`, because that route takes the outlet from the request
+>   body — holding it would be a way to record against another outlet's room.
+> - **There is no separate verification page.** Its routes moved under `/outlet/*`
+>   inside the signed-in outlet screen, and the verification session now binds to
+>   the outlet account rather than to a staff user on a standalone page.
+> - **The card code is static.** The rotating payload and its freshness window are
+>   implemented but unused, because the printed card cannot rotate one. The code
+>   identifies and grants nothing, which is the whole basis for accepting it — see
+>   DECISIONS.md, 2026-08-12, including the condition that would force a revisit.
+>
+> The substance of every outlet item below still holds: no list or search endpoint
+> is reachable by an outlet account, lookups are exact-match and hard rate
+> limited, every lookup is audited, and recording requires a session bound to a
+> member just resolved at that outlet. **This section needs a full re-review
+> against the new surface before launch** — it has been annotated, not redone.
+>
+> **Outlet-authentication follow-up — 2026-08-12.** The Stage 28 note above
+> records the first implementation, where Google was the default; a subsequent
+> compatibility period is also superseded. The only active outlet login is one
+> high-entropy `TOKEN` credential per physical device. An outlet email is an
+> optional notification destination only and grants no access. A standing device
+> token is accepted only at `/outlet/auth/token`, stored only as a SHA-256 digest,
+> and exchanged for a
+> short bearer access token plus rotating httpOnly refresh cookie. Admin issuance
+> and rotation reveal plaintext once; rotation and irreversible revocation bump
+> `tokenVersion` and revoke live refresh families. No browser persists a raw token
+> in web storage or a URL.
+>
+> The outlet hostname is also behind `INTERNAL_CIDR`. That allowlist must contain
+> only the staff/back-of-house VLAN and VPN — not guest Wi-Fi — and a tablet on
+> cellular is refused by design. This is defence in depth: source address is not
+> identity and never replaces the per-device credential. The detailed addendum at
+> the end of this review is the current authority wherever older verification-page
+> or Google-default text below conflicts.
 
 Every item in `docs/security-implementation.md` §12, with its status and where
 it is enforced. Confirmed items cite the file that enforces them and the test
@@ -98,6 +143,46 @@ which now completes enrollment the way a real client must:
 - Every MFA event is audited: challenged, success, failure, enrolled, and
   recovery-code used as its own action, since spending a recovery code should
   stand out in the trail.
+
+**Revised 2026-08-12: there is now one switch that skips the second factor, and
+production refuses to honour it.**
+
+`STAFF_MFA_REQUIRED=false` makes a dashboard password complete sign-in on its own.
+Naming it here rather than only in DECISIONS.md, because the heading above claims
+enforcement "on every dashboard account" and that claim now carries a condition.
+
+The section on Argon2 parameters two headings up says a knob that can weaken
+password hashing is a knob that eventually will, and that reasoning applies to
+this one too. What makes it acceptable is that it cannot be turned in the place
+where turning it matters:
+
+- `loadEnv` **throws** if the flag is false while `NODE_ENV=production`, so the
+  API does not start. Not a warning in a log, not a startup banner — a boot
+  failure, because a misconfigured production deployment must not be reachable
+  with one factor for the minutes it takes somebody to notice.
+- The login handler re-checks `NODE_ENV !== 'production'` at the branch itself,
+  rather than trusting that the boot check ran.
+- Anything other than the exact string `false` is read as true, so a typo
+  (`no`, `0`, `False`, empty) fails closed.
+- A password-only sign-in audits as `auth.mfa.skipped` with the flag named in its
+  metadata — never `auth.login.success`. Any such row on a production database is
+  evidence that something started with a configuration that should have been
+  impossible, and it is findable by action rather than by inference.
+- Nothing is removed when it is off: enrollment, verification, recovery codes and
+  the replay check all remain and all still work.
+
+Pinned by `test/setup.ts` for the whole suite and covered by
+`test/staff-mfa-gate.test.ts` (8 tests), which asserts the default, the typo
+behaviour, the production refusal, that a wrong password is still refused with the
+flag off, and that the resulting token really does open an administrator route —
+the last one because a switch that half-works is worse than either state.
+
+**Why it exists at all.** The second factor is TOTP, so a developer without the
+secret in an authenticator app must run `npm run mfa:code` in a second terminal
+and read a code that rolls over every thirty seconds, on every sign-in. §3's
+requirement is aimed at a stolen or phished administrator password reaching the
+internet; that threat does not describe a seeded database on 127.0.0.1. The scope
+of this switch is exactly that gap and no wider.
 
 **Two things deliberately not built, and worth naming:**
 1. **No MFA reset path for an account that has lost both its authenticator and
@@ -567,3 +652,71 @@ database constraint preventing those roles from becoming active. It retains the
 rows so historic redemptions still name the actor who recorded them. Tests cover
 correct-password login denial, stale/forged-role token denial, account-creation
 payload denial and administrator-only account management.
+
+---
+
+## Per-device outlet authentication addendum (2026-08-12)
+
+**Current status: implemented and tested.** This addendum supersedes the
+administrator-only, Google-default and Google-compatibility conclusions above
+only where they concern the outlet surface. MANAGER and SUPPORT remain inert.
+`ADMINISTRATOR` remains the only role held by a named person; `OUTLET_STAFF`
+principals represent labelled counter devices and receive exactly `outlet:queue`,
+`outlet:fulfil` and `outlet:resolve`.
+
+### Standing credential
+
+- `security/outlet-login-token.ts` generates `pgo_` plus 32 random bytes (256
+  bits) encoded as unpadded base64url. The exchange endpoint bounds input size
+  but deliberately hashes malformed and truncated values through the same
+  indexed lookup and uniform 401 path as unknown or revoked credentials.
+- `StaffUser.outletTokenHash` is unique and contains SHA-256, never plaintext.
+  A fast digest is appropriate because the input is uniformly random rather than
+  human-selected; there is no feasible dictionary for a slow password hash to
+  frustrate.
+- `POST /outlet/auth/token` is rate-limited by source IP, performs one indexed
+  digest lookup, requires an active `TOKEN` account bound to an active outlet,
+  and returns one uniform failure for unknown, revoked and unusable credentials.
+  Neither the token nor its digest enters audit metadata.
+- Success issues the normal short staff access token and rotating refresh family.
+  The browser uses the httpOnly, `Secure` in production, `SameSite=Strict` cookie
+  scoped to `/api/auth`; it ignores the response-body refresh copy intended for
+  non-browser clients. Outlet data routes continue to require a bearer access
+  token and never accept the standing device credential.
+
+### Lifecycle and exposure
+
+- Admin → Outlets creates a separate row for each physical device. Issue and
+  rotate responses contain plaintext once; management reads expose only label,
+  status and issued/last-used timestamps. The admin client holds the one-time
+  value in component state, supports manual selection/explicit clipboard copy,
+  and never persists it in web storage or a URL.
+- Rotation atomically replaces the digest, clears last-used state, increments
+  `tokenVersion` and revokes active refresh families. Revocation additionally
+  clears the digest and suspends the principal. It has no reinstate action: a
+  recovered device gets a new row so an already copied token cannot become live
+  again.
+- The row is retained for immutable redemption attribution. This attribution is
+  deliberately station-level rather than person-level and the label must describe
+  the physical counter/device, not an employee.
+- Google OAuth routes, hosted-domain/allowlist gates, Google outlet-account
+  provisioning and development session bundles are absent from the active outlet
+  login surface. Local testing must issue and exchange a real device token too.
+- `Outlet.notifyEmail` is deliberately separate from `StaffUser`: it is an optional
+  destination for request notifications, not an identity, allowlist entry,
+  credential or recovery channel.
+- A device token is a single factor. That is an explicit pilot tradeoff, not a
+  claim that the network is a second factor. A per-device PIN can be added if
+  the hotel later needs an extra factor; this release does not pretend one exists.
+
+### Network layer
+
+`outlet.<domain>` imports Caddy's `internal_only` rule. Production
+`INTERNAL_CIDR` must enumerate the staff/back-of-house VLAN and VPN. Guest Wi-Fi
+is explicitly outside the trust boundary even when it is operated by the hotel,
+and cellular devices are refused. This reduces public exposure but is not relied
+on for authorization: the token still selects one active device principal and all
+reads/writes remain scoped to its `outletId`.
+
+Local acceptance uses Admin → Outlets and the real token-exchange route. There is
+no development session minter or client-side session-bundle adoption path.

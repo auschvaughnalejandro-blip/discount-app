@@ -869,3 +869,360 @@ account). A migration suspends those rows and revokes their sessions. Login,
 refresh, principal resolution, permissions and account-management routes also
 reject them independently. They are not converted into administrators, because
 doing so would turn a later reinstatement into privilege escalation.
+
+---
+
+**2026-08-12 — the benefit request stops being a petition; the outlets confirm
+their own visits.**
+
+The client's IT asked that a guest's request go straight to the outlet with no
+administrator approving or declining it. That reads at first like a conflict with
+the hotel's own description of an outlet screen where staff "approve or reject",
+and it is not. They are two different events, and this system already had two
+different rows for them:
+
+- `BenefitRequest` is the guest announcing themselves.
+- `Redemption` is the immutable record that a discount was given.
+
+The removed step is the administrator in the middle. What the outlet does is not
+permission — it is **confirmation of use**, which writes the Redemption. Its
+counterpart is not a refusal but *the guest never came*.
+
+So a request is now a **notice**, created already usable and addressed to one
+outlet. `PENDING → APPROVED → FULFILLED` becomes `SENT → FULFILLED`, with
+`NOT_USED` as the other ending. `PENDING`, `APPROVED` and `DECLINED` remain in
+the enum on historical rows only — the same treatment the retired `Role` values
+already get, so nothing is rewritten and no audit entry is falsified. The
+`decided*` columns keep their names in the database and are mapped to `closed*`
+in code, so the rename cost no migration.
+
+**Why not simply create requests as `APPROVED` and change nothing else.** That
+was a smaller diff by a wide margin and it was rejected: it would put the word
+"approved" in the audit log and in the hotel's spreadsheet for something nobody
+approved. In a system whose entire value is a record the hotel can trust, a
+convenient lie in that record is the most expensive kind of shortcut.
+
+**The one-per-minute throttle is a database count, not the in-memory limiter.**
+`rate-limit.ts` resets on every deploy and holds a separate allowance per
+process. Counting rows on `requestedAt` survives both, and the index it needs —
+`[memberId, requestedAt]` — was already on the table. A test holds a restart
+across it.
+
+**A notice names its outlet, and the guest chooses it.** `Benefit.outletKind` is
+a *kind*, and a hotel has several restaurants — so "the outlet that was told" was
+undefined as specified. Broadcasting to every outlet of the kind would mean
+duplicate messages and a race over who confirms. The guest already knows where
+they are going, so they say; the picker appears only when more than one outlet
+honours the benefit, and the server fills it in otherwise.
+
+**A notice nobody confirms is closed automatically after 24 hours**, as
+`NOT_USED` with no `closedByUserId`. Attributing a clock's decision to an account
+would name somebody who never touched it — the same falsification the original
+`decision_complete` CHECK existed to prevent, pointing the other way. The
+constraint was replaced by name to allow exactly that one case.
+
+---
+
+**2026-08-12 — outlet accounts return, authenticating through Google. This
+partly reverses Stage 27.**
+
+Stage 27 (2026-08-09) recorded that the product has two applications and one
+hotel-facing account type, and suspended `OUTLET_STAFF` behind a database CHECK.
+An outlet screen requires that to be reversed. The client chose the mechanism:
+each outlet signs in with its own Google account, and nothing else can.
+
+**Only the first half of Stage 27 is reversed.** There is a third surface, but
+there is still exactly one kind of account a *named person* holds:
+`ADMINISTRATOR`. An outlet account is a shared credential for a room, labelled
+after the room ("Steakhouse counter"), and no administrator permission reaches
+it. `StaffUser_only_administrators_active` was dropped and replaced by
+`StaffUser_only_live_roles_active`, which still refuses MANAGER and SUPPORT — a
+narrowing recorded in the migration history rather than an absence somebody has
+to notice.
+
+**Three things had to be true for delegating to Google to deliver anything.**
+
+1. **It is real OAuth, not a Gmail address in our password field.** The shortcut
+   buys none of the benefit, because we would still hold the password. The ID
+   token is verified against Google's published keys, with issuer, audience,
+   nonce and `email_verified` all checked. `jose` was already a dependency.
+2. **Google authenticates; we authorize.** Google says *which account*. It does
+   not say that the account may work an outlet queue — that is a row in our
+   database. Both gates must pass: the address is on the hotel's domain, *and* it
+   is an active `OUTLET_STAFF` row bound to an active outlet. A hotel employee
+   with a valid work address who is not in that table gets nothing.
+3. **The account is shared, so this is outlet-level security.** One mailbox used
+   by everyone on shift means the password is known to several people and will be
+   written down, and 2FA on a shared account is awkward enough that hotels
+   commonly turn it off — which would quietly cancel the benefit being bought.
+
+**What this cannot enforce, stated plainly: whether their 2FA is switched on.**
+Google does not disclose that to a relying application. So "as secure as their
+Google account" is true and unenforceable by us. The strongest available
+substitute is refusing every account outside the hotel's own domain
+(`GOOGLE_WORKSPACE_DOMAIN`, checked against the `hd` claim) and leaving the
+policy to the hotel's Workspace administrator.
+
+**A Workspace domain is materially better than consumer Gmail**, and the
+`OUTLET_SIGNIN_ALLOWLIST` fallback is explicitly weaker. With a domain, the check
+is one server-side rule against a claim Google signed; without one it is a
+hand-maintained list of addresses that drifts. A domain account can also be
+suspended by hotel IT the day somebody leaves, has readable login history, and
+does not die with an ex-employee's recovery phone. Notices carrying a membership
+number to a hotel-controlled mailbox are the hotel handling its own guest data;
+the same message to a personal Gmail is guest data sent to an account nobody
+controls.
+
+**Attribution weakens, deliberately.** A redemption recorded at an outlet names
+the room, not the person. The alternative — per-person accounts on a shared iPad
+— was not on offer, and a per-device PIN can be added later if anybody asks "who
+did this?" `Redemption.staffUserId` is unchanged and still non-null, because an
+outlet account *is* a `StaffUser`; `StaffUser.outletId` already existed for
+historical outlet actors and simply came back into use. That avoided a nullable
+actor column on the immutable table, a CHECK constraint, and a fallback in every
+reader that prints who recorded a visit.
+
+`passwordHash` is now nullable, paired with a new `authMethod` column and a CHECK
+that a PASSWORD account has a hash and a GOOGLE account does not. Stated as its
+own column rather than inferred from a null hash, because an outlet account has
+neither a password nor a Google subject until its first sign-in — so "no hash"
+alone could not tell a Google account from a broken row. The Google subject is
+recorded on first use and pinned thereafter: a later sign-in presenting the same
+address with a different subject is refused, which is what a mailbox deleted and
+recreated by somebody else looks like.
+
+---
+
+**2026-08-12 — WhatsApp was considered and rejected. Notices go by email and to
+the outlet's own screen.**
+
+IT's original request was that a notice reach "the WhatsApp number of the
+outlet". Automatic WhatsApp means Meta's Cloud API, which carries a verified
+business account, a dedicated number not already on consumer WhatsApp,
+**pre-approved message templates** for every business-initiated message, and a
+per-message fee. The free `wa.me` link everybody thinks of needs a human to press
+it and so cannot deliver a notification at all.
+
+The client's own conclusion, and the right one: **ditch it.** The destination is
+the outlet's screen — no external service, no per-message cost, and it still works
+when the connection to Meta does not. The email is a nudge on top, through the
+SMTP transport Stage 18 already built.
+
+**The notice is the message.** The Messages tab and the queue are one list, so
+there is no second store to reconcile and no way for the two to disagree. A
+`seenAt` column carries the unread marker, and is the closest thing to a delivery
+receipt that does not depend on email arriving.
+
+**One deliberate departure from §9.** Every other message this system sends
+carries no membership number, name or benefit — a member's personal inbox is not
+a place to restate who they are. An outlet notice carries the membership number
+and the benefit, because it is useless without them. That is a difference of
+audience, not of principle: the recipient is an internal operational mailbox at
+the hotel, and the guest's *name* is still never sent.
+
+**The guest's free-text note is off by default** (`OUTLET_NOTIFY_INCLUDE_NOTE`).
+The standing export policy excludes request free text from anything leaving the
+system, and a guest can type their own name into that box — so enabling it makes
+"we never send names" false. The outlet sees the note on its screen regardless.
+Turning it on is the hotel's decision and belongs in this file when it happens.
+
+---
+
+**2026-08-12 — Q1 is reversed: there is a QR again, and it is static.**
+
+PROGRESS.md Q1 was answered on 2026-08-08 with "there is no QR", and the whole
+scanned credential was deleted — module, route, camera and both dependencies.
+IT has asked for it back so a Privilege Guest need not open the app at all. The
+deleted code was recovered from `2f44daf~1` rather than rewritten.
+
+**The card carries the code in ink, so it cannot rotate.** The original design
+(§7) defeated a forwarded screenshot with a freshness window and a payload
+reissued every 60 seconds. A printed payload has one timestamp for the life of the
+card, so a freshness window either rejects the card on day two or is not a
+freshness window at all.
+
+`v2.<member_ref>.<hmac>` is therefore static, and says so in the version prefix
+rather than pretending to a freshness it does not have. `v1` remains implemented
+and verifiable, so rotation can be reinstated later without reprinting a card or
+updating a scanner.
+
+**Why a static code is acceptable: it identifies and grants nothing** (R10).
+Resolving it returns who the member is and what the programme offers them.
+Applying a discount still requires an authenticated outlet session, and recording
+one still writes an immutable attributed row. The code is therefore no stronger
+and no weaker than the membership number already printed in plain text on the
+front of the same card, which staff can and do type in by hand. **If possession
+of the payload alone ever becomes worth something, this decision has to be
+revisited** — that is the condition, and `v1` exists so it can be.
+
+The payload is derived from the member's opaque internal id, never the sequential
+`PG-` number (R3), so no member can generate a neighbour's from their own. It is
+computed rather than stored: there is no column to migrate, nothing to keep in
+sync with the printed card, and no table whose leak would hand somebody a set of
+working payloads. Rotating `IDENTITY_CODE_HMAC_SECRET` invalidates every code at
+once, which is the only recovery a printed credential can have.
+
+The scanner lives inside the signed-in outlet screen rather than on a standalone
+page. Beyond the obvious convenience, it means resolving a member and recording a
+visit are two calls in one already-authenticated session, so the short-lived
+verification session binding them is simpler than the old standalone page's.
+
+**A camera needs a secure context.** `getUserMedia` refuses on plain HTTP;
+`localhost` counts and a LAN address does not. Testing a scan on a real counter
+tablet therefore needs TLS, which makes the deployment stage a prerequisite for
+accepting this rather than something that follows it. The scanner says so, and
+typing the membership number always works.
+
+---
+
+**2026-08-12 — per-device tokens become the default outlet authentication;
+Google remains optional compatibility. This supersedes the default chosen in the
+earlier 2026-08-12 Google decision without rewriting it.**
+
+Building the Google path made its operational dependencies concrete: a live OAuth
+client and exact redirect URI, hotel Workspace mailboxes, a shared-account 2FA
+policy, and coordination with the hotel's Workspace administrator. None can be
+completed by deploying this application. A counter device instead receives its
+own application credential, which the programme administrator can issue and
+revoke without another system or another team.
+
+**One token per physical device, not one per outlet.** `pgo_` tokens contain 256
+bits of cryptographically random entropy. They are not human-chosen passwords and
+are stored only as a unique SHA-256 digest, which gives one indexed lookup without
+leaving plaintext in the database. The standing credential is accepted only by
+`POST /outlet/auth/token`; success exchanges it for the ordinary short access
+token and rotating httpOnly refresh-cookie session. Queue, lookup and redemption
+routes never accept the standing token directly.
+
+This makes the blast radius the device's one outlet. A lost spa tablet can be
+revoked without signing out another spa counter, and its token cannot reach the
+restaurant's work. It does not recover person-level attribution: the immutable
+redemption names the labelled station, not whoever happened to hold it. That is
+the same honest outlet-level attribution accepted in the Google decision.
+
+**This is one factor, accepted explicitly for the pilot.** The staff network is
+not counted as a second factor and the interface makes no such claim. A short
+per-device PIN remains a possible follow-up if the hotel wants another factor;
+shipping no PIN is preferable to inheriting shared-Google 2FA that operations
+would likely disable while believing the application had stronger assurance.
+
+**Plaintext is a one-time administrative handoff.** Admin → Outlets returns a new
+token only when a device is issued or rotated. The interface holds it in component
+memory, offers explicit copy/manual selection, warns that it cannot be recovered,
+and does not write it to web storage or a URL. Rotation replaces the digest,
+increments `tokenVersion` and revokes the refresh family. Revocation also destroys
+the standing digest and is deliberately irreversible; recovered hardware gets a
+new device row so a possibly copied token is never brought back to life. The old
+row remains because historical redemptions point to it.
+
+**The hotel network is defence in depth, not authentication.** The outlet hostname
+now shares the `INTERNAL_CIDR` edge restriction with the administrator surface.
+That variable must contain only staff/back-of-house ranges and the VPN — never
+guest Wi-Fi merely because it is inside the building. A tablet on cellular is
+refused by design. Source address reduces exposure; the per-device token is still
+what identifies and authorizes the station.
+
+**Google is retained, not deleted.** Existing `GOOGLE` outlet accounts, OAuth
+routes, domain/allowlist gates and subject pinning continue to work, but appear as
+an optional secondary path. A deployment using only device tokens leaves the
+three `GOOGLE_OAUTH_*` values empty. This preserves a migration path for hotels
+that later choose Workspace without making Workspace a prerequisite for opening
+the outlet screen.
+
+The legacy local session-minter remains development-only and is renamed
+`npm run outlet:dev-session` so nobody mistakes its access/refresh pair for the
+new standing device credential. Normal local testing should issue a real device
+token through the admin panel and exercise the production exchange route.
+
+---
+
+**2026-08-12 — outlet authentication is device-token-only; email is notification
+metadata. This supersedes both Google compatibility and the development session
+minter above without rewriting their decision history.**
+
+The client clarified that an outlet “account” means the labelled counter device,
+not a mailbox. Every outlet session therefore begins with a real Admin-issued
+`pgo_…` credential at `POST /outlet/auth/token`. There is no Google button, OAuth
+callback, email/password login, allowlist, Google-account provisioner or secondary
+authentication path for an outlet. Historical schema or migration vocabulary may
+remain where database history requires it; it does not constitute a live login
+option.
+
+**The outlet's email has exactly one job: notifications.** `Outlet.notifyEmail` is an
+optional SMTP destination for guest notices. It is not copied into `StaffUser`,
+matched during authentication, placed on an identity allowlist or used to recover
+a token. Empty means the outlet relies on its own queue. Changing the notification
+address changes no principal, permission or session. Google's Sheets service
+account configuration is unrelated and remains solely for the reporting mirror.
+
+**Local login is deliberately the production login.** The session-bundle helper
+and Development sign-in panel are removed. A developer issues a labelled device
+under Admin → Outlets and pastes its one-time token into the normal outlet form.
+This keeps the tested handoff honest and prevents an access/refresh JWT bundle
+from being mistaken for the long-lived device credential operators must rotate or
+revoke. Multiple local outlets use multiple device rows and separate browser
+profiles, exactly as multiple counters do in production.
+
+---
+
+**2026-08-12 — the dashboard refreshes through one shared promise; and
+`STAFF_MFA_REQUIRED` exists as a local-development switch that production refuses
+to honour.**
+
+Two changes to how an administrator session behaves, from one report: "if I stay
+on the admin panel for too long I suddenly get a warning saying authentication
+required."
+
+**The session bug was concurrency, not expiry.** Refresh tokens rotate single-use,
+and §4 requires that presenting a spent one revoke the whole family — from the
+server a replay is indistinguishable from theft. The admin dashboard was the only
+client refreshing per-request rather than through one shared in-flight promise,
+and it is also the only one whose landing screen opens with five requests at once.
+So ten minutes after every sign-in, when the access token expired, all five came
+back 401 together and rotated the same cookie in parallel: the first won, the
+other four were read as replay, and the family died — taking the winner's fresh
+token with it. A twelve-hour refresh token was being destroyed by a ten-minute
+access token, every time, and the dashboard then sat there rendering
+"Authentication required." into eight panels because clearing the token did not
+change the `signedIn` state the tree renders from.
+
+The server was left alone deliberately. Widening rotation to tolerate a
+"recently spent" token would weaken §4's theft detection to compensate for a
+client defect, and the member and outlet clients had the single-flight guard
+already — the dashboard was the outlier, not the rule. `client-invariants.test.ts`
+now asserts the guard statically for all three, plus that each client contains
+exactly one call site for `/auth/refresh`: the defect compiled perfectly, so a
+typecheck can never be what catches its return.
+
+Two adjacent defects in the same code, fixed with it: the 401 retry recursed with
+no depth guard, so a 401 no refresh could fix would refresh-and-retry for as long
+as the server kept refusing; and "Sign out" called only `clearTokens`, dropping
+the access token while leaving the refresh cookie intact — so the next page load
+resumed the session and signed the administrator straight back in. On a shared
+back-office machine that button was not ending a session, only hiding it. It now
+calls `/auth/logout`, and `clearTokens` is no longer exported.
+
+**`STAFF_MFA_REQUIRED` answers a fair question about a real cost.** The second
+factor is TOTP, so a developer without the secret in an authenticator app runs
+`npm run mfa:code` in a second terminal and reads a number that rolls over every
+thirty seconds — on every sign-in, all day, to protect fictional members on
+127.0.0.1. Worth noting because the same panel was read as "something that renews
+the login token every 30 seconds": it is not, and the session bug above was the
+actual cause of being logged out.
+
+Defaults to true; anything but the exact string `false` is true, so a typo fails
+closed; and `loadEnv` refuses to return at all if it is false while
+`NODE_ENV=production`. A boot failure rather than a warning, because §3 admits no
+exception and a misconfigured production API must not be reachable with one factor
+for however long it takes somebody to read a log. Nothing is deleted when it is
+off — enrollment, verification, recovery codes and the replay check all remain, so
+switching back needs no migration and no re-enrollment. A password-only sign-in
+audits as `auth.mfa.skipped`, never `auth.login.success`: "an administrator signed
+in" and "an administrator signed in without a second factor" are different events,
+and a trail that recorded them identically would hide the only rows that could
+evidence a misconfiguration after the fact.
+
+The alternative was deleting MFA outright, which was declined. §3's requirement is
+about a stolen or phished administrator password reaching the internet, and that
+threat does not go away because the second factor is inconvenient to a developer —
+it only stops applying on a laptop, which is exactly the scope this switch has.

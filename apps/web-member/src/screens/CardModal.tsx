@@ -1,4 +1,5 @@
 import { formatDate } from '@pgp/ui/format';
+import QRCode from 'react-qr-code';
 
 import { AppShell } from '../components/AppShell.js';
 import { Button } from '../components/Button.js';
@@ -15,13 +16,14 @@ import { useSession } from '../session.js';
  * the one on Profile, which is what lets the view transition morph one into the
  * other instead of cross-fading two lookalikes.
  *
- * Three things on this screen are deliberately not what the board shows, and
- * each is noted where it appears:
+ * Two things on this screen are deliberately not what the board shows, and each
+ * is noted where it appears:
  *
- * - the code block is a placeholder, because the scanned credential was removed
- *   from this product;
  * - Add to Wallet has nothing to add;
  * - screen brightness is not something the web can set.
+ *
+ * The code block, which used to be a third, now holds a real scannable code —
+ * see below, and DECISIONS.md for why it came back.
  */
 export function CardModal() {
   const { profile } = useSession();
@@ -50,21 +52,40 @@ export function CardModal() {
         />
 
         {/**
-         * The board puts a scannable code here. There is none.
+         * The code the board reserves this block for.
          *
-         * The guest QR was removed from this product on 2026-08-08 — the client
-         * did not want a scanned credential, and `client-invariants.test.ts`
-         * now fails the build if this app declares a QR dependency, renders a
-         * code or opens a camera. A member is identified by their number, which
-         * staff look up and approve.
+         * It is the *same value* printed on the back of the physical card, so a
+         * guest can present either and staff scan the same thing. It identifies
+         * and grants nothing — resolving it tells staff who the member is, and
+         * recording anything still needs them signed in at an outlet.
          *
-         * So this block holds the shape the design reserves and nothing else,
-         * pending a decision on what belongs in it. It is not a QR waiting for
-         * a library.
+         * Level M rather than H: H adds roughly 30% more modules, which on a phone
+         * at 216px makes each one smaller and *harder* to read. H earns its keep on
+         * printed labels that get dirty, not on a backlit screen.
+         *
+         * Static, so there is nothing to refresh and no countdown to explain.
          */}
-        <div className="code-block" aria-hidden="true" />
+        <div className="code-block">
+          {profile === null ? (
+            <span className="skeleton qr-quiet-zone" aria-hidden="true" />
+          ) : (
+            <>
+              <div className="qr-quiet-zone">
+                <QRCode
+                  value={profile.cardCode}
+                  level="M"
+                  title={`Membership code for ${profile.memberNumber}`}
+                />
+              </div>
+              <output className="code-fallback">{profile.cardCode}</output>
+            </>
+          )}
+        </div>
 
-        <p className="modal-caption">Show this card at any outlet to redeem.</p>
+        <p className="modal-caption">
+          Show this code at any outlet, or hand over your card — the code on the back is
+          the same one.
+        </p>
 
         {profile === null ? null : (
           <p className="modal-validity">

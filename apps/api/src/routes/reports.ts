@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
 import { NotFoundError, RateLimitedError } from '../errors.js';
+import { toCsv } from '../reporting/csv.js';
 import {
   DIMENSIONS,
   DIMENSION_NAME_LIST,
@@ -408,23 +409,6 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
       .send(csv);
     },
   );
-
-  /**
-   * Minimal RFC 4180. Quote every field and double any quote inside it.
-   *
-   * Quoting unconditionally rather than only when needed: a member's name never
-   * appears here, but an outlet called "Crust, Doha" or a staff member called
-   * O'Brien would otherwise shift every column after it, and a spreadsheet that
-   * is subtly wrong is worse than one that fails to open.
-   *
-   * A BOM, because Excel reads a UTF-8 file without one as the local codepage
-   * and mangles any non-ASCII outlet or staff name.
-   */
-  function toCsv(header: string[], rows: string[][]): string {
-    const escape = (field: string) => `"${field.replace(/"/g, '""')}"`;
-    const lines = [header, ...rows].map((row) => row.map(escape).join(','));
-    return `\ufeff${lines.join('\r\n')}\r\n`;
-  }
 
   function resolveMetric(value: string | undefined): MetricName {
     if (value === undefined) {

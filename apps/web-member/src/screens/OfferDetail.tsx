@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
-import { api, type BenefitRequest } from '../api.js';
+import { ApiError, api, type BenefitRequest, type OutletChoice } from '../api.js';
 import { AppShell } from '../components/AppShell.js';
 import { BackButton } from '../components/BackButton.js';
 import { Button } from '../components/Button.js';
@@ -32,6 +32,15 @@ export function OfferDetail() {
   const [requestLoading, setRequestLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
+  /**
+   * Where the guest is going.
+   *
+   * Empty until the server says it needs one. A benefit honoured by a single
+   * outlet never asks — the server fills it in — so a picker rendered up front
+   * would be a required-looking field with one option in it on most screens.
+   */
+  const [outlets, setOutlets] = useState<OutletChoice[]>([]);
+  const [chosenOutlet, setChosenOutlet] = useState<string>('');
 
   const benefit = benefits?.find((row) => row.key === slug) ?? null;
 
@@ -70,16 +79,16 @@ export function OfferDetail() {
   }, [benefit?.key, benefits]);
 
   useEffect(() => {
-    if (
-      benefit === null ||
-      (currentRequest?.status !== 'PENDING' && currentRequest?.status !== 'APPROVED')
-    ) {
+    // Only while a notice is open. There is nothing else worth watching: every
+    // other state is terminal, so polling one would be asking a settled question
+    // every fifteen seconds for as long as the screen stays open.
+    if (benefit === null || currentRequest?.status !== 'SENT') {
       return;
     }
 
-    // A member may leave this screen open while staff work in the dashboard.
-    // Keep the visible status honest without making them reload or sign in
-    // again; email remains the out-of-app notification channel.
+    // A member may leave this screen open while the outlet confirms them at the
+    // counter. Keep the visible status honest without making them reload or sign
+    // in again; email remains the out-of-app notification channel.
     const timer = window.setInterval(() => {
       void api.requests().then(({ requests }) => {
         setCurrentRequest(requests.find((row) => row.benefit.key === benefit.key) ?? null);
@@ -92,26 +101,43 @@ export function OfferDetail() {
     return () => window.clearInterval(timer);
   }, [benefit?.key, currentRequest?.status]);
 
-  async function requestBenefit() {
+  async function announce() {
     if (benefit === null || requesting) return;
     setRequesting(true);
     setRequestError(null);
     try {
-      const created = await api.requestBenefit(benefit.key, requestNote.trim() || undefined);
+      const created = await api.announceVisit(benefit.key, {
+        ...(chosenOutlet ? { outletId: chosenOutlet } : {}),
+        ...(requestNote.trim() ? { note: requestNote.trim() } : {}),
+      });
       setCurrentRequest(created);
       setRequestNote('');
+      setOutlets([]);
+      setChosenOutlet('');
     } catch (cause) {
-      setRequestError(cause instanceof Error ? cause.message : 'Could not send your request.');
+      // The server refuses to guess which outlet, and sends the list with the
+      // refusal. Reading it here is what turns a dead end into the next step —
+      // and avoids a second round trip for something already in hand.
+      if (
+        cause instanceof ApiError &&
+        (cause.code === 'outlet_required' || cause.code === 'outlet_not_valid') &&
+        Array.isArray(cause.details['outlets'])
+      ) {
+        setOutlets(cause.details['outlets'] as OutletChoice[]);
+        setChosenOutlet('');
+      }
+      setRequestError(cause instanceof Error ? cause.message : 'Could not tell the outlet.');
     } finally {
       setRequesting(false);
     }
   }
 
-  const canRequest =
-    !requestLoading &&
-    (currentRequest === null ||
-      currentRequest.status === 'DECLINED' ||
-      currentRequest.status === 'FULFILLED');
+  /**
+   * A notice is open, or it is not. There is nothing in between any more — no
+   * approval to wait for, so the only state that blocks announcing again is one
+   * the outlet has not closed out yet.
+   */
+  const canAnnounce = !requestLoading && currentRequest?.status !== 'SENT';
 
   if (benefits !== null && benefit === null) {
     return (
@@ -181,35 +207,73 @@ export function OfferDetail() {
           </InfoPanel>
         )}
 
-        {benefit === null || requestLoading ? null : currentRequest?.status === 'PENDING' ? (
-          <div className="request-status" data-status="pending" role="status">
-            <strong>Request sent</strong>
-            <span>The hotel has been notified. This page will show when it is approved.</span>
-          </div>
-        ) : currentRequest?.status === 'APPROVED' ? (
+        {benefit === null || requestLoading ? null : currentRequest?.status === 'SENT' ? (
           <div className="request-status" data-status="approved" role="status">
-            <strong>Approved</strong>
+            <strong>{currentRequest.outlet?.name ?? 'The outlet'} knows you are coming</strong>
             <span>
-              Your benefit is ready. Complete any required reservation, and staff will record it
-              after applying the offer.
+              Nothing to wait for — just turn up and show your card. The discount is applied
+              at the outlet and recorded afterwards.
             </span>
           </div>
-        ) : currentRequest?.status === 'DECLINED' ? (
+        ) : currentRequest?.status === 'NOT_USED' ? (
           <div className="request-status" data-status="declined" role="status">
-            <strong>Not approved</strong>
-            <span>{currentRequest.decisionReason ?? 'Contact the hotel if you need help.'}</span>
+            <strong>Not used</strong>
+            <span>
+              {currentRequest.closedReason ??
+                'That visit did not happen, so nothing was recorded.'}{' '}
+              Your benefit is untouched — use it whenever you like.
+            </span>
           </div>
         ) : currentRequest?.status === 'FULFILLED' ? (
           <div className="request-status" data-status="fulfilled" role="status">
             <strong>Previous use recorded</strong>
-            <span>You can send another request when you would like to use this benefit again.</span>
+            <span>Let an outlet know again whenever you would like to use this benefit.</span>
+          </div>
+        ) : currentRequest?.status === 'APPROVED' || currentRequest?.status === 'PENDING' ? (
+          /* A row from before outlets closed their own notices. Shown so the
+             history is not a blank, and worded so nobody waits for an approval
+             that is never coming. */
+          <div className="request-status" data-status="approved" role="status">
+            <strong>Earlier request</strong>
+            <span>Go ahead and show your card at the outlet — nothing else is needed.</span>
+          </div>
+        ) : currentRequest?.status === 'DECLINED' ? (
+          <div className="request-status" data-status="declined" role="status">
+            <strong>Earlier request was not approved</strong>
+            <span>{currentRequest.closedReason ?? 'You can use this benefit now regardless.'}</span>
           </div>
         ) : null}
 
-        {canRequest ? (
+        {canAnnounce ? (
           <div className="request-action">
+            {/* Only rendered once the server has said it needs one, and it arrives
+                with the list already attached to the refusal. */}
+            {outlets.length > 0 ? (
+              <>
+                <label className="field-label" htmlFor="benefit-outlet">
+                  Where are you going?
+                </label>
+                <select
+                  id="benefit-outlet"
+                  className="request-outlet"
+                  value={chosenOutlet}
+                  onChange={(event) => {
+                    setChosenOutlet(event.target.value);
+                    setRequestError(null);
+                  }}
+                >
+                  <option value="">Choose an outlet…</option>
+                  {outlets.map((outlet) => (
+                    <option key={outlet.id} value={outlet.id}>
+                      {outlet.name}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
+
             <label className="field-label" htmlFor="benefit-request-note">
-              Request details <span className="field-optional">(optional)</span>
+              Anything they should know <span className="field-optional">(optional)</span>
             </label>
             <textarea
               id="benefit-request-note"
@@ -219,7 +283,7 @@ export function OfferDetail() {
               placeholder={
                 benefit?.reservationPhone
                   ? 'Preferred date, time, and number of guests'
-                  : 'Anything the hotel should know'
+                  : 'Anything the outlet should know'
               }
               value={requestNote}
               onChange={(event) => {
@@ -227,12 +291,15 @@ export function OfferDetail() {
                 setRequestError(null);
               }}
             />
-            <Button onClick={() => void requestBenefit()} disabled={requesting}>
+            <Button
+              onClick={() => void announce()}
+              disabled={requesting || (outlets.length > 0 && chosenOutlet === '')}
+            >
               {requesting
-                ? 'Sending request…'
+                ? 'Telling the outlet…'
                 : currentRequest === null
-                  ? 'Request this benefit'
-                  : 'Request this benefit again'}
+                  ? 'Let the outlet know'
+                  : 'Let the outlet know again'}
             </Button>
           </div>
         ) : null}

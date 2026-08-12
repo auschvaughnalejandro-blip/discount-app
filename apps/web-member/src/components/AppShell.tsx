@@ -6,9 +6,9 @@ import { TabBar } from './TabBar.js';
  * The page frame: the base ground, the 342px column, and the safe areas.
  *
  * `tabs` is what decides the bottom padding rather than a fixed value, because
- * the tab bar is a different height on the two screens that carry it (82px on
- * Offers, 62px on Profile) and the screens that do not carry one — the auth
- * screens and the card modal — must not reserve space for it.
+ * the screens that carry no bar — the auth screens and the card modal — must
+ * not reserve space for one. The bar itself is a single height everywhere it
+ * appears; see `--h-tabbar`.
  *
  * `bleed` turns off the horizontal gutter for screens whose hero runs edge to
  * edge. The gutter then belongs to the sections underneath, which is why it is

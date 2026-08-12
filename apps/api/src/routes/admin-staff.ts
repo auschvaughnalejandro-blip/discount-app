@@ -395,7 +395,10 @@ const adminStaffRoutes: FastifyPluginAsync = async (app) => {
         where: { id: principal.subjectId },
         select: { id: true, passwordHash: true, role: true },
       });
-      if (!self) {
+      // A non-password account has no hash to change. Treat it as "no such
+      // thing" rather than a distinct error, because the only accounts that can
+      // reach this route are administrators, all of which have a password hash.
+      if (!self || self.passwordHash === null) {
         throw new NotFoundError();
       }
 

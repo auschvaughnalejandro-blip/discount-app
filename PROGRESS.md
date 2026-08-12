@@ -4,11 +4,18 @@
 > applications and only Administrator accounts. Older stage notes about manager,
 > support, outlet-staff or verification access are historical, not current
 > requirements.
+>
+> **Reversed in part — 2026-08-12:** the outlet application and the
+> `OUTLET_STAFF` role are live again. `ADMINISTRATOR` remains the only account a
+> named hotel employee holds; outlet principals represent labelled counter
+> devices authenticated only by their per-device tokens.
 
-Last updated: 2026-08-09
-Current stage: 27 (complete) — 369 tests passing.
-Surfaces: **two** — the member app and the admin dashboard. The verification
-page was deleted 2026-08-08; see DECISIONS.md.
+Last updated: 2026-08-12
+Current stage: 28 (complete), including the per-device-token authentication
+follow-up.
+Surfaces: **three** — member app, admin dashboard and outlet screen. The old
+standalone verification page remains deleted; its narrowly scoped work lives in
+the authenticated outlet screen. See DECISIONS.md.
 
 Stages 0–14 built the logic under BUILD-PLAN.md. Stages 15–24 are defined in
 ROADMAP.md, which continues the same numbering and rules. 16, 17, 18 and 19 are
@@ -46,6 +53,7 @@ See SECURITY-REVIEW.md for the §12 checklist: 22 confirmed, 3 partial,
 - [x] 25 — Administrator account management
 - [x] 26 — Google Sheets operational mirror
 - [x] 27 — Administrator-only hotel access
+- [x] 28 — Outlet fulfilment and per-device outlet authentication
 
 ## Stage log
 
@@ -538,6 +546,10 @@ not routine open questions.
   activation cannot complete: the claim flow asks for it in phase 2, after the
   code has already been sent. `src/notifications/`. See DECISIONS.md.
 
+  Since 2026-08-12 the same transport also carries outlet notices, which share
+  the sending account's daily cap. A pilot will not notice; a launch will, and
+  that is one more reason the interim label on this stands.
+
   The original gap, for the record:
   `POST /auth/member/request-otp` generates and stores a hashed OTP
   (`src/security/otp.ts`) but nothing sends it anywhere. The plaintext code
@@ -551,15 +563,30 @@ not routine open questions.
 The four items below carry forward from Stage 1, recorded per BUILD-PLAN §0
 rule 4, with `TODO(open-question)` comments where they touch code.
 
-- [x] **Q1 — ANSWERED 2026-08-08 by the client: there is no QR.** A member asks for
-  a benefit in the app, an administrator approves it, and the outlet applies the
-  discount when the guest arrives and gives their name. The scanned credential is
-  gone — module, route, renderer, camera and both dependencies — and
-  `BenefitRequest` replaces it. See DECISIONS.md.
+- [x] **Q1 — RE-ANSWERED 2026-08-12: there is a QR, and it is on the back of the
+  printed card.** The client's IT asked for it back so a Privilege Guest need not
+  open the app at all: staff scan the card, see what the guest is entitled to, and
+  record it. The deleted mechanism was recovered from `2f44daf~1` rather than
+  rebuilt.
+
+  The code is **static**, because the card carries it in ink and ink cannot
+  rotate. That gives up the freshness window §7 specified as the defence against a
+  forwarded screenshot, and it is acceptable for one reason: the code
+  **identifies and grants nothing** (R10), so it is no stronger and no weaker than
+  the membership number already printed in plain text on the front of the same
+  card. `v1` (rotating) is still implemented and verifiable, so this is reversible
+  without reprinting a card. See DECISIONS.md for the full argument and the
+  condition under which it must be revisited.
 
   Note for whoever reads the reference documents next: **§6 and the wireframes
-  describe the scanning model the client has now rejected.** They are stale on
-  this point, and possibly on others.
+  describe a scanning model close to what now exists again**, after a four-day
+  period where they were stale. What they still do *not* describe is that the
+  outlet confirms its own visits with no administrator in the middle.
+
+  The previous answer, for the record — because the reversal is the interesting
+  part: on 2026-08-08 the client said there was no QR, a member asked for a
+  benefit in the app, an administrator approved it, and the outlet applied the
+  discount when the guest arrived and gave their name.
 
 - [ ] **Q2 — §11.3: will staff record bill amounts?**
   `billAmountMinor` is nullable and optional, so the build works either way. If the
@@ -650,3 +677,80 @@ hotel-facing account type.
 - All 369 API tests passed across sequential runs; the final 106 role,
   redemption and reporting regression tests passed together. All workspace
   TypeScript checks and `git diff --check` pass.
+
+## Outlet fulfilment (2026-08-12)
+
+The client's IT asked for two changes and they were built together, because the
+second is only useful once the first exists.
+
+**A request stops being a petition.** A guest announces themselves, one outlet is
+told, and that outlet confirms the visit or records that it never happened. No
+administrator stands in the middle. `SENT → FULFILLED`, with `NOT_USED` as the
+other ending; the three old statuses survive on historical rows only. The
+one-per-minute anti-spam rule is a database count rather than the in-memory
+limiter, so a deploy does not hand anybody a fresh allowance.
+
+**Outlets have their own screen**, `apps/web-outlet`. The sign-in credential is a
+separate 256-bit random token for each physical device, stored only as a SHA-256
+digest and exchanged for the normal short access token plus rotating httpOnly
+refresh session. It is the only outlet sign-in: there is no email, password,
+Google or development-session option. The screen shows who is expected, confirms
+or closes each notice, and scans the code on the back of a member's card for a
+guest who never opened the app. It can reach nothing else: no member list, no
+other outlet's work, no report.
+
+**Q1 is reversed** and the card has a scannable code again — static, because the
+printed card cannot rotate one. See above and DECISIONS.md.
+
+**WhatsApp was rejected**, on the client's own conclusion. The outlet's screen is
+the destination; an outlet's optional email address is a best-effort notification
+destination on the transport Stage 18 built. It is not a login identity or
+recovery channel.
+
+### Both known issues from the previous commit are fixed
+
+Recorded here because the last commit message carried them in deliberately, and
+a stale warning is worse than none:
+
+- `apps/api` typecheck **passes**. The narrowing gap at
+  `integrations/google-sheets/publisher.ts:250` was a real one — the code checked
+  the sheet's id for null but never the sheet itself — and the fix narrows on the
+  object so everything below reads it without re-testing. The production image
+  builds again.
+- The test suite **no longer inherits `OTP_DELIVERY_CHANNEL` from `.env`.**
+  `test/setup.ts` pins it to `none`. The 25 failures were real but they were about
+  whoever ran the suite having configured mail locally, which is not a fact about
+  the code. Tests that need to observe delivery inject a capturing sender.
+
+### Device-token authentication follow-up
+
+- Admin → **Outlets** now issues one token per labelled physical device, shows the
+  plaintext once, reports issued/last-used timestamps, rotates a possibly exposed
+  credential and irreversibly revokes a lost or retired device.
+- Rotation and revocation increment `tokenVersion` and revoke every live refresh
+  family, so both the standing credential and derived sessions stop working.
+- The outlet app makes the token form primary, resumes silently from the httpOnly
+  cookie without a sign-in flash, and calls the server logout endpoint rather than
+  only clearing local memory. It never stores the token in web storage or a URL.
+- The production outlet hostname is restricted by `INTERNAL_CIDR` to the
+  staff/back-of-house VLAN and VPN. Guest Wi-Fi must be excluded, and a device on
+  cellular is refused. The network remains defence in depth; the token is the
+  credential.
+- Google OAuth, Workspace-domain/allowlist gates and Google outlet-account
+  provisioning were removed. An outlet email belongs only to notification
+  delivery; changing it cannot create, recover or authorize a session.
+- Local testing exercises the real issue/exchange path too. There is no session
+  bundle minter or development sign-in panel: Admin issues a `pgo_…` token and the
+  outlet exchanges it through `/outlet/auth/token`.
+
+### Carried forward
+
+- **A camera needs a secure context**, so the scanner cannot be tested on a
+  counter tablet over the LAN until TLS exists. Typing a membership number always
+  works, and the scanner says which case it is in rather than showing a dead
+  rectangle.
+- **The expiry sweep is an in-process timer**, joining the Sheets sync and the
+  in-memory rate limiter in assuming the single documented API instance. The sweep
+  itself is idempotent and conditional on `status = 'SENT'`, so two instances
+  would be harmless; the rate limiter is the one that would actually need an
+  external store.

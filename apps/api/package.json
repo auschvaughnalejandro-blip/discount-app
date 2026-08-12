@@ -13,7 +13,6 @@
     "migrate:dev": "prisma migrate dev",
     "seed": "tsx --env-file=.env prisma/seed.ts",
     "mfa:code": "tsx --env-file=.env scripts/mfa-code.ts",
-    "otp:code": "tsx --env-file=.env scripts/otp-code.ts",
     "mail:test": "tsx --env-file=.env scripts/mail-test.ts",
     "sheets:sync": "tsx --env-file=.env scripts/sheets-sync.ts",
     "generate": "prisma generate",

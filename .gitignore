@@ -19,6 +19,3 @@ Thumbs.db
 
 .vscode/
 .idea/
-
-# Development-only: the current verification code (see src/security/dev-otp.ts)
-VERIFICATION-CODE.txt

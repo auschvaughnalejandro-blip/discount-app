@@ -128,9 +128,8 @@ describe('a sender that fails does not change what the caller can observe', () =
 
 describe('member lifecycle email content', () => {
   it.each([
-    ['request-submitted', 'request was received'],
-    ['request-approved', 'request was approved'],
-    ['request-declined', 'Update on your'],
+    ['request-submitted', 'the outlet has been told'],
+    ['request-not-used', 'not used'],
     ['redemption-recorded', 'benefit was recorded'],
   ] as const)('builds a %s message', (purpose, subjectFragment) => {
     const message = messageBody(

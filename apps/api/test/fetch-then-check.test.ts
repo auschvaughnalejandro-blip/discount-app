@@ -21,6 +21,20 @@ import { describe, expect, it } from 'vitest';
 
 const ROUTES_DIR = resolve(import.meta.dirname, '..', 'src', 'routes');
 
+/**
+ * Also scanned: the shared recording logic.
+ *
+ * `recordRedemption` used to live inside `routes/redemptions.ts` and was covered
+ * by this guard there. When the outlet surface arrived it moved to its own module
+ * so both surfaces could call it — which quietly took the most security-sensitive
+ * writes in the system outside the scan. Listing the directory explicitly is the
+ * fix; the alternative was a check that still passed while covering less.
+ */
+const SCANNED_DIRS = [
+  ROUTES_DIR,
+  resolve(import.meta.dirname, '..', 'src', 'redemptions'),
+];
+
 /** Models whose rows belong to, or are visible to, only some principals. */
 const SCOPED_MODELS = [
   'member',
@@ -77,14 +91,41 @@ const EXEMPT: { file: string; snippet: string; reason: string }[] = [
       'failure, so it discloses nothing about who holds that number.',
   },
   {
-    file: 'redemptions.ts',
-    snippet: 'prisma.member.findUnique({ where: { id: body.memberId }',
+    file: 'record.ts',
+    snippet: 'prisma.member.findUnique({ where: { id: input.memberId }',
     reason:
-      'POST /admin/redemptions. The administrator is the only active staff role and also holds ' +
-      'members:read, so scopeForMember returns {} and adding it would compose an empty fragment ' +
-      'rather than a restriction. The read is exempt because the scope is vacuous here, not ' +
-      'because it was skipped: if a narrower staff role is ever introduced, this exemption ' +
-      'must be reviewed.',
+      'recordRedemption, shared by the dashboard and the outlet screen. ' +
+      'REVIEWED 2026-08-12, because the earlier version of this exemption said it must be if a ' +
+      'narrower staff role was ever introduced — and OUTLET_STAFF is one. ' +
+      'For an administrator the scope is vacuous: they hold members:read, so scopeForMember ' +
+      'returns {} and composing it would add nothing. For an outlet account it is not vacuous — ' +
+      'scopeForMember returns MATCHES_NOTHING — so the authorization is upstream instead, and ' +
+      'there are only two ways in: confirming a notice, where the member id comes off a row ' +
+      'already fetched through scopeForBenefitRequest; and recording after a scan, where the id ' +
+      'is bound into the verification session that POST /outlet/resolve issued. Neither lets an ' +
+      'outlet name a member it has not already been authorized to see. Scoping the read itself ' +
+      'would break confirmation entirely rather than restrict it.',
+  },
+  {
+    file: 'record.ts',
+    snippet: 'prisma.member.findUniqueOrThrow({',
+    reason:
+      'The idempotent-replay path. Re-reads the member named by a redemption the caller has ' +
+      'already been shown through scopeForRedemption, only to rebuild the same response body the ' +
+      'original call returned. Nothing new becomes visible.',
+  },
+  {
+    file: 'outlet.ts',
+    snippet: 'prisma.member.findUnique({',
+    reason:
+      'POST /outlet/resolve — the counter lookup, and deliberately unscoped. ' +
+      'scopeForMember returns MATCHES_NOTHING for an outlet account, so scoping this would mean ' +
+      'staff could never identify the guest standing in front of them, which is the whole purpose ' +
+      'of the call. §5 anticipates exactly this and names the compensating controls instead: ' +
+      'exact match only on an id or a full membership number (no contains, no prefix, no ' +
+      'case-insensitive match, all asserted in outlet-scan.test.ts), a hard per-account rate ' +
+      'limit, and an audit row for every lookup including the failures. An outlet holds no ' +
+      'members:list permission, so this is the only member read it can reach at all.',
   },
   {
     file: 'redemptions.ts',
@@ -200,8 +241,10 @@ function scanSource(relative: string, source: string): Finding[] {
 }
 
 function findUnscopedReads(): Finding[] {
-  return sourceFiles(ROUTES_DIR).flatMap((file) =>
-    scanSource(file.slice(file.lastIndexOf('routes') + 'routes'.length + 1), readFileSync(file, 'utf8')),
+  return SCANNED_DIRS.flatMap((dir) =>
+    sourceFiles(dir).flatMap((file) =>
+      scanSource(file.slice(dir.length + 1), readFileSync(file, 'utf8')),
+    ),
   );
 }
 
@@ -226,11 +269,17 @@ describe('no handler fetches a scoped record and checks permission afterwards', 
     ).toEqual([]);
   });
 
-  it('scans the route files that actually exist', () => {
-    // Guards against the check silently passing because the directory moved.
-    const files = sourceFiles(ROUTES_DIR);
+  it('scans the files that actually exist', () => {
+    // Guards against the check silently passing because a directory moved — which
+    // is exactly what happened when the recording logic was extracted.
+    const files = SCANNED_DIRS.flatMap((dir) => sourceFiles(dir));
     expect(files.length).toBeGreaterThan(0);
     expect(files.some((f) => f.endsWith('auth.ts'))).toBe(true);
+    expect(files.some((f) => f.endsWith('outlet.ts'))).toBe(true);
+    expect(
+      files.some((f) => f.endsWith('record.ts')),
+      'the shared recording logic must be scanned',
+    ).toBe(true);
   });
 });
 

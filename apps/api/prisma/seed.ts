@@ -1,6 +1,6 @@
 /**
  * Stage 1 seed — 5 outlets, the 5 benefits with their real values, one
- * administrator, one outlet staff user, three test members.
+ * administrator, notification addresses for the outlets, three test members.
  *
  * Runs as the schema owner (`DATABASE_MIGRATION_URL`), not the application
  * role, because the application role is deliberately denied some of the writes
@@ -212,12 +212,15 @@ async function main(): Promise<void> {
   for (const outlet of OUTLETS) {
     await prisma.outlet.upsert({
       where: { id: `seed-outlet-${outlet.key}` },
+      // Keep an explicit address an administrator has already entered. The
+      // placeholder is only for a fresh development database.
       update: { name: outlet.name, kind: outlet.kind, active: true },
       create: {
         id: `seed-outlet-${outlet.key}`,
         name: outlet.name,
         kind: outlet.kind,
         active: true,
+        notifyEmail: `${outlet.key}@outlet.pgp.test`,
       },
     });
   }
@@ -235,6 +238,7 @@ async function main(): Promise<void> {
       fullName: 'S. Abouelmagd',
       email: 'admin@pgp.test',
       passwordHash,
+      authMethod: 'PASSWORD',
       role: 'ADMINISTRATOR',
       outletId: null,
       status: 'ACTIVE',
@@ -314,6 +318,7 @@ async function main(): Promise<void> {
   // membership numbers and counts only.
   console.log(
     `Seeded ${OUTLETS.length} outlets, ${BENEFITS.length} benefits, 1 administrator, ` +
+      `${OUTLETS.length} outlet accounts, ` +
       `${MEMBERS.length} members (${MEMBERS.map((m) => m.memberNumber).join(', ')}).`,
   );
 }

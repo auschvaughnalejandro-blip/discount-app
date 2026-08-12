@@ -17,7 +17,7 @@
   parents are still node/npm/cmd (that is, still part of this dev server rather
   than the user's shell or Explorer), and kill the whole tree from the top.
 
-  Targets only the processes attached to these four ports. It does not kill
+  Targets only the processes attached to these ports. It does not kill
   every node.exe on the machine, which would also take out unrelated work.
 
 .EXAMPLE
@@ -25,7 +25,7 @@
 #>
 [CmdletBinding()]
 param(
-  [int[]]$Ports = @(3000, 5173, 5175)
+  [int[]]$Ports = @(3000, 5173, 5175, 5176)
 )
 
 $ErrorActionPreference = 'Stop'

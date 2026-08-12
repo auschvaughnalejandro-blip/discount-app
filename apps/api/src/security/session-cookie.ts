@@ -29,8 +29,9 @@ import type { Env } from '../config/env.js';
  *
  *   1. `SameSite=Strict` — the browser does not send it on any cross-site
  *      request at all, which is the whole attack.
- *   2. `path` — it is sent *only* to the refresh endpoint. No other route reads
- *      it, so no other route can be driven by holding it.
+ *   2. `path` — it is sent only to the authentication namespace. No
+ *      application-data route receives it, and only refresh/logout handlers read
+ *      it; the other authentication handlers ignore cookies.
  *   3. The refresh response is unreadable cross-origin. An attacker who somehow
  *      triggered a refresh could not see the tokens it returned.
  *
@@ -44,10 +45,13 @@ import type { Env } from '../config/env.js';
 export const REFRESH_COOKIE = 'pgp_refresh';
 
 /**
- * Scoped to the one endpoint that reads it. A cookie sent to every route is a
- * cookie every route could be tricked into acting on.
+ * Browser-visible path, before Vite/Caddy strip the `/api` prefix. Refresh and
+ * logout are sibling routes, so their narrowest common cookie path is the auth
+ * namespace. No outlet, member or admin data route receives it, and the other
+ * auth handlers never read it. Using the internal `/auth/refresh` path here
+ * leaves browsers unable to send it to the actual `/api/auth/refresh` request.
  */
-export const REFRESH_COOKIE_PATH = '/auth/refresh';
+export const REFRESH_COOKIE_PATH = '/api/auth';
 
 function baseOptions(env: Env) {
   return {

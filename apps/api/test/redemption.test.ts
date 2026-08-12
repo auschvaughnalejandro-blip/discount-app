@@ -22,6 +22,7 @@ import { buildApp } from '../src/app.js';
 import { loadEnv, type Env } from '../src/config/env.js';
 import { resetRateLimits } from '../src/security/rate-limit.js';
 import { issueAccessToken } from '../src/security/tokens.js';
+import { createOutletDeviceFixture } from './outlet-device-fixture.js';
 
 const ownerUrl = process.env['DATABASE_MIGRATION_URL'];
 if (!ownerUrl) {
@@ -33,8 +34,9 @@ let env: Env;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
 let adminToken: string;
-/** A retired historical account type, used here only to prove it cannot authenticate. */
+/** A live outlet device, used to prove its narrow role cannot enter admin routes. */
 let outletStaffToken: string;
+let outletStaffId = '';
 let memberToken: string;
 let otherMemberToken: string;
 
@@ -58,10 +60,13 @@ beforeAll(async () => {
   app = await buildApp({ env });
   await app.ready();
 
-  const outletStaff = await ownerPrisma.staffUser.findFirstOrThrow({
-    where: { role: 'OUTLET_STAFF' },
-  });
   spaOutletId = (await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } })).id;
+  const outletStaff = await createOutletDeviceFixture(
+    ownerPrisma,
+    spaOutletId,
+    'Redemption test outlet device',
+  );
+  outletStaffId = outletStaff.id;
   outletStaffToken = await issueAccessToken({
     issuer: env.JWT_ISSUER,
     audience: env.JWT_AUDIENCE_STAFF,
@@ -128,6 +133,7 @@ afterAll(async () => {
   await ownerPrisma.redemption.deleteMany({
     where: { idempotencyKey: { startsWith: 'test-' } },
   });
+  await ownerPrisma.staffUser.delete({ where: { id: outletStaffId } });
   void createdRedemptionIds;
   await app.close();
   await ownerPrisma.$disconnect();
@@ -476,14 +482,15 @@ describe('R7 — reversal leaves the original untouched', () => {
         idempotencyKey: key('rev-authz'),
       });
 
-    // Historical non-administrator accounts cannot authenticate, including
-    // for reversal of a permanent record.
+    // An outlet account may record what happened in its own room; unwinding a
+    // permanent record is an administrator's decision (R7). 403 rather than 401:
+    // the account is real and signed in, and simply holds no reversal permission.
     const attempt = await request(app.server)
       .post(`/admin/redemptions/${created.body.id}/reverse`)
       .set('Authorization', `Bearer ${outletStaffToken}`)
       .send({ reason: 'nope', idempotencyKey: key('rev-authz-2') });
 
-    expect(attempt.status).toBe(401);
+    expect(attempt.status).toBe(403);
   });
 });
 
@@ -529,16 +536,17 @@ describe('a member cannot read another member’s redemptions', () => {
   });
 });
 
-describe('retired outlet-staff accounts cannot access redemptions', () => {
+describe('an outlet account cannot reach the dashboard redemption routes', () => {
   it('refuses the administrator redemption log', async () => {
     const response = await request(app.server)
       .get('/admin/redemptions')
       .set('Authorization', `Bearer ${outletStaffToken}`);
 
-    expect(response.status).toBe(401);
+    // It sees its own outlet's work through /outlet/*, never the whole log.
+    expect(response.status).toBe(403);
   });
 
-  it('cannot record a redemption either, now that it holds nothing', async () => {
+  it('cannot record through the dashboard route, where the outlet is a body field', async () => {
     const response = await request(app.server)
       .post('/admin/redemptions')
       .set('Authorization', `Bearer ${outletStaffToken}`)
@@ -550,7 +558,10 @@ describe('retired outlet-staff accounts cannot access redemptions', () => {
         idempotencyKey: key('outlet-staff-record'),
       });
 
-    expect(response.status).toBe(401);
+    // The point of withholding `redemptions:record` from an outlet account: this
+    // route takes the outlet from the request body, so holding it would be a way
+    // to record a visit against a room the account does not belong to.
+    expect(response.status).toBe(403);
   });
 
   it('shows an administrator every redemption, attributed to the staff member', async () => {

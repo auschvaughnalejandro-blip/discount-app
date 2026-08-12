@@ -12,11 +12,15 @@ import { HeroImage } from '../components/HeroImage.js';
 import { InfoPanel } from '../components/InfoPanel.js';
 import { Lockup } from '../components/Lockup.js';
 import { MembershipCard } from '../components/MembershipCard.js';
+import { MembershipCardBack } from '../components/MembershipCardBack.js';
 import { OtpInput } from '../components/OtpInput.js';
 import { StatBar } from '../components/StatBar.js';
 import { Toggle } from '../components/Toggle.js';
 import { BenefitCard } from '../components/BenefitCard.js';
 import { useSession } from '../session.js';
+
+/** Correct card-code shape and length, but deliberately not a valid signature. */
+const STRUCTURAL_CARD_CODE = `v2.00000000-0000-4000-8000-000000000000.${'A'.repeat(43)}`;
 
 /**
  * `/styleguide` — every component, in every state, on one page.
@@ -152,15 +156,14 @@ export function Styleguide() {
 
       <Section title="Lockup">
         <Lockup />
-        {/* The card variant is sized against its container, so on its own it
-            collapses to its px fallback. It reads properly on the card below. */}
-        <Lockup size="card" />
       </Section>
 
       <Section title="Membership card">
-        <p className="lede">Loading, then with values. Tap the second to see the morph.</p>
+        <p className="lede">Both sides, loading then with structural values.</p>
         <MembershipCard fullName={null} memberNumber={null} />
         <MembershipCard fullName="Name" memberNumber="Number" href="/profile/card" />
+        <MembershipCardBack cardCode={null} memberNumber={null} />
+        <MembershipCardBack cardCode={STRUCTURAL_CARD_CODE} memberNumber="Number" />
       </Section>
 
       <Section title="Benefit card">

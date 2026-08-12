@@ -25,6 +25,7 @@ import {
 import { suppressGroup } from '../src/reporting/suppression.js';
 import { resetRateLimits } from '../src/security/rate-limit.js';
 import { issueAccessToken } from '../src/security/tokens.js';
+import { createOutletDeviceFixture } from './outlet-device-fixture.js';
 
 const ownerUrl = process.env['DATABASE_MIGRATION_URL'];
 if (!ownerUrl) {
@@ -34,6 +35,8 @@ if (!ownerUrl) {
 let app: FastifyInstance;
 let env: Env;
 let adminToken: string;
+let outletToken: string;
+let outletDeviceId = '';
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
 /** A benefit and members created only for this file, so the cohort is exact. */
@@ -83,6 +86,21 @@ beforeAll(async () => {
   narrowBenefitId = benefit.id;
 
   const outlet = await ownerPrisma.outlet.findFirstOrThrow({ where: { kind: 'SPA' } });
+  const outletDevice = await createOutletDeviceFixture(
+    ownerPrisma,
+    outlet.id,
+    'Reporting test outlet device',
+  );
+  outletDeviceId = outletDevice.id;
+  outletToken = await issueAccessToken({
+    issuer: env.JWT_ISSUER,
+    audience: env.JWT_AUDIENCE_STAFF,
+    subject: outletDevice.id,
+    subjectType: 'STAFF',
+    role: 'OUTLET_STAFF',
+    tokenVersion: outletDevice.tokenVersion,
+    ttlSeconds: 300,
+  });
 
   for (let i = 0; i < 3; i += 1) {
     const member = await ownerPrisma.member.create({
@@ -126,6 +144,7 @@ afterAll(async () => {
   if (narrowBenefitId !== '') {
     await ownerPrisma.benefit.deleteMany({ where: { id: narrowBenefitId } });
   }
+  await ownerPrisma.staffUser.delete({ where: { id: outletDeviceId } });
   await app.close();
   await ownerPrisma.$disconnect();
 });
@@ -522,20 +541,7 @@ describe('reports are readable only in the administrator panel', () => {
     expect(response.status).toBe(200);
   });
 
-  it('refuses a retired outlet-staff account on every reporting endpoint', async () => {
-    const staff = await ownerPrisma.staffUser.findFirstOrThrow({
-      where: { role: 'OUTLET_STAFF' },
-    });
-    const token = await issueAccessToken({
-      issuer: env.JWT_ISSUER,
-      audience: env.JWT_AUDIENCE_STAFF,
-      subject: staff.id,
-      subjectType: 'STAFF',
-      role: 'OUTLET_STAFF',
-      tokenVersion: staff.tokenVersion,
-      ttlSeconds: 300,
-    });
-
+  it('refuses an outlet account on every reporting endpoint', async () => {
     for (const path of [
       '/admin/reports/summary',
       '/admin/reports/by-benefit',
@@ -544,8 +550,13 @@ describe('reports are readable only in the administrator panel', () => {
       '/admin/reports/unclaimed',
       '/admin/reports/export',
     ]) {
-      const response = await request(app.server).get(path).set('Authorization', `Bearer ${token}`);
-      expect(response.status, path).toBe(401);
+      const response = await request(app.server)
+        .get(path)
+        .set('Authorization', `Bearer ${outletToken}`);
+      // 403, not 401: the account is live and signed in — it simply holds no
+      // reporting permission. Reports are the one place the whole membership is
+      // visible at once, so no counter credential reaches them.
+      expect(response.status, path).toBe(403);
     }
   });
 });

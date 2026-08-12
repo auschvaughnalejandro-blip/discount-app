@@ -83,6 +83,14 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /**
+     * The rest of the error body.
+     *
+     * Some refusals carry what the screen needs next — a 422 asking which outlet
+     * the guest means arrives with the list of outlets attached. Dropping it here
+     * would mean a second round trip to fetch something the server already sent.
+     */
+    readonly details: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -136,11 +144,13 @@ async function call<T>(
     const payload = (await response.json().catch(() => ({}))) as {
       error?: string;
       message?: string;
-    };
+    } & Record<string, unknown>;
+    const { error: _code, message: _message, ...details } = payload;
     throw new ApiError(
       response.status,
       payload.error ?? 'unknown',
       payload.message ?? 'Something went wrong.',
+      details,
     );
   }
 
@@ -181,6 +191,14 @@ export interface MemberProfile {
   joinedAt: string;
   claimedAt: string | null;
   consent: Record<string, ConsentState | null>;
+  /**
+   * The signed code the card carries — the same value printed on the back of the
+   * physical card, so a guest can present either one.
+   *
+   * It identifies and grants nothing: staff still have to be signed in at an
+   * outlet to record anything against it.
+   */
+  cardCode: string;
 }
 
 export interface Redemption {
@@ -208,21 +226,45 @@ export interface Redemption {
   outlet: { name: string };
 }
 
+export interface OutletChoice {
+  id: string;
+  name: string;
+  kind: string;
+}
+
 /**
- * A member's ask, and what happened to it.
+ * A member telling an outlet they are coming, and what happened next.
  *
- * `APPROVED` is permission for staff to apply a discount — not the discount
- * itself. `FULFILLED` is the only state that means it was actually given.
+ * Nothing approves this — the member is already entitled to every published
+ * benefit, so `SENT` means the outlet has been told and the guest can simply turn
+ * up. `FULFILLED` is the only state that means the benefit was actually given;
+ * `NOT_USED` means the visit did not happen and leaves the entitlement intact.
+ *
+ * The other three are historical, from when an administrator stood in the middle.
+ * They appear only on old rows.
  */
 export interface BenefitRequest {
   id: string;
-  status: 'PENDING' | 'APPROVED' | 'DECLINED' | 'FULFILLED';
+  status: 'SENT' | 'FULFILLED' | 'NOT_USED' | 'PENDING' | 'APPROVED' | 'DECLINED';
   requestedAt: string;
   note: string | null;
-  decidedAt: string | null;
-  decisionReason: string | null;
+  closedAt: string | null;
+  closedReason: string | null;
   fulfilledAt: string | null;
   benefit: { key: string; title: string; discountPct: string };
+  outlet: { id: string; name: string } | null;
+}
+
+/**
+ * The server refusing to guess which outlet a guest meant.
+ *
+ * Returned as a 422 with the choices attached, rather than as an error the client
+ * has to translate — the list is what the screen needs to show next.
+ */
+export interface OutletChoiceRequired {
+  error: 'outlet_required' | 'outlet_not_valid';
+  message: string;
+  outlets: OutletChoice[];
 }
 
 // ── Calls ────────────────────────────────────────────────────────────────
@@ -261,18 +303,54 @@ export const api = {
   benefits: (fresh = false) =>
     call<{ benefits: Benefit[] }>(fresh ? `/benefits?refresh=${Date.now()}` : '/benefits'),
   me: () => call<MemberProfile>('/member/me'),
-  redemptions: () => call<{ redemptions: Redemption[] }>('/member/me/redemptions'),
+
+  /**
+   * The member's visit history.
+   *
+   * `fresh` matters more here than anywhere else. This history is written by an
+   * outlet, on their device, and the member's copy is a cache in two senses: the
+   * service worker holds the last response (NetworkFirst, see `vite.config.ts`)
+   * and the app holds the parsed result in session state. A visit recorded at
+   * the counter invalidates both, and nothing tells either of them so.
+   *
+   * The query parameter is what reaches past the service worker: its rule is
+   * anchored on `…/redemptions$`, so a URL carrying a search string does not
+   * match it and goes to the network unconditionally. That anchor is load-
+   * bearing — `client-invariants.test.ts` holds both halves together.
+   *
+   * The server has no querystring schema on this route, so the parameter is
+   * read by nothing and changes no response.
+   */
+  redemptions: (fresh = false) =>
+    call<{ redemptions: Redemption[] }>(
+      fresh ? `/member/me/redemptions?refresh=${Date.now()}` : '/member/me/redemptions',
+    ),
 
   requests: () => call<{ requests: BenefitRequest[] }>('/member/me/requests'),
+
+  /** Where a benefit can be used, for the picker. */
+  benefitOutlets: (benefitKey: string) =>
+    call<{ outlets: OutletChoice[] }>(
+      `/member/me/benefits/${encodeURIComponent(benefitKey)}/outlets`,
+    ),
+
   /**
    * `benefitKey` — the public key ("spa"), not an internal id. `GET /benefits`
    * never sends a member an id, so there is none to quote back, and the server
    * schema is strict: an unknown field is a 400, not a silently ignored one.
+   *
+   * `outletId` is omitted when only one outlet honours the benefit; the server
+   * fills it in. When several do, leaving it out comes back as a 422 carrying the
+   * list — which is how the screen learns it needs to ask.
    */
-  requestBenefit: (benefitKey: string, note?: string) =>
+  announceVisit: (benefitKey: string, input: { outletId?: string; note?: string } = {}) =>
     call<BenefitRequest>('/member/me/requests', {
       method: 'POST',
-      body: { benefitKey, ...(note ? { note } : {}) },
+      body: {
+        benefitKey,
+        ...(input.outletId ? { outletId: input.outletId } : {}),
+        ...(input.note ? { note: input.note } : {}),
+      },
     }),
 
   updateConsent: (body: { email?: boolean; sms?: boolean }) =>

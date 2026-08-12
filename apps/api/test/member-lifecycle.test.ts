@@ -19,6 +19,7 @@ import { loadEnv, type Env } from '../src/config/env.js';
 import { generateClaimCode, hashClaimCode, normalizeClaimCode } from '../src/security/claim-codes.js';
 import { resetRateLimits } from '../src/security/rate-limit.js';
 import { issueAccessToken } from '../src/security/tokens.js';
+import { createOutletDeviceFixture } from './outlet-device-fixture.js';
 
 const ownerUrl = process.env['DATABASE_MIGRATION_URL'];
 if (!ownerUrl) {
@@ -28,10 +29,34 @@ if (!ownerUrl) {
 let app: FastifyInstance;
 let env: Env;
 let adminToken: string;
+let outletDeviceId = '';
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
 /** Members created by these tests, cleaned up afterwards. */
 const createdMemberIds: string[] = [];
+
+/**
+ * Allocate from a test-only Qatar mobile range, checking the shared database
+ * rather than assuming a short timestamp suffix has not been used by an older
+ * run. The suite deliberately keeps one persistent seeded database, so a
+ * four-digit clock suffix eventually collides even when cleanup is correct.
+ */
+// Give concurrent Vitest processes different blocks. Reused PIDs from older
+// runs remain harmless because every candidate is still checked below.
+let nextPhoneCandidate = (process.pid * 100) % 10_000_000;
+async function uniquePhone(): Promise<string> {
+  for (let attempts = 0; attempts < 10_000_000; attempts += 1) {
+    const suffix = nextPhoneCandidate.toString().padStart(7, '0');
+    nextPhoneCandidate = (nextPhoneCandidate + 1) % 10_000_000;
+    const phone = `+9745${suffix}`;
+    const existing = await ownerPrisma.member.findUnique({
+      where: { phone },
+      select: { id: true },
+    });
+    if (existing === null) return phone;
+  }
+  throw new Error('No unused lifecycle-test phone number remains.');
+}
 
 beforeAll(async () => {
   env = loadEnv();
@@ -50,6 +75,14 @@ beforeAll(async () => {
     tokenVersion: admin.tokenVersion,
     ttlSeconds: 900,
   });
+
+  const outlet = await ownerPrisma.outlet.findFirstOrThrow({ where: { active: true } });
+  const outletDevice = await createOutletDeviceFixture(
+    ownerPrisma,
+    outlet.id,
+    'Member lifecycle test outlet device',
+  );
+  outletDeviceId = outletDevice.id;
 });
 
 afterEach(() => {
@@ -64,29 +97,54 @@ afterAll(async () => {
     await ownerPrisma.refreshToken.deleteMany({ where: { subjectId: id } });
     await ownerPrisma.member.deleteMany({ where: { id } });
   }
+  // The retired-role probes below create their own throwaway accounts.
+  await ownerPrisma.staffUser.deleteMany({
+    where: { email: { startsWith: 'lifecycle-retired-manager-' } },
+  });
+  await ownerPrisma.staffUser.delete({ where: { id: outletDeviceId } });
   await app.close();
   await ownerPrisma.$disconnect();
 });
 
 /** Creates a member through the real endpoint and returns its claim code. */
-async function createMember(phone?: string): Promise<{
+async function createMember(options: { withPhone?: boolean; fullName?: string } = {}): Promise<{
   id: string;
   memberNumber: string;
   claimCode: string;
+  phone?: string;
 }> {
-  const response = await request(app.server)
-    .post('/admin/members')
-    .set('Authorization', `Bearer ${adminToken}`)
-    .send({ fullName: 'Lifecycle Test Member', ...(phone ? { phone } : {}) });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const phone = options.withPhone ? await uniquePhone() : undefined;
+    const response = await request(app.server)
+      .post('/admin/members')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        fullName: options.fullName ?? 'Lifecycle Test Member',
+        ...(phone ? { phone } : {}),
+      });
 
-  expect(response.status).toBe(201);
-  createdMemberIds.push(response.body.id);
+    // The API's unique constraint is the final arbiter if another test process
+    // claimed this candidate after our read. Retry with a new number instead of
+    // turning harmless shared-database contention into suite flakiness.
+    if (
+      options.withPhone &&
+      response.status === 409 &&
+      response.body.error === 'phone_already_used'
+    ) {
+      continue;
+    }
 
-  return {
-    id: response.body.id,
-    memberNumber: response.body.memberNumber,
-    claimCode: response.body.claimCode.code,
-  };
+    expect(response.status, JSON.stringify({ phone, body: response.body })).toBe(201);
+    createdMemberIds.push(response.body.id);
+
+    return {
+      id: response.body.id,
+      memberNumber: response.body.memberNumber,
+      claimCode: response.body.claimCode.code,
+      ...(phone ? { phone } : {}),
+    };
+  }
+  throw new Error('Could not allocate an unused lifecycle-test phone number.');
 }
 
 
@@ -132,14 +190,8 @@ describe('a membership nobody could activate is refused at creation', () => {
     // Clicking "create" twice with the same details used to raise an unmapped
     // unique-constraint violation — a 500 that read as a broken server when the
     // truth was that the first click had worked.
-    const phone = `+9745551${Date.now().toString().slice(-3)}`;
-    const first = await request(app.server)
-      .post('/admin/members')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ fullName: 'Duplicate Phone Test', phone });
-
-    expect(first.status).toBe(201);
-    createdMemberIds.push(first.body.id);
+    const first = await createMember({ withPhone: true, fullName: 'Duplicate Phone Test' });
+    const phone = first.phone!;
 
     const second = await request(app.server)
       .post('/admin/members')
@@ -150,7 +202,7 @@ describe('a membership nobody could activate is refused at creation', () => {
     expect(second.body.error).toBe('phone_already_used');
     // The message has to name the membership, or an administrator cannot act
     // on it without going to look.
-    expect(second.body.memberNumber).toBe(first.body.memberNumber);
+    expect(second.body.memberNumber).toBe(first.memberNumber);
 
     // And nothing was written on the second attempt.
     const named = await ownerPrisma.member.count({
@@ -225,8 +277,8 @@ describe('R2 — claim codes are not derivable from the membership number', () =
 
 describe('R1 — a claim code cannot be used twice', () => {
   it('rejects the second activation attempt with the same code', async () => {
-    const phone = `+9745555${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     // Activation is one call: the invitation code arrived in the member's
     // inbox, which is already proof they hold that address.
@@ -255,8 +307,8 @@ describe('R1 — a claim code cannot be used twice', () => {
   });
 
   it('consumes the code atomically, so concurrent activations cannot both win', async () => {
-    const phone = `+9745556${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     // Fired together: the consuming UPDATE carries `usedAt: null`, so exactly
     // one can match. A read-then-write would let both through.
@@ -279,8 +331,8 @@ describe('R1 — a claim code cannot be used twice', () => {
 
 describe('an expired claim code is rejected', () => {
   it('refuses a code whose expiry has passed', async () => {
-    const phone = `+9745557${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     await ownerPrisma.claimCode.updateMany({
       where: { memberId: member.id },
@@ -297,8 +349,8 @@ describe('an expired claim code is rejected', () => {
   });
 
   it('gives an identical response for expired, unknown and already-used codes', async () => {
-    const phone = `+9745558${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
     await ownerPrisma.claimCode.updateMany({
       where: { memberId: member.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
@@ -324,8 +376,8 @@ describe('an expired claim code is rejected', () => {
 
 describe('resend-claim supersedes the outstanding code', () => {
   it('invalidates the old code so a discarded letter stops working', async () => {
-    const phone = `+9745559${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     const resent = await request(app.server)
       .post(`/admin/members/${member.id}/resend-claim`)
@@ -355,8 +407,8 @@ describe('resend-claim supersedes the outstanding code', () => {
 
 describe('R15 — consent is recorded per channel with a timestamp', () => {
   it('stores a row per channel, including a declined one', async () => {
-    const phone = `+9745560${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
@@ -386,8 +438,8 @@ describe('R15 — consent is recorded per channel with a timestamp', () => {
   });
 
   it('records a withdrawal as a new row, leaving the original intact', async () => {
-    const phone = `+9745561${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     const claimed = await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
@@ -423,8 +475,8 @@ describe('R15 — consent is recorded per channel with a timestamp', () => {
 
 describe('R16 — members are suspended, never deleted', () => {
   it('preserves the record and its history, and invalidates live sessions', async () => {
-    const phone = `+9745562${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     const claimed = await request(app.server).post('/member/claim').send({
       claimCode: member.claimCode,
@@ -490,8 +542,8 @@ describe('R16 — members are suspended, never deleted', () => {
   });
 
   it('refuses to activate a suspended membership', async () => {
-    const phone = `+9745563${Date.now().toString().slice(-4)}`;
-    const member = await createMember(phone);
+    const member = await createMember({ withPhone: true });
+    const phone = member.phone!;
 
     await request(app.server)
       .post(`/admin/members/${member.id}/suspend`)
@@ -510,54 +562,70 @@ describe('R16 — members are suspended, never deleted', () => {
 
 // ── R11 ────────────────────────────────────────────────────────────────────
 
-describe('retired staff accounts cannot enter the administrator panel', () => {
-  it('refuses member list and detail access', async () => {
-    const retiredStaff = await ownerPrisma.staffUser.findFirstOrThrow({
-      where: { role: 'OUTLET_STAFF' },
-    });
-    const token = await issueAccessToken({
+describe('no non-administrator account can enter the administrator panel', () => {
+  /**
+   * Two kinds of account are refused here, for two different reasons, and the
+   * status code is the tell:
+   *
+   *   **MANAGER** is retired. `resolvePrincipal` refuses to build a principal at
+   *   all, so the request never reaches authorization — **401**.
+   *
+   *   **OUTLET_STAFF** is live again, since the outlet screen signs in as one. Its
+   *   principal resolves fine and then holds no dashboard permission — **403**.
+   *
+   * Both satisfy R11's stronger form: absent, not filtered. Asserting the exact
+   * code for each is what keeps a future change from downgrading one of them into
+   * a filtered 200.
+   */
+  /**
+   * A MANAGER row is created on demand: the seed no longer makes one, and the
+   * only reason to want one is to prove it still cannot get in.
+   */
+  async function tokenFor(role: 'MANAGER' | 'OUTLET_STAFF'): Promise<string> {
+    const account =
+      role === 'MANAGER'
+        ? await ownerPrisma.staffUser.create({
+            data: {
+              fullName: 'Retired manager',
+              email: `lifecycle-retired-manager-${Date.now()}@pgp.test`,
+              passwordHash: 'not-used-by-this-test',
+              role: 'MANAGER',
+              // The database permits a retired role only as a suspended
+              // historical identity.
+              status: 'SUSPENDED',
+            },
+          })
+        : await ownerPrisma.staffUser.findUniqueOrThrow({ where: { id: outletDeviceId } });
+    return issueAccessToken({
       issuer: env.JWT_ISSUER,
       audience: env.JWT_AUDIENCE_STAFF,
-      subject: retiredStaff.id,
+      subject: account.id,
       subjectType: 'STAFF',
-      role: retiredStaff.role,
-      ...(retiredStaff.outletId ? { outletId: retiredStaff.outletId } : {}),
-      tokenVersion: retiredStaff.tokenVersion,
+      role: account.role,
+      tokenVersion: account.tokenVersion,
       ttlSeconds: 300,
     });
+  }
+
+  it('refuses an outlet account member list and detail access', async () => {
+    const token = await tokenFor('OUTLET_STAFF');
 
     const list = await request(app.server)
       .get('/admin/members')
       .set('Authorization', `Bearer ${token}`);
-    expect(list.status).toBe(401);
+    expect(list.status).toBe(403);
 
     const detail = await request(app.server)
       .get(`/admin/members/${(await ownerPrisma.member.findFirstOrThrow()).id}`)
       .set('Authorization', `Bearer ${token}`);
-    expect(detail.status).toBe(401);
+    expect(detail.status).toBe(403);
   });
 
-  it('cannot reach any endpoint that returns more than one member', async () => {
-    // The stronger form of R11: absent, not filtered.
-    //
+  it('reaches no endpoint that returns more than one member', async () => {
     // This replaced an assertion that string-matched Fastify's route-tree
-    // *rendering*, which broke the moment a route was added at `/` — and which
-    // had never actually checked the property it claimed to. This drives every
+    // *rendering*, which broke the moment a route was added at `/` — and which had
+    // never actually checked the property it claimed to. This drives every
     // enumerating endpoint and asserts none of them answers.
-    const retiredStaff = await ownerPrisma.staffUser.findFirstOrThrow({
-      where: { role: 'OUTLET_STAFF' },
-    });
-    const token = await issueAccessToken({
-      issuer: env.JWT_ISSUER,
-      audience: env.JWT_AUDIENCE_STAFF,
-      subject: retiredStaff.id,
-      subjectType: 'STAFF',
-      role: retiredStaff.role,
-      ...(retiredStaff.outletId ? { outletId: retiredStaff.outletId } : {}),
-      tokenVersion: retiredStaff.tokenVersion,
-      ttlSeconds: 300,
-    });
-
     const enumerating = [
       '/admin/members',
       '/admin/redemptions',
@@ -570,12 +638,19 @@ describe('retired staff accounts cannot enter the administrator panel', () => {
       '/admin/reports/export',
     ];
 
-    for (const path of enumerating) {
-      const response = await request(app.server)
-        .get(path)
-        .set('Authorization', `Bearer ${token}`);
+    for (const [role, expected] of [
+      ['MANAGER', 401],
+      ['OUTLET_STAFF', 403],
+    ] as const) {
+      const token = await tokenFor(role);
 
-      expect(response.status, path).toBe(401);
+      for (const path of enumerating) {
+        const response = await request(app.server)
+          .get(path)
+          .set('Authorization', `Bearer ${token}`);
+
+        expect(response.status, `${role} ${path}`).toBe(expected);
+      }
     }
   });
 });

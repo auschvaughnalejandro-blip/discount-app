@@ -15,16 +15,35 @@ export const PERMISSIONS = [
   'members:update',
   'members:suspend',
   'members:issue-claim',
+  /**
+   * The card-print export: membership number, name and card code, for the
+   * bureau that manufactures the physical cards.
+   *
+   * Separate from `reports:export` because the two disclose different things.
+   * That one is deliberately a list of membership numbers and no names at all
+   * (§12, asserted by `reporting.test.ts`); this one cannot be, because the
+   * name is what gets printed on the card. Holding one must never imply the
+   * other, and only a distinct permission can express that.
+   */
+  'members:export-cards',
 
   // Benefits
   'benefits:read-published',
   'benefits:read-all',
   'benefits:manage',
 
-  // Benefit requests — a member asks, a person decides, an outlet fulfils
+  // Benefit requests — a member announces, the outlet confirms. Nobody decides:
+  // the guest is already entitled, so there is no approval permission any more.
   'requests:create',
   'requests:read',
-  'requests:decide',
+
+  // The outlet surface. Narrow on purpose — an outlet account works its own
+  // queue and resolves a card in front of it, and can do nothing else. Notably
+  // absent: any form of member listing, which is what keeps a shared counter
+  // credential from being a route to the membership list (§5).
+  'outlet:queue',
+  'outlet:fulfil',
+  'outlet:resolve',
 
   // Redemption
   'redemptions:record',
@@ -34,6 +53,11 @@ export const PERMISSIONS = [
   // Reporting
   'reports:read',
   'reports:export',
+
+  // Outlets: their notification address and which token-backed devices may work them.
+  // Separate from staff:manage because it is a different question — that one is
+  // "who may reach the dashboard", this one is "which room may record a visit".
+  'outlets:manage',
 
   // Staff administration
   'staff:manage',
@@ -64,30 +88,34 @@ const PERMISSION_ACTORS: Record<Permission, Actor> = {
   'members:update': 'STAFF',
   'members:suspend': 'STAFF',
   'members:issue-claim': 'STAFF',
+  'members:export-cards': 'STAFF',
   'benefits:read-published': 'MEMBER',
   'benefits:read-all': 'STAFF',
   'benefits:manage': 'STAFF',
   'requests:create': 'MEMBER',
   'requests:read': 'STAFF',
-  'requests:decide': 'STAFF',
+  'outlet:queue': 'STAFF',
+  'outlet:fulfil': 'STAFF',
+  'outlet:resolve': 'STAFF',
   'redemptions:record': 'STAFF',
   'redemptions:list': 'STAFF',
   'redemptions:reverse': 'STAFF',
   'reports:read': 'STAFF',
   'reports:export': 'STAFF',
+  'outlets:manage': 'STAFF',
   'staff:manage': 'STAFF',
   'staff:self': 'STAFF',
   'member:self': 'MEMBER',
 };
 
 /**
- * The product now has two surfaces: the administrator dashboard and the
- * member app. `MANAGER`, `OUTLET_STAFF` and `SUPPORT` remain database enum
- * values only so historical rows can keep naming the account that performed
- * an action. They deliberately hold no permission and cannot authenticate.
+ * Three surfaces: the member app, the administrator dashboard, and the outlet
+ * screen. `MANAGER` and `SUPPORT` remain database enum values only so
+ * historical rows can keep naming the account that performed an action; they
+ * deliberately hold no permission and cannot authenticate.
  *
- * Administrator permissions are stated exhaustively rather than by wildcard,
- * so adding a permission to the catalogue never silently grants it.
+ * Permissions are stated exhaustively per role rather than by wildcard, so
+ * adding one to the catalogue never silently grants it to anybody.
  */
 const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ADMINISTRATOR: [
@@ -97,23 +125,38 @@ const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'members:update',
     'members:suspend',
     'members:issue-claim',
+    'members:export-cards',
     'benefits:read-all',
     'benefits:manage',
     'requests:read',
-    'requests:decide',
     'redemptions:record',
     'redemptions:list',
     'redemptions:reverse',
     'reports:read',
     'reports:export',
+    'outlets:manage',
     'staff:manage',
     'staff:self',
   ],
 
+  /**
+   * An outlet account: a shared credential on a counter device.
+   *
+   * It reads its own outlet's notices, confirms or closes them, and resolves the
+   * card a guest is holding. It cannot list members, read another outlet's work,
+   * see any report, record a redemption outside its own outlet, reverse
+   * anything, or reach account management.
+   *
+   * `redemptions:record` is **not** here even though confirming a notice writes
+   * a redemption. The outlet routes call the recording logic directly with the
+   * outlet fixed from the account, so granting the general permission would only
+   * add a way to record against an outlet the account does not belong to.
+   */
+  OUTLET_STAFF: ['outlet:queue', 'outlet:fulfil', 'outlet:resolve'],
+
   // Historical enum values only. Fail closed if an old account or token ever
   // reaches authorization despite the login and principal checks.
   MANAGER: [],
-  OUTLET_STAFF: [],
   SUPPORT: [],
 };
 

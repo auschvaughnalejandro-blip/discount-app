@@ -9,9 +9,9 @@
  *
  * ── Why a script, and not an echo inside the server ───────────────────────
  *
- * `DEV_OTP_ECHO` prints *member* passcodes from the request handler that issues
- * them (`src/security/dev-otp.ts`), and the obvious move is to do the same for
- * the staff second factor. It is the wrong shape here, for two reasons.
+ * The obvious move is to print the staff second factor from the sign-in handler,
+ * the way a member passcode could be printed from the request that issues it. It
+ * is the wrong shape here, for two reasons.
  *
  * A member passcode is issued once, by a request, and lasts five minutes — so
  * there is a moment to print it and a comfortable window to type it. A TOTP code
