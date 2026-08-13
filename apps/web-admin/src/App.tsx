@@ -4,14 +4,16 @@ import { formatDate, formatTimestamp } from '@pgp/ui/format';
 
 import {
   api,
-  clearTokens,
+  onSessionEnd,
   resumeSession,
   setTokens,
+  signOut,
   type AdminBenefit,
   type BenefitGroup,
   type MemberRow,
   type ReportMember,
   type ReportSummary,
+  type RequestStatus,
   type StaffRow,
 } from './api.js';
 import { FigureValue, formatMinor, StatTile } from './Charts.js';
@@ -41,6 +43,7 @@ type Section =
   | 'redemptions'
   | 'reports'
   | 'benefits'
+  | 'outlets'
   | 'staff';
 
 /**
@@ -56,11 +59,12 @@ type Section =
  */
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Headline figures and what needs attention' },
-  { id: 'requests', label: 'Requests', hint: 'Members waiting on a decision' },
+  { id: 'requests', label: 'Requests', hint: 'Who each outlet is expecting' },
   { id: 'members', label: 'Members', hint: 'Create, suspend and reinstate memberships' },
   { id: 'redemptions', label: 'Redemptions', hint: 'The immutable log' },
   { id: 'reports', label: 'Reports', hint: 'Programme activity in detail' },
   { id: 'benefits', label: 'Benefits', hint: 'Discounts, caps and terms' },
+  { id: 'outlets', label: 'Outlets', hint: 'Notification addresses and outlet sign-in' },
   { id: 'staff', label: 'Administrators', hint: 'Administrator accounts and offboarding' },
 ];
 
@@ -87,6 +91,24 @@ export default function App() {
     })();
   }, []);
 
+  /**
+   * A session that ends in the background has to reach the screen.
+   *
+   * Without this the dashboard stayed mounted after its session died and each
+   * panel independently rendered the API's "Authentication required." into its
+   * own error slot — eight copies of an error message where one sign-in form
+   * belonged, and no way out but a manual reload. `api` decides when a session is
+   * over; this is how that decision arrives here.
+   */
+  useEffect(
+    () =>
+      onSessionEnd(() => {
+        setSignedIn(false);
+        setChallenge(null);
+      }),
+    [],
+  );
+
   if (resuming) {
     return (
       <main>
@@ -109,7 +131,16 @@ export default function App() {
         />
       );
     }
-    return <SignIn onChallenge={setChallenge} />;
+    return (
+      <SignIn
+        onChallenge={setChallenge}
+        onSignedIn={(tokens) => {
+          setTokens(tokens);
+          setChallenge(null);
+          setSignedIn(true);
+        }}
+      />
+    );
   }
 
   return (
@@ -135,9 +166,12 @@ export default function App() {
         <button
           type="button"
           onClick={() => {
-            clearTokens();
+            // The screen changes first and `signOut` revokes in the background:
+            // a button that waited on the network before doing anything visible
+            // invites a second click, and the local state is cleared either way.
             setChallenge(null);
             setSignedIn(false);
+            void signOut();
           }}
         >
           Sign out
@@ -150,6 +184,7 @@ export default function App() {
       {section === 'redemptions' ? <Redemptions /> : null}
       {section === 'reports' ? <Reports /> : null}
       {section === 'benefits' ? <Benefits /> : null}
+      {section === 'outlets' ? <Outlets /> : null}
       {section === 'staff' ? <Administrators /> : null}
     </main>
   );
@@ -157,8 +192,11 @@ export default function App() {
 
 function SignIn({
   onChallenge,
+  onSignedIn,
 }: {
   onChallenge: (challenge: { challengeToken: string; stage: 'enroll' | 'verify' }) => void;
+  /** Only reachable on a server running `STAFF_MFA_REQUIRED=false`. */
+  onSignedIn: (tokens: { accessToken: string }) => void;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -170,7 +208,14 @@ function SignIn({
     try {
       const result = await api.login(email, password);
 
-      onChallenge({ challengeToken: result.challengeToken, stage: result.stage });
+      // Which of the two the server sent is the server's decision, not a
+      // preference held here — a client that could choose to skip the second
+      // factor would not be a second factor.
+      if (result.mfaRequired) {
+        onChallenge({ challengeToken: result.challengeToken, stage: result.stage });
+      } else {
+        onSignedIn({ accessToken: result.accessToken });
+      }
     } catch {
       setError('Those details were not accepted.');
     }
@@ -205,6 +250,21 @@ function SignIn({
 
 // ── Screens 11 / D3: members ─────────────────────────────────────────────
 
+/**
+ * Hand a fetched blob to the browser as a download.
+ *
+ * Shared by the two exports. The object URL is revoked straight after the
+ * click, or the blob is held for the lifetime of the page.
+ */
+function saveFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function Members() {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -214,6 +274,7 @@ function Members() {
   /** From the server, never a constant here — see routes/health.ts. */
   const [countryCode, setCountryCode] = useState('');
   const [issued, setIssued] = useState<{ memberNumber: string; code: string } | null>(null);
+  const [exportingCards, setExportingCards] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -286,6 +347,26 @@ function Members() {
     }
   }
 
+  /**
+   * The file the card bureau prints from.
+   *
+   * Rate limited to a handful a day and individually audited, like the
+   * redemption export — none of which is client-side. This button only makes
+   * the capability reachable.
+   */
+  async function downloadCardExport() {
+    setExportingCards(true);
+    setError(null);
+    try {
+      const { blob, filename } = await api.exportCardsCsv();
+      saveFile(blob, filename);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not export the card list.');
+    } finally {
+      setExportingCards(false);
+    }
+  }
+
   const dormant = members.filter((m) => m.totalUses === 0).length;
   const unclaimed = members.filter((m) => !m.appClaimed).length;
 
@@ -294,6 +375,25 @@ function Members() {
       <h2>Members</h2>
       <p>
         {total} total · {dormant} have never used a benefit · {unclaimed} have not claimed the app
+      </p>
+
+      <p>
+        <button
+          type="button"
+          onClick={() => void downloadCardExport()}
+          disabled={exportingCards}
+        >
+          {exportingCards ? 'Preparing…' : 'Export card list (CSV)'}
+        </button>
+      </p>
+      {/* Said on the screen, not only in the route comment: this is the one
+          export that carries names, and the person about to email it to a
+          print vendor is the person who needs to know that. */}
+      <p className="field-hint">
+        Membership number, name and card code for every member — what the card printer needs.
+        It names individuals, so treat it as confidential. The card code must reach the
+        printer exactly as written: it is case-sensitive, and altering it stops the card
+        scanning.
       </p>
 
       <form onSubmit={create}>
@@ -433,6 +533,375 @@ function Members() {
       </div>
 
     </section>
+  );
+}
+
+/**
+ * Outlets: notification delivery and the devices allowed to work each queue.
+ *
+ * There are exactly two concepts here: the outlet email that receives notices,
+ * and the token-backed counter devices that sign in. The email is never a
+ * credential. A device token is returned once, held only in this component long
+ * enough to copy, and never included in the management GET.
+ */
+function Outlets() {
+  type Row = Awaited<ReturnType<typeof api.manageOutlets>>['outlets'][number];
+  type IssuedToken = {
+    outletId: string;
+    deviceId: string;
+    label: string;
+    token: string;
+    action: 'issued' | 'rotated';
+  };
+
+  const [rows, setRows] = useState<Row[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [issued, setIssued] = useState<IssuedToken | null>(null);
+  const [copiedDeviceId, setCopiedDeviceId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows((await api.manageOutlets()).outlets);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load outlets.');
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function act(id: string, work: () => Promise<unknown>) {
+    setBusy(id);
+    setError(null);
+    try {
+      await work();
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'That did not work.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function issueDevice(outletId: string, label: string): Promise<boolean> {
+    setBusy(outletId);
+    setError(null);
+    try {
+      const result = await api.createOutletDevice(outletId, { label });
+      setIssued({
+        outletId,
+        deviceId: result.device.id,
+        label: result.device.fullName,
+        token: result.token,
+        action: 'issued',
+      });
+      setCopiedDeviceId(null);
+      await load();
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not issue a device token.');
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function rotateDevice(outletId: string, deviceId: string, label: string) {
+    if (
+      !window.confirm(
+        `Rotate the token for ${label}? Its old token and existing sessions will stop working.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy(outletId);
+    setError(null);
+    try {
+      const result = await api.rotateOutletDevice(deviceId);
+      setIssued({
+        outletId,
+        deviceId: result.device.id,
+        label: result.device.fullName,
+        token: result.token,
+        action: 'rotated',
+      });
+      setCopiedDeviceId(null);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not rotate that device token.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyIssuedToken() {
+    if (!issued) return;
+    try {
+      await navigator.clipboard.writeText(issued.token);
+      setCopiedDeviceId(issued.deviceId);
+    } catch {
+      setError('Could not copy the token. Select the token and copy it manually.');
+    }
+  }
+
+  return (
+    <section>
+      <h2>Outlets</h2>
+      <p className="row-secondary">
+        Set the outlet email for notices, then issue a private login token to each counter device.
+      </p>
+
+      {rows.map((outlet) => (
+        <article key={outlet.id} className="panel">
+          <h3>
+            {outlet.name}{' '}
+            {outlet.active ? null : (
+              <span className="badge" data-tone="warn">
+                closed
+              </span>
+            )}
+          </h3>
+
+          <div className="outlet-panel-body">
+            <NotifyEmailForm
+              outlet={outlet}
+              busy={busy === outlet.id}
+              onSave={(notifyEmail) =>
+                void act(outlet.id, () => api.updateOutlet(outlet.id, { notifyEmail }))
+              }
+            />
+
+            <section className="outlet-signin-section" aria-labelledby={`devices-${outlet.id}`}>
+              <div>
+                <h4 id={`devices-${outlet.id}`}>Device sign-in</h4>
+                <p className="row-secondary">
+                  Use a separate token for every tablet or counter computer so one device can be
+                  revoked without taking the whole outlet offline.
+                </p>
+              </div>
+
+              {outlet.devices.length === 0 ? (
+                <p className="row-secondary">No device token has been issued yet.</p>
+              ) : (
+                <div className="table-scroll">
+                  <table>
+                    <caption>Counter devices</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Label</th>
+                        <th scope="col">Last used</th>
+                        <th scope="col">Token issued</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outlet.devices.map((device) => (
+                        <tr key={device.id}>
+                          <td>{device.fullName}</td>
+                          <td>
+                            {device.outletTokenLastUsedAt ? (
+                              <time dateTime={device.outletTokenLastUsedAt}>
+                                {formatTimestamp(device.outletTokenLastUsedAt)}
+                              </time>
+                            ) : (
+                              <span className="row-secondary">never</span>
+                            )}
+                          </td>
+                          <td>
+                            <time dateTime={device.outletTokenIssuedAt}>
+                              {formatTimestamp(device.outletTokenIssuedAt)}
+                            </time>
+                          </td>
+                          <td>
+                            <span
+                              className="badge"
+                              data-tone={device.status === 'ACTIVE' ? 'ok' : 'warn'}
+                            >
+                              {device.status === 'ACTIVE' ? 'active' : 'revoked'}
+                            </span>
+                          </td>
+                          <td>
+                            {device.status === 'ACTIVE' ? (
+                              <div className="device-actions">
+                                <button
+                                  type="button"
+                                  disabled={busy === outlet.id}
+                                  onClick={() =>
+                                    void rotateDevice(outlet.id, device.id, device.fullName)
+                                  }
+                                >
+                                  Rotate
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy === outlet.id}
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Revoke ${device.fullName}? Its token and existing sessions will stop working.`,
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    void act(outlet.id, async () => {
+                                      await api.revokeOutletDevice(device.id);
+                                      if (issued?.deviceId === device.id) setIssued(null);
+                                    });
+                                  }}
+                                >
+                                  Revoke
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="row-secondary">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {issued?.outletId === outlet.id ? (
+                <div className="device-token" role="status">
+                  <div>
+                    <strong>
+                      {issued.action === 'issued' ? 'Device token issued' : 'Device token rotated'}
+                      {' — '}
+                      {issued.label}
+                    </strong>
+                    <p>
+                      Copy this token to the device now. It is shown once and cannot be retrieved
+                      afterwards; losing it means rotating the token again.
+                    </p>
+                    <output aria-label={`Login token for ${issued.label}`}>{issued.token}</output>
+                    <div className="device-token-actions">
+                      <button type="button" onClick={() => void copyIssuedToken()}>
+                        {copiedDeviceId === issued.deviceId ? 'Copied' : 'Copy token'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIssued(null);
+                          setCopiedDeviceId(null);
+                        }}
+                      >
+                        I have saved it
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <NewOutletDeviceForm
+                outletId={outlet.id}
+                busy={busy === outlet.id}
+                disabled={!outlet.active}
+                onCreate={(label) => issueDevice(outlet.id, label)}
+              />
+            </section>
+
+          </div>
+        </article>
+      ))}
+
+      {error ? <p role="alert">{error}</p> : null}
+    </section>
+  );
+}
+
+function NotifyEmailForm({
+  outlet,
+  busy,
+  onSave,
+}: {
+  outlet: { id: string; notifyEmail: string | null };
+  busy: boolean;
+  onSave: (notifyEmail: string | null) => void;
+}) {
+  const [value, setValue] = useState(outlet.notifyEmail ?? '');
+
+  return (
+    <form
+      className="field"
+      onSubmit={(event) => {
+        event.preventDefault();
+        // An empty box means "nobody is emailed", which is a real choice — so it
+        // sends null rather than refusing to submit.
+        onSave(value.trim() === '' ? null : value.trim());
+      }}
+    >
+      <label htmlFor={`notify-${outlet.id}`}>Outlet email</label>
+      <br />
+      <input
+        id={`notify-${outlet.id}`}
+        type="email"
+        value={value}
+        placeholder="No outlet email set"
+        aria-describedby={`notify-hint-${outlet.id}`}
+        onChange={(event) => setValue(event.target.value)}
+      />{' '}
+      <span className="field-hint" id={`notify-hint-${outlet.id}`}>
+        Receives guest notices only. This address cannot sign in.
+      </span>
+      <button type="submit" disabled={busy}>
+        Save outlet email
+      </button>
+    </form>
+  );
+}
+
+function NewOutletDeviceForm({
+  outletId,
+  busy,
+  disabled,
+  onCreate,
+}: {
+  outletId: string;
+  busy: boolean;
+  disabled: boolean;
+  onCreate: (label: string) => Promise<boolean>;
+}) {
+  const [label, setLabel] = useState('');
+
+  if (disabled) {
+    return <p className="row-secondary">Reopen this outlet before issuing a device token.</p>;
+  }
+
+  return (
+    <form
+      className="outlet-device-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const next = label.trim();
+        if (next === '') return;
+        void onCreate(next).then((created) => {
+          if (created) setLabel('');
+        });
+      }}
+    >
+      <p className="field">
+        <label htmlFor={`device-label-${outletId}`}>Device label</label>
+        <br />
+        <input
+          id={`device-label-${outletId}`}
+          value={label}
+          placeholder="Steakhouse counter tablet"
+          onChange={(event) => setLabel(event.target.value)}
+          required
+        />
+        <span className="field-hint">Name the physical device or counter, not a person.</span>
+      </p>
+      <button type="submit" disabled={busy || label.trim() === ''}>
+        {busy ? 'Issuing…' : 'Issue device token'}
+      </button>
+    </form>
   );
 }
 
@@ -1212,13 +1681,7 @@ function Reports() {
     setError(null);
     try {
       const { blob, filename } = await api.exportCsv();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      link.click();
-      // Or the blob is held for the lifetime of the page.
-      URL.revokeObjectURL(url);
+      saveFile(blob, filename);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not export.');
     } finally {
@@ -1339,25 +1802,32 @@ function Reports() {
   );
 }
 
-// ── The approval queue ───────────────────────────────────────────────────
+// ── The notice monitor ─────────────────────────────────────────
 
 /**
- * Members waiting on a decision.
+ * Guests who told an outlet they were coming.
  *
- * Oldest first, and it opens on PENDING because that is the only state anyone
- * comes here to act on — a queue you have to filter before you can work it is a
- * queue that grows.
+ * **Nothing on this screen decides anything.** There used to be Approve and
+ * Decline buttons here; a Privilege Guest is entitled to every published benefit
+ * the moment they join, so asking permission was asking for something they already
+ * had — and it put an administrator in the middle of every single visit. The
+ * outlets close their own notices out now.
+ *
+ * What is left is worth having: a live view of what each outlet has been told, and
+ * whether the email actually reached them. `Record by hand` stays for the exception
+ * an outlet cannot cover — a visit somebody forgot to confirm on the night, or a
+ * benefit given somewhere with no screen.
+ *
+ * Opens on SENT because that is what is still in flight.
  */
 function Requests() {
   type Row = Awaited<ReturnType<typeof api.requests>>['requests'][number];
-  type Status = 'PENDING' | 'APPROVED' | 'DECLINED' | 'FULFILLED';
 
-  const [status, setStatus] = useState<Status>('PENDING');
+  const [status, setStatus] = useState<RequestStatus>('SENT');
   const [rows, setRows] = useState<Row[]>([]);
   const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  /** The approval currently being marked used, if any. */
+  /** The notice currently being recorded by hand, if any. */
   const [fulfilling, setFulfilling] = useState<Row | null>(null);
 
   const load = useCallback(async () => {
@@ -1383,31 +1853,13 @@ function Requests() {
     })();
   }, []);
 
-  async function decide(id: string, decision: 'approve' | 'decline') {
-    // A decline without a reason reads to the member as a malfunction rather
-    // than an answer, so it is required here even though the API allows it to
-    // be absent.
-    let reason: string | undefined;
-    if (decision === 'decline') {
-      const entered = prompt('Why is this being declined? The member will see this.');
-      if (!entered) return;
-      reason = entered;
-    }
-
-    setBusyId(id);
-    try {
-      await api.decideRequest(id, decision, reason);
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not record that decision.');
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   return (
     <section>
       <h2>Requests</h2>
+      <p className="row-secondary">
+        Guests tell an outlet directly and the outlet confirms the visit. Nothing here needs
+        approving — this is a view of what is happening.
+      </p>
 
       <p className="field">
         <label htmlFor="request-status">Showing</label>
@@ -1415,27 +1867,25 @@ function Requests() {
         <select
           id="request-status"
           value={status}
-          onChange={(e) => setStatus(e.target.value as Status)}
+          onChange={(e) => setStatus(e.target.value as RequestStatus)}
         >
-          <option value="PENDING">Waiting for a decision</option>
-          <option value="APPROVED">Approved, not yet used</option>
+          <option value="SENT">Outlet told, guest not yet arrived</option>
           <option value="FULFILLED">Used</option>
-          <option value="DECLINED">Declined</option>
+          <option value="NOT_USED">Not used</option>
+          <option value="APPROVED">Earlier: approved (old flow)</option>
+          <option value="PENDING">Earlier: awaiting approval (old flow)</option>
+          <option value="DECLINED">Earlier: declined (old flow)</option>
         </select>
       </p>
 
       {rows.length === 0 ? (
-        <p>
-          {status === 'PENDING'
-            ? 'Nothing is waiting. '
-            : 'Nothing to show here. '}
-        </p>
+        <p>{status === 'SENT' ? 'No outlet is expecting anybody.' : 'Nothing to show here.'}</p>
       ) : (
         <div className="table-scroll">
           <table>
             <caption>
-              {status === 'PENDING'
-                ? 'Oldest first — these members are waiting'
+              {status === 'SENT'
+                ? 'Oldest first — these outlets are expecting somebody'
                 : 'Requests in this state'}
             </caption>
             <thead>
@@ -1443,8 +1893,9 @@ function Requests() {
                 <th scope="col">Asked</th>
                 <th scope="col">Member</th>
                 <th scope="col">Benefit</th>
+                <th scope="col">Outlet told</th>
                 <th scope="col">Note</th>
-                <th scope="col">{status === 'PENDING' ? 'Decision' : 'Decided by'}</th>
+                <th scope="col">{status === 'SENT' ? 'Delivery' : 'Closed by'}</th>
               </tr>
             </thead>
             <tbody>
@@ -1467,36 +1918,55 @@ function Requests() {
                   <td>
                     {row.benefit.title} · {row.benefit.discountPct}%
                   </td>
+                  <td>
+                    {row.outlet?.name ?? <span className="row-secondary">—</span>}
+                    {/* Whether the outlet has actually looked at its list — the
+                        closest thing to a read receipt that does not depend on
+                        email arriving. */}
+                    {row.outlet && row.status === 'SENT' ? (
+                      <>
+                        <br />
+                        <span className="row-secondary">
+                          {row.seenAt === null ? 'not seen on screen yet' : 'seen on screen'}
+                        </span>
+                      </>
+                    ) : null}
+                  </td>
                   <td>{row.note ?? '—'}</td>
                   <td>
-                    {row.status === 'PENDING' ? (
+                    {row.status === 'SENT' ? (
                       <>
-                        <button
-                          type="button"
-                          disabled={busyId === row.id}
-                          onClick={() => void decide(row.id, 'approve')}
-                        >
-                          Approve
-                        </button>{' '}
-                        <button
-                          type="button"
-                          disabled={busyId === row.id}
-                          onClick={() => void decide(row.id, 'decline')}
-                        >
-                          Decline
+                        {/* A failed send is the one thing on this screen worth
+                            acting on: the outlet still works from its own list,
+                            but somebody should know the mail is not arriving. */}
+                        {row.notifyStatus === null ? (
+                          <span className="row-secondary">not sent</span>
+                        ) : row.notifyStatus === 'delivered' ? (
+                          <span className="row-secondary">emailed</span>
+                        ) : (
+                          <span className="badge" data-tone="warn">
+                            {row.notifyStatus === 'no_address'
+                              ? 'no outlet email set'
+                              : 'email failed'}
+                          </span>
+                        )}
+                        <br />
+                        <button type="button" onClick={() => setFulfilling(row)}>
+                          Record by hand
                         </button>
                       </>
-                    ) : row.status === 'APPROVED' ? (
-                      <button type="button" onClick={() => setFulfilling(row)}>
-                        Mark as used
-                      </button>
                     ) : (
                       <>
-                        {row.decidedBy?.fullName ?? '—'}
-                        {row.decisionReason ? (
+                        {row.closedBy?.fullName ?? (
+                          /* Nobody closed it — the expiry sweep did. Attributing
+                             that to an account would name somebody who never
+                             touched it. */
+                          <span className="row-secondary">closed automatically</span>
+                        )}
+                        {row.closedReason ? (
                           <>
                             <br />
-                            <span className="row-secondary">{row.decisionReason}</span>
+                            <span className="row-secondary">{row.closedReason}</span>
                           </>
                         ) : null}
                       </>
@@ -1527,12 +1997,14 @@ function Requests() {
 }
 
 /**
- * Marking an approval used — the moment the discount actually happened.
+ * Recording a visit by hand — the exception path, now that outlets record their own.
  *
- * The outlet is asked for rather than assumed. Whoever is filling this in is at
- * a desk, not standing in the spa, and a redemption attributed to the wrong
- * outlet is worse than one attributed to none: it is wrong in a report that
- * looks right.
+ * Kept for the cases an outlet screen cannot cover: a visit nobody confirmed on the
+ * night, or a benefit given somewhere with no screen at all.
+ *
+ * The outlet is asked for rather than assumed. Whoever is filling this in is at a
+ * desk, not standing in the spa, and a redemption attributed to the wrong outlet is
+ * worse than one attributed to none: it is wrong in a report that looks right.
  */
 function MarkAsUsed({
   row,

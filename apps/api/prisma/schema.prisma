@@ -9,10 +9,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // The application connects as the least-privileged role, which is denied
   // UPDATE/DELETE on redemptions (R7).
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   // Migrations run as the schema owner. Prisma Migrate uses `directUrl` when
   // it is present, so the revocation cannot be defeated by the migration that
   // creates the tables.
@@ -31,12 +31,28 @@ enum UserStatus {
 
 enum Role {
   ADMINISTRATOR
+  /// Live again as of the outlet-fulfilment change. Each account is bound to
+  /// exactly one `Outlet` and holds only the permissions needed to work its own
+  /// queue and scan a card. Each active row is a TOKEN account for one physical
+  /// counter device; historical GOOGLE rows are retained only while suspended.
+  OUTLET_STAFF
   // Historical values only. Existing rows keep them so foreign-key-backed
   // member/redemption attribution is not rewritten. They are forced suspended
   // by a database CHECK and cannot authenticate or receive permissions.
   MANAGER
-  OUTLET_STAFF
   SUPPORT
+}
+
+/// How a staff account proves who it is.
+///
+/// Stated as a column rather than inferred from nullable credentials: PASSWORD,
+/// GOOGLE and TOKEN rows intentionally carry different shapes. GOOGLE is kept
+/// only to preserve historical actors; a CHECK permits active OUTLET_STAFF only
+/// with TOKEN. Separate credential-shape checks hold each stored pairing.
+enum StaffAuthMethod {
+  PASSWORD
+  GOOGLE
+  TOKEN
 }
 
 enum OutletKind {
@@ -49,13 +65,26 @@ enum OutletKind {
 
 /// A member's request to use a benefit, and what happened to it.
 ///
-/// DECLINED and FULFILLED are both terminal. PENDING and APPROVED are the two
-/// states a member can be waiting in, and the only two an outlet ever acts on.
+/// The guest is already entitled to every published benefit, so this row is a
+/// *notice*, not a petition: nobody grants it. `SENT` means the outlet has been
+/// told. The outlet then either confirms the benefit was given (`FULFILLED`,
+/// carrying a Redemption) or records that the guest never came (`NOT_USED`).
+/// Both are terminal.
 enum BenefitRequestStatus {
+  /// Created, outlet notified, waiting for the guest to arrive. The default.
+  SENT
+  /// An outlet confirmed the benefit was given. Carries `redemptionId`.
+  FULFILLED
+  /// The guest never came, or the notice aged out unconfirmed. Not a refusal —
+  /// the entitlement itself is untouched and can be announced again.
+  NOT_USED
+  // Historical values only, retained so no existing row is rewritten and no
+  // audit entry is falsified. These are what the flow looked like when an
+  // administrator stood between the guest and the outlet. Nothing creates them
+  // any more; see DECISIONS.md.
   PENDING
   APPROVED
   DECLINED
-  FULFILLED
 }
 
 enum Channel {
@@ -91,7 +120,7 @@ model Member {
   createdByUserId String
   createdAt       DateTime     @default(now())
 
-  createdBy   StaffUser       @relation("MemberCreatedBy", fields: [createdByUserId], references: [id])
+  createdBy   StaffUser        @relation("MemberCreatedBy", fields: [createdByUserId], references: [id])
   claimCodes  ClaimCode[]
   redemptions Redemption[]
   consents    ConsentRecord[]
@@ -120,40 +149,65 @@ model ClaimCode {
 }
 
 model StaffUser {
-  id           String     @id @default(uuid())
-  fullName     String
-  email        String     @unique
-  passwordHash String
-  /// New accounts are always ADMINISTRATOR. Other values survive only on
-  /// suspended historical actors and cannot be selected by account creation.
-  role         Role
-  /// Retained only to describe historical OUTLET_STAFF actors. New
-  /// administrator accounts always store null.
-  outletId     String?
+  id                    String          @id @default(uuid())
+  fullName              String
+  /// Required for PASSWORD and historical GOOGLE rows. A token-backed outlet device is
+  /// a room credential rather than a mailbox, so inventing an address for it
+  /// would make this field lie. PostgreSQL permits multiple nulls under the
+  /// unique index while continuing to reject duplicate real addresses.
+  email                 String?         @unique
+  /// Present only for PASSWORD accounts. Historical GOOGLE rows carry no local
+  /// credential; a TOKEN device uses `outletTokenHash` below. Database CHECKs
+  /// enforce these credential shapes and forbid active Google outlet rows.
+  passwordHash          String?
+  /// PASSWORD for an administrator; TOKEN for a live outlet device. GOOGLE is
+  /// retained only on suspended historical outlet actors.
+  authMethod            StaffAuthMethod @default(PASSWORD)
+  /// Historical Google `sub` claim retained for attribution and investigation.
+  /// It is no longer consulted by a sign-in path.
+  googleSubject         String?         @unique
+  /// SHA-256 of a 256-bit `pgo_` device token, never the plaintext credential.
+  /// Required while a TOKEN account is active; nullable once that device is
+  /// suspended or revoked so the credential can be destroyed without deleting
+  /// the actor referenced by historical redemptions and audit entries.
+  outletTokenHash       String?         @unique
+  /// When the current token was generated (initial issue or rotation). Kept
+  /// separately from `createdAt`, because rotation must be visible operationally.
+  outletTokenIssuedAt   DateTime?
+  /// Updated after a successful token exchange. Null means this particular
+  /// credential has never established a session.
+  outletTokenLastUsedAt DateTime?
+  /// Administrator accounts, and OUTLET_STAFF accounts bound to one outlet.
+  /// MANAGER and SUPPORT survive only on suspended historical actors.
+  role                  Role
+  /// Required for an active OUTLET_STAFF account and null for an administrator.
+  /// Already present before outlet accounts came back — it described historical
+  /// outlet actors — so this column is put back into use rather than added.
+  outletId              String?
   /// Incrementing this invalidates every outstanding access token for the user
   /// — the mechanism behind logout-everywhere, role change and offboarding.
-  tokenVersion Int        @default(1)
+  tokenVersion          Int             @default(1)
   /// AES-256-GCM ciphertext, never the raw TOTP secret — a stolen dump alone
   /// must not yield working second factors. See src/security/mfa.ts.
-  mfaSecret    String?
+  mfaSecret             String?
   /// Set when enrollment is confirmed by a valid code. Null with a non-null
   /// `mfaSecret` means enrollment was started and abandoned, which must not
   /// count as enrolled.
-  mfaEnrolledAt DateTime?
+  mfaEnrolledAt         DateTime?
   /// Period start of the last TOTP code this account used. A code at or before
   /// this is refused even when cryptographically valid, so one observed over a
   /// shoulder cannot be replayed inside its ~90-second window. §3 requires the
   /// member OTP to be single use; a staff second factor should not be weaker.
-  mfaLastUsedEpoch Int?
-  status       UserStatus @default(ACTIVE)
-  createdAt    DateTime   @default(now())
+  mfaLastUsedEpoch      Int?
+  status                UserStatus      @default(ACTIVE)
+  createdAt             DateTime        @default(now())
 
-  outlet         Outlet?      @relation(fields: [outletId], references: [id])
-  membersCreated Member[]     @relation("MemberCreatedBy")
-  redemptions    Redemption[]
-  benefitsEdited Benefit[]
+  outlet           Outlet?           @relation(fields: [outletId], references: [id])
+  membersCreated   Member[]          @relation("MemberCreatedBy")
+  redemptions      Redemption[]
+  benefitsEdited   Benefit[]
   mfaRecoveryCodes MfaRecoveryCode[]
-  requestsDecided  BenefitRequest[]
+  requestsClosed   BenefitRequest[]
 
   @@index([role])
   @@index([outletId])
@@ -177,48 +231,55 @@ model MfaRecoveryCode {
 }
 
 model Outlet {
-  id     String     @id @default(uuid())
-  name   String
-  kind   OutletKind
-  active Boolean    @default(true)
+  id          String     @id @default(uuid())
+  name        String
+  kind        OutletKind
+  active      Boolean    @default(true)
+  /// Where a request notice is emailed. Optional and separate from every device
+  /// token, so a hotel can point notices at a shared distribution list without
+  /// turning that mailbox into a credential. Null means
+  /// nobody is emailed and the outlet works from its own screen alone — which
+  /// is a supported configuration, not a misconfiguration.
+  notifyEmail String?
 
   staff       StaffUser[]
   redemptions Redemption[]
+  requests    BenefitRequest[]
 }
 
 /// Every value a member sees is a row here, never a constant in code (R14).
 /// Changing the dining discount from 25% to 20% must be a database update.
 model Benefit {
-  id              String   @id @default(uuid())
-  key             String   @unique
-  title           String
-  category        String
-  discountPct     Decimal  @db.Decimal(5, 2)
+  id               String      @id @default(uuid())
+  key              String      @unique
+  title            String
+  category         String
+  discountPct      Decimal     @db.Decimal(5, 2)
   /// e.g. "Retail products" at the spa, "Outside catering" for events.
-  secondaryLabel  String?
-  secondaryPct    Decimal? @db.Decimal(5, 2)
+  secondaryLabel   String?
+  secondaryPct     Decimal?    @db.Decimal(5, 2)
   /// e.g. { "6-12": 50, "0-6": 100 } — percentage off, by age band.
-  childRules      Json?
+  childRules       Json?
   /// Party-size cap (R5). 6 for dining, 2 for spa.
-  maxGuests       Int?
+  maxGuests        Int?
   /// Party-size floor (R6). Events require 20.
-  minGuests       Int?
+  minGuests        Int?
   reservationPhone String?
-  terms           String
-  published       Boolean  @default(false)
-  sortOrder       Int
+  terms            String
+  published        Boolean     @default(false)
+  sortOrder        Int
   /// Which kind of outlet honours this benefit, so an approved request reaches
   /// the spa's list and not the restaurant's. Null means every outlet sees it —
   /// the honest default for a benefit nobody has assigned yet, since a request
   /// nobody can see is worse than one seen too widely.
-  outletKind      OutletKind?
+  outletKind       OutletKind?
   /// Incremented on every change, with the editing user recorded, because
   /// "who changed the spa discount, and when" is a question that will be asked.
-  version         Int      @default(1)
-  updatedByUserId String?
-  updatedAt       DateTime @updatedAt
+  version          Int         @default(1)
+  updatedByUserId  String?
+  updatedAt        DateTime    @updatedAt
 
-  updatedBy   StaffUser?   @relation(fields: [updatedByUserId], references: [id])
+  updatedBy   StaffUser?       @relation(fields: [updatedByUserId], references: [id])
   redemptions Redemption[]
   requests    BenefitRequest[]
 
@@ -228,36 +289,36 @@ model Benefit {
 /// Immutable (R7). UPDATE and DELETE are revoked for the application role at
 /// the database level; a correction is a new row carrying `reversesId`.
 model Redemption {
-  id             String   @id @default(uuid())
-  memberId       String
-  benefitId      String
-  outletId       String
-  staffUserId    String
-  partySize      Int?
+  id                 String   @id @default(uuid())
+  memberId           String
+  benefitId          String
+  outletId           String
+  staffUserId        String
+  partySize          Int?
   /// Minor units (fils) as an integer. Never a float — money does not survive
   /// binary floating point.
-  billAmountMinor Int?
+  billAmountMinor    Int?
   /// The rate this member was actually given, copied from the benefit at the
   /// moment of recording. Not read back through `benefit` — R14 lets an
   /// administrator change that percentage at any time, and doing so must not
   /// rewrite what happened on a past visit.
-  discountPctApplied Decimal @db.Decimal(5, 2)
+  discountPctApplied Decimal  @db.Decimal(5, 2)
   /// Which revision of the benefit's terms and caps was in force, so the rate
   /// above can be traced to the edit that set it.
-  benefitVersion  Int
+  benefitVersion     Int
   /// Client-supplied; a retried submission must not double-record (R8).
-  idempotencyKey String   @unique
+  idempotencyKey     String   @unique
   /// Set on a reversing entry. The row it points at is never touched.
-  reversesId     String?  @unique
-  occurredAt     DateTime @default(now())
+  reversesId         String?  @unique
+  occurredAt         DateTime @default(now())
 
-  member    Member      @relation(fields: [memberId], references: [id])
-  benefit   Benefit     @relation(fields: [benefitId], references: [id])
-  outlet    Outlet      @relation(fields: [outletId], references: [id])
-  staffUser StaffUser   @relation(fields: [staffUserId], references: [id])
-  reverses  Redemption? @relation("Reversal", fields: [reversesId], references: [id])
-  reversedBy Redemption? @relation("Reversal")
-  request   BenefitRequest?
+  member     Member          @relation(fields: [memberId], references: [id])
+  benefit    Benefit         @relation(fields: [benefitId], references: [id])
+  outlet     Outlet          @relation(fields: [outletId], references: [id])
+  staffUser  StaffUser       @relation(fields: [staffUserId], references: [id])
+  reverses   Redemption?     @relation("Reversal", fields: [reversesId], references: [id])
+  reversedBy Redemption?     @relation("Reversal")
+  request    BenefitRequest?
 
   @@index([memberId, occurredAt])
   @@index([outletId, occurredAt])
@@ -265,41 +326,67 @@ model Redemption {
   @@index([occurredAt])
 }
 
-/// A member asks to use a benefit; a person decides; an outlet fulfils it.
+/// A member announces they are coming; the outlet confirms they arrived.
 ///
-/// The member never grants themselves anything — this row is the request, and
-/// only a staff decision moves it out of PENDING. Nothing here applies a
-/// discount either: fulfilment writes a Redemption, and that is still the only
-/// record of a benefit having been given.
+/// Nobody grants this. The guest is already entitled to every published benefit,
+/// so the row exists to tell one outlet to expect them — and nothing here
+/// applies a discount: confirmation writes a Redemption, and that remains the
+/// only record of a benefit having been given.
+///
+/// The three `closed*` fields map to columns originally named `decided*`, from
+/// when an administrator approved or declined these. The columns are unchanged
+/// so no historical row moves; only the names in code are honest about what the
+/// act now is.
 model BenefitRequest {
   id          String               @id @default(uuid())
   memberId    String
   benefitId   String
-  status      BenefitRequestStatus @default(PENDING)
+  /// Which outlet was told. Chosen by the guest, because a benefit is attached
+  /// to a *kind* of outlet and a hotel has several restaurants — so without
+  /// this, "the outlet" a notice belongs to is undefined. Nullable only for the
+  /// historical rows that predate the guest being asked.
+  outletId    String?
+  status      BenefitRequestStatus @default(SENT)
   requestedAt DateTime             @default(now())
   /// Free text from the member — "Friday evening, four of us". Advisory only;
-  /// no rule reads it.
+  /// no rule reads it. Excluded from the Sheets mirror, and see DECISIONS.md
+  /// before putting it in anything that leaves the system.
   note        String?
 
-  decidedAt       DateTime?
-  decidedByUserId String?
-  /// Shown to the member, so a decline is never silent.
-  decisionReason  String?
+  /// When the outlet first loaded a queue containing this row — the unread
+  /// marker behind the Messages tab, and the closest thing to a delivery
+  /// receipt that does not depend on email.
+  seenAt       DateTime?
+  /// When the notice was emailed onward, and how that went. Recorded rather
+  /// than inferred, so "the outlet says they never heard" is answerable.
+  notifiedAt   DateTime?
+  notifyStatus String?
 
-  /// The redemption this request authorised, set when an outlet fulfils it.
-  /// Unique: one approval cannot be spent twice, enforced by the database
-  /// rather than by the handler remembering to check.
+  /// When an outlet closed this out, which outlet account did it, and — for a
+  /// no-show — why. Shown to the member, so an unused notice is never silent.
+  closedAt       DateTime? @map("decidedAt")
+  closedByUserId String?   @map("decidedByUserId")
+  closedReason   String?   @map("decisionReason")
+
+  /// The redemption this notice produced, set when an outlet confirms use.
+  /// Unique: one notice cannot be spent twice, enforced by the database rather
+  /// than by the handler remembering to check.
   redemptionId String?   @unique
   fulfilledAt  DateTime?
 
   member     Member      @relation(fields: [memberId], references: [id])
   benefit    Benefit     @relation(fields: [benefitId], references: [id])
-  decidedBy  StaffUser?  @relation(fields: [decidedByUserId], references: [id])
+  outlet     Outlet?     @relation(fields: [outletId], references: [id])
+  closedBy   StaffUser?  @relation(fields: [closedByUserId], references: [id])
   redemption Redemption? @relation(fields: [redemptionId], references: [id])
 
-  /// The admin queue reads (PENDING, oldest first); an outlet reads
-  /// (APPROVED, today). Both are this index.
+  /// The admin monitor reads (SENT, oldest first). An outlet reads its own
+  /// (outletId, SENT) — hence the second index, which the first cannot serve
+  /// because `outletId` is not its leading column.
   @@index([status, requestedAt])
+  @@index([outletId, status, requestedAt])
+  /// Also the throttle: "has this member asked in the last minute" is a count
+  /// on this index rather than an in-memory bucket that a restart forgets.
   @@index([memberId, requestedAt])
 }
 

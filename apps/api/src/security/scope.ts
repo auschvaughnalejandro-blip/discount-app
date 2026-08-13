@@ -46,8 +46,27 @@ export function scopedWhere<T extends object>(base: T, scope: T): T {
 }
 
 /**
- * Members visible to this principal. Historical staff roles resolve nothing;
- * only an administrator reaches the dashboard.
+ * The outlet an outlet principal is bound to, or a fragment matching nothing.
+ *
+ * Every outlet scope routes through this rather than reading
+ * `principal.outletId` directly, so the "no outlet means no rows" rule is
+ * written once. `resolvePrincipal` already refuses to mint such a principal;
+ * this is the second lock on the same door.
+ */
+function outletBinding(principal: Principal): string | null {
+  return principal.role === 'OUTLET_STAFF' && principal.outletId !== undefined
+    ? principal.outletId
+    : null;
+}
+
+/**
+ * Members visible to this principal.
+ *
+ * An outlet account resolves **nothing** here, deliberately: it reads a member
+ * only through the scan/lookup path, which returns one exact match and is rate
+ * limited. Membership numbers are sequential and printed on cards, so any scope
+ * that let a counter credential query members at all would be an enumeration
+ * tool (§5).
  */
 export function scopeForMember(principal: Principal): Prisma.MemberWhereInput {
   if (principal.subjectType === 'MEMBER') {
@@ -62,7 +81,7 @@ export function scopeForMember(principal: Principal): Prisma.MemberWhereInput {
   }
 }
 
-/** Redemptions visible to this principal. */
+/** Redemptions visible to this principal. An outlet sees only its own. */
 export function scopeForRedemption(principal: Principal): Prisma.RedemptionWhereInput {
   if (principal.subjectType === 'MEMBER') {
     // A member reads their own history and nobody else's.
@@ -72,6 +91,10 @@ export function scopeForRedemption(principal: Principal): Prisma.RedemptionWhere
   switch (principal.role) {
     case 'ADMINISTRATOR':
       return {};
+    case 'OUTLET_STAFF': {
+      const outletId = outletBinding(principal);
+      return outletId === null ? MATCHES_NOTHING : { outletId };
+    }
     default:
       return MATCHES_NOTHING;
   }
@@ -80,7 +103,9 @@ export function scopeForRedemption(principal: Principal): Prisma.RedemptionWhere
 /**
  * Benefit requests visible to this principal.
  *
- * There is no counter application. Historical staff roles resolve nothing.
+ * An outlet sees the notices addressed to it. Not every notice of its own kind —
+ * the guest names one outlet, and a steakhouse has no business reading what
+ * somebody told the other restaurant.
  */
 export function scopeForBenefitRequest(principal: Principal): Prisma.BenefitRequestWhereInput {
   if (principal.subjectType === 'MEMBER') {
@@ -91,6 +116,10 @@ export function scopeForBenefitRequest(principal: Principal): Prisma.BenefitRequ
   switch (principal.role) {
     case 'ADMINISTRATOR':
       return {};
+    case 'OUTLET_STAFF': {
+      const outletId = outletBinding(principal);
+      return outletId === null ? MATCHES_NOTHING : { outletId };
+    }
     default:
       return MATCHES_NOTHING;
   }

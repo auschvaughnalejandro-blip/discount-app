@@ -45,24 +45,48 @@
   padding-inline: var(--gutter);
 }
 
-/* Room for the fixed tab bar, which is a different height on each screen that
-   carries one, plus the home indicator underneath it. */
-.shell[data-tabs='offers'] .shell-main {
-  padding-block-end: calc(var(--h-tabbar-offers) + var(--s-6) + env(safe-area-inset-bottom, 0px));
-}
-
+/**
+ * Room for the fixed tab bar, plus the home indicator underneath it.
+ *
+ * One height for both screens, which is not what the boards drew: they put an
+ * 82px bar on Offers against a 62px one on Profile. The bar is anchored to the
+ * bottom of the viewport, so a difference in height is a difference in where
+ * its *top edge* sits — and switching tabs dropped the whole bar 20px. Two
+ * boards disagreeing about a chrome element is a drawing artefact, not an
+ * instruction; the bar is the one fixed thing on screen and it has to hold
+ * still.
+ *
+ * Listing both values rather than matching on `[data-tabs]` alone: AppShell
+ * stamps `none` on the screens that carry no bar, so the bare attribute
+ * selector would reserve space on the auth screens too.
+ */
+.shell[data-tabs='offers'] .shell-main,
 .shell[data-tabs='profile'] .shell-main {
   padding-block-end: calc(var(--h-tabbar) + var(--s-6) + env(safe-area-inset-bottom, 0px));
-}
-
-.shell[data-tabs='offers'] .tabbar-link {
-  min-block-size: var(--h-tabbar-offers);
 }
 
 /* Nothing may push the page sideways — not a long benefit title, not a member
    name that does not wrap. */
 body {
   overflow-x: hidden;
+}
+
+/**
+ * The scrollbar's width is reserved whether or not there is one to draw.
+ *
+ * Every screen is a 390px column centred in whatever space it is given, and
+ * the tab bar centres its own row the same way. On a classic-scrollbar desktop
+ * that centre moves: Offers is long enough to scroll, Profile is not, so
+ * switching tabs took the scrollbar away and slid the entire column 7.5px —
+ * half its width — sideways. Measured, not assumed: 416.00 against 408.50.
+ *
+ * `stable` holds the gutter open on both, so the two screens share one centre
+ * and the cross-fade between them has nothing left to move. Phones are
+ * unaffected either way; their scrollbars are drawn over the content and take
+ * no space to begin with.
+ */
+html {
+  scrollbar-gutter: stable;
 }
 
 /* ── Boot ───────────────────────────────────────────────────────────────── */
@@ -268,6 +292,29 @@ body {
   color: var(--text-faint);
 }
 
+/**
+ * The outlet picker. Shares the note's box so the two read as one form rather
+ * than two unrelated controls that happen to be adjacent.
+ *
+ * `color-scheme: dark` is what makes the native dropdown list render dark to
+ * match — without it the closed control is styled and the open list is a bright
+ * white panel, which on this palette looks like a rendering fault.
+ */
+.request-outlet {
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  outline: none;
+  background: rgb(245 241 234 / 0.05);
+  color: var(--text);
+  color-scheme: dark;
+  font: inherit;
+}
+
+.request-outlet:focus {
+  border-color: var(--sand);
+}
+
 .request-error {
   margin-block-start: var(--s-3);
 }
@@ -323,18 +370,65 @@ body {
 }
 
 /**
- * The 160 × 160 block the board reserves for a scannable code.
+ * The block the board reserves for the scannable code — now holding one.
  *
- * Held on the light ground the design specifies and left empty. See
- * `CardModal.tsx` — the guest QR was removed from this product deliberately and
- * a test prevents it returning, so this is a reserved space rather than a
- * placeholder for a library that is about to be installed.
+ * The code is the same value printed on the back of the physical card, so a guest
+ * who would rather not open the app can hand the card over instead.
  */
 .code-block {
-  inline-size: 160px;
-  block-size: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/**
+ * The white margin around the symbol, and it is function rather than decoration.
+ *
+ * Two separate reasons this element is pure white and not `--paper`:
+ *
+ *   1. **Scanners need luminance contrast, not brand contrast.** Whatever the
+ *      design system does everywhere else, a tinted ground behind a QR lowers the
+ *      module-to-background ratio and a phone camera at arm's length starts
+ *      missing it. This survives any later argument about the palette.
+ *   2. **The library draws modules edge to edge.** The four-module quiet zone
+ *      scanners use to *find* the symbol is ours to supply, so cropping this
+ *      padding to save a few pixels breaks scanning while the code still looks
+ *      perfectly fine on screen.
+ *
+ * `client-invariants.test.ts` asserts both, because neither failure is visible by
+ * looking at it.
+ */
+.qr-quiet-zone {
+  padding: 12px;
   border-radius: var(--r-input);
-  background: var(--paper);
+  background: #fff;
+  line-height: 0;
+}
+
+.qr-quiet-zone svg {
+  display: block;
+  /* 240px minimum on a phone screen: below that each module gets small enough
+     that camera noise starts costing reads. */
+  inline-size: 216px;
+  block-size: 216px;
+}
+
+/**
+ * The payload as selectable text, small, under the image.
+ *
+ * A fallback for a broken camera — staff can read the membership number off the
+ * card instead, but a member whose screen is the only copy needs something to
+ * read out. Deliberately below the code and quiet: it is not the primary path.
+ */
+.code-fallback {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--t-meta);
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+  max-inline-size: 240px;
+  text-align: center;
+  user-select: all;
 }
 
 .modal-caption {

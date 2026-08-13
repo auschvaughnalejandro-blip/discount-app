@@ -6,11 +6,34 @@
 > outlet-staff, counter and verification-page stages below are superseded. They
 > remain in this file only as planning history; see the Stage 27 workstream and
 > DECISIONS.md for the active direction.
+>
+> **Partly reversed — 2026-08-12 (Stage 28).** There are now *three* user-facing
+> applications: the outlet screen came back, because the client wanted requests to
+> reach outlets directly and guests to be served without opening the app. Two
+> things the 2026-08-09 correction said still hold, and one does not:
+>
+> - **Still true:** manager and support do not exist, and `ADMINISTRATOR` remains
+>   the only account type a *named person* holds. An outlet account is a shared
+>   credential for a room.
+> - **No longer true:** "exactly two applications". `apps/web-outlet` exists.
+> - **Also reversed:** Q1's "there is no QR". The card has a scannable code on its
+>   back again, and it is static — see Stage 28 and DECISIONS.md.
+>
+> The counter and verification-page *stages* below remain superseded as written:
+> what was built is not those plans, it is Stage 28.
+>
+> **Authentication follow-up — 2026-08-12.** Stage 28 initially made Google
+> OAuth the outlet default, then briefly retained it as compatibility. Both are
+> superseded: one high-entropy token per physical device is now the only outlet
+> login. An outlet email is a notification destination only. The outlet hostname
+> is restricted to the staff/back-of-house VLAN and VPN through `INTERNAL_CIDR`
+> (never guest Wi-Fi; cellular is refused), while the device token remains the
+> credential.
 
-Last updated: 2026-07-30
-Status: stages 0–14 complete; **16, 17, 18 and 19 now also complete**. 313 tests
-passing. Stage 15's decisions are partly answered (Q1, Q5, Q6 closed; Q11 open) —
-see PROGRESS.md and DECISIONS.md. Remaining: 20, 21, 22, 23, 24.
+Last updated: 2026-08-12
+Status: stages 0–14, 16–19 and 25–28 complete. Stage 15's decisions are partly
+answered (Q1, Q5, Q6 closed; Q11 open) — see PROGRESS.md and DECISIONS.md.
+Remaining: 20, 21, 22, 23, 24.
 
 A separate security-hardening plan covering Stage 20 in more detail lives at
 `~/.claude/plans/can-you-implement-a-agile-flurry.md`. It also adds audit-log
@@ -291,8 +314,8 @@ screen before calling the stage done.
 # 4. Stage 18 — SMS delivery
 
 Right now `POST /auth/member/request-otp` hashes and stores a code and sends it
-nowhere. In development it prints to the terminal (`DEV_OTP_ECHO`). **No member
-can sign in without this stage.**
+nowhere unless `OTP_DELIVERY_CHANNEL=smtp` mails it. **No member can sign in
+without this stage.**
 
 **Provider.** Twilio to start — best documentation, works from anywhere, one
 afternoon to integrate. Regional alternatives worth pricing for volume:
@@ -428,7 +451,7 @@ is number three, orchestration is a liability, not an asset.
 Internet
    ↓ (443, TLS via Caddy + Let's Encrypt)
 Caddy  ──→  my.<domain>       →  web-member static bundle
-       ──→  verify.<domain>   →  web-verify static bundle
+       ──→  outlet.<domain>   →  web-outlet static bundle (staff/VPN only)
        ──→  admin.<domain>    →  web-admin static bundle
        ──→  api.<domain>      →  Fastify (reverse proxy)
                                    ↓
@@ -460,8 +483,8 @@ from where**. There are three audiences and they need three different exposures:
 | Surface | Who | Reachable from | Why |
 |---|---|---|---|
 | Member app + its API routes | Members | **Anywhere** | They are not at the hotel |
-| Verification page | Outlet staff | **Hotel network only** | Staff are at a counter, by definition |
-| Admin dashboard + `/admin/*` | Managers, owner | **Hotel network or VPN** | The membership list |
+| Outlet screen | Counter devices | **Staff VLAN or VPN** | Guest Wi-Fi is not a staff network; cellular is refused |
+| Admin dashboard + `/admin/*` | Administrators | **Staff VLAN or VPN** | The membership list |
 
 One API process still serves all three. The separation is done at the reverse
 proxy in front of it, by hostname and source address:
@@ -474,7 +497,7 @@ proxy in front of it, by hostname and source address:
                     └──────┬───────┘
    my.<domain>  ───────────┤  public — the member app (static bundle)
    api.<domain> ───────────┤  public — but /admin/* IP-restricted (see below)
-   verify.<domain> ────────┤  hotel network + VPN only
+   outlet.<domain> ────────┤  staff network + VPN only
    admin.<domain> ─────────┤  hotel network + VPN only
                            │
                     ┌──────┴───────┐
@@ -496,23 +519,19 @@ Restricting a hostname in Caddy is a few lines — `@internal remote_ip` plus a
    restricted one. The API talks to it over loopback or a private network. This
    is the single most common way a system like this leaks.
 
-### The consequence for outlet-staff MFA
+### The outlet boundary has two independent layers
 
-Stage 19 exempted `OUTLET_STAFF` from MFA, following §3's "MFA for any staff
-account that can reach more than the verification page." **That exemption assumes
-the verification page is not on the open internet.**
+`outlet.<domain>` imports the same edge `internal_only` rule as the dashboard.
+`INTERNAL_CIDR` must contain the staff/back-of-house VLAN and VPN, not the guest
+Wi-Fi range merely because it is inside the hotel. A tablet on cellular is
+outside the boundary and receives 403 by design.
 
-Password-only authentication, on a public endpoint, reaching member records, is a
-materially worse position than the one that decision was made in. So:
-
-- If `verify.<domain>` is restricted to the hotel network — the exemption stands,
-  and §3's named-accounts-plus-shift-expiry treatment is proportionate.
-- If it ends up public for any reason — **extend MFA to `OUTLET_STAFF`.** It is a
-  one-line change (`MFA_REQUIRED_ROLES` in `src/security/mfa.ts`), and the
-  reasoning that justified the exemption no longer holds.
-
-Decide this deliberately at deploy time rather than discovering later which of
-the two you ended up in.
+That network check is defence in depth, not identity. Every physical station has
+its own 256-bit random token, stored only as a digest and exchanged once for a
+short access token plus rotating httpOnly refresh session. A copied token is
+rotated; a lost or retired device is irreversibly revoked; both actions invalidate
+existing sessions. This is the only outlet authentication path; an outlet email
+is used only for best-effort notice delivery.
 
 ## The deployment gotcha that will silently break R7
 
@@ -849,3 +868,81 @@ mechanism underneath it is already finished and tested, and it converts "paste
 this string into that box" into something you can demonstrate with a phone in
 your hand. That demo is what makes Stage 15's conversation with the client
 productive — and Stage 15 is what unblocks everything else.
+
+---
+
+# Stage 28 — Outlet fulfilment (2026-08-12) — **done**
+
+Two changes the client's IT asked for, built together because the second is only
+useful once the first exists. Full reasoning in DECISIONS.md; this is the index.
+
+## What changed
+
+**A request stopped being a petition.** A guest is entitled to every published
+benefit the moment they join, so a request now tells one outlet to expect them and
+nothing more. That outlet confirms the visit or records that it never happened.
+`SENT → FULFILLED`, with `NOT_USED` as the other ending; the three old statuses
+survive on historical rows only.
+
+**Outlets got their own screen** (`apps/web-outlet`, port 5176). Its only
+authentication is one high-entropy token per physical device, exchanged for the
+ordinary short access token and rotating httpOnly refresh session. It shows who
+is expected, confirms or closes each notice, and scans the code on the back of a
+member's card. It can reach nothing else — no member list, no other outlet's
+work, no report. An optional outlet email receives notices only and cannot sign
+in.
+
+**The card has a QR again**, static because print cannot rotate. Q1 reversed.
+
+**WhatsApp was rejected** on the client's own conclusion. Email plus the screen.
+
+## Where the work landed
+
+| Area | Files |
+|---|---|
+| Schema | `prisma/schema.prisma`, 3 migrations from `20260812090000` |
+| Request flow | `routes/requests.ts`, `plugins/request-expiry.ts` |
+| Shared recording | `redemptions/record.ts` — new, called by both surfaces |
+| Outlet surface | `routes/outlet.ts`, `security/outlet-login-token.ts` |
+| Card code | `security/identity-codes.ts`, `security/verification-session.ts` |
+| Outlet management | `routes/admin-outlets.ts`, admin **Outlets** section |
+| Clients | `apps/web-outlet` (new), member card + picker, admin monitor |
+| Tests | `requests.test.ts` rewritten; `outlet-scan.test.ts`, `identity-codes.test.ts` new |
+
+## Two pre-existing blockers cleared on the way
+
+Both were carried in deliberately by the previous commit and would have looked
+like this work breaking things:
+
+- **`publisher.ts:250` typecheck failure** — a real narrowing gap (the sheet's id
+  was checked for null, the sheet itself never was). The production image builds.
+- **The test suite inheriting `OTP_DELIVERY_CHANNEL` from a developer's `.env`** —
+  25 failures that were about local mail configuration rather than the code.
+  `test/setup.ts` now pins it.
+
+## Authentication follow-up completed
+
+- Admin → **Outlets** issues a device credential once, retains only its SHA-256
+  digest, shows issued/last-used state, rotates a credential and irreversibly
+  revokes a device. Rotation and revocation also kill derived refresh sessions.
+- The outlet client makes this token primary, resumes from its httpOnly cookie
+  without a login flash, and logs out server-side. Raw tokens are never persisted
+  in web storage or placed in URLs.
+- `outlet.<domain>` is restricted to staff/VPN `INTERNAL_CIDR` ranges. Guest
+  Wi-Fi is excluded and cellular is refused; this network rule remains secondary
+  to the device credential.
+- Local and production login use the same Admin-issued `pgo_…` credential and
+  `/outlet/auth/token` exchange. There is no development session-bundle helper.
+
+## What Stage 28 did not do
+
+- **The camera is unexercised on real counter hardware**, because `getUserMedia`
+  needs a secure context and there is no TLS yet. This makes Stage 21 a
+  prerequisite for accepting the scan rather than something that follows it.
+- **No printable card back.** The code is in the app and the API returns it, but
+  producing the artwork a printer receives — per member, or as a batch — is not
+  built. Until it is, the physical cards carry nothing scannable. This is the
+  largest remaining gap in the feature as the client described it.
+- **Arabic/RTL** remains untouched, and the outlet screen adds a third surface to
+  it. Its layout uses logical properties throughout, so the cost is the same shape
+  as the other two: cheap UI, and a translation table for benefit content.

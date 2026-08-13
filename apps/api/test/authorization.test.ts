@@ -36,8 +36,14 @@ let app: FastifyInstance;
 let env: Env;
 const ownerPrisma = new PrismaClient({ datasourceUrl: ownerUrl });
 
-const RETIRED_ROLES = ['MANAGER', 'OUTLET_STAFF', 'SUPPORT'] as const satisfies readonly Role[];
-const ALL_ROLES = ['ADMINISTRATOR', ...RETIRED_ROLES] as const satisfies readonly Role[];
+/**
+ * MANAGER and SUPPORT only. `OUTLET_STAFF` used to be here and is live again —
+ * the outlet screen signs in as one. The retired set is what must stay unusable
+ * even holding a validly signed token.
+ */
+const RETIRED_ROLES = ['MANAGER', 'SUPPORT'] as const satisfies readonly Role[];
+const LIVE_ROLES = ['ADMINISTRATOR', 'OUTLET_STAFF'] as const satisfies readonly Role[];
+const ALL_ROLES = [...LIVE_ROLES, ...RETIRED_ROLES] as const satisfies readonly Role[];
 
 beforeAll(async () => {
   env = loadEnv();
@@ -127,21 +133,34 @@ const EXPECTED_ROLE_ACCESS: Record<Permission, readonly Role[]> = {
   'members:update': ['ADMINISTRATOR'],
   'members:suspend': ['ADMINISTRATOR'],
   'members:issue-claim': ['ADMINISTRATOR'],
+  // The card-print export. Administrator only, and deliberately not implied by
+  // `reports:export` — that file carries membership numbers and no names, this
+  // one has to carry names because the name is what gets printed on the card.
+  'members:export-cards': ['ADMINISTRATOR'],
   'benefits:read-published': [],
   'benefits:read-all': ['ADMINISTRATOR'],
   'benefits:manage': ['ADMINISTRATOR'],
-  // Only a member asks for a benefit. No staff role holds this: an approval an
-  // administrator both raised and granted has nobody to answer for it.
+  // Only a member announces themselves. No staff role holds this.
   'requests:create': [],
+  // Read-only for an administrator now: the outlets close their own notices out,
+  // and there is no `requests:decide` because nothing decides anything.
   'requests:read': ['ADMINISTRATOR'],
-  'requests:decide': ['ADMINISTRATOR'],
-  // Whoever can approve can mark used. Splitting those between two roles would
-  // leave a queue that one person fills and nobody can finish.
+  // The outlet surface, and only the outlet. An administrator deliberately holds
+  // none of these: granting them would mean a dashboard session could work a
+  // queue it cannot see the room for, and the dashboard has its own recording
+  // route with an explicit outlet field.
+  'outlet:queue': ['OUTLET_STAFF'],
+  'outlet:fulfil': ['OUTLET_STAFF'],
+  'outlet:resolve': ['OUTLET_STAFF'],
+  // Conversely, an outlet account holds none of these. `redemptions:record` in
+  // particular: an outlet records through its own route, where the outlet is
+  // taken from the account rather than the request body.
   'redemptions:record': ['ADMINISTRATOR'],
   'redemptions:list': ['ADMINISTRATOR'],
   'redemptions:reverse': ['ADMINISTRATOR'],
   'reports:read': ['ADMINISTRATOR'],
   'reports:export': ['ADMINISTRATOR'],
+  'outlets:manage': ['ADMINISTRATOR'],
   'staff:manage': ['ADMINISTRATOR'],
   'staff:self': ['ADMINISTRATOR'],
   'member:self': [],
@@ -218,17 +237,13 @@ describe('the matrix holds over HTTP, not only in the permission table', () => {
       probe.get('/probe/members', { config: { permission: 'members:list' } }, async () => ({ ok: true }));
       await probe.ready();
 
-      const outlet =
-        role === 'OUTLET_STAFF'
-          ? await ownerPrisma.outlet.findFirstOrThrow({ where: { active: true } })
-          : null;
       const retired = await ownerPrisma.staffUser.create({
         data: {
           fullName: `Retired ${role}`,
           email: `authorization-retired-${role.toLowerCase()}-${Date.now()}@pgp.test`,
           passwordHash: 'not-used-by-this-test',
           role,
-          outletId: outlet?.id ?? null,
+          outletId: null,
           // The database permits retired roles only as suspended historical
           // identities. They must remain unusable even with an old valid JWT.
           status: 'SUSPENDED',
@@ -466,5 +481,86 @@ describe('scopeFor puts the restriction in the query, not after it', () => {
     expect(composed).toEqual({
       AND: [{ id: 'someone-elses-id' }, { id: 'caller-own-id' }],
     });
+  });
+});
+
+describe('protected responses are never stored by client or intermediary caches', () => {
+  async function memberToken(): Promise<string> {
+    const member = await ownerPrisma.member.findUniqueOrThrow({
+      where: { memberNumber: 'PG-0003' },
+    });
+    return issueAccessToken({
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE_MEMBER,
+      subject: member.id,
+      subjectType: 'MEMBER',
+      tokenVersion: member.tokenVersion,
+      ttlSeconds: 300,
+    });
+  }
+
+  async function administratorToken(): Promise<string> {
+    const staff = await ownerPrisma.staffUser.findFirstOrThrow({
+      where: { role: 'ADMINISTRATOR', status: 'ACTIVE' },
+    });
+    return issueAccessToken({
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE_STAFF,
+      subject: staff.id,
+      subjectType: 'STAFF',
+      role: 'ADMINISTRATOR',
+      tokenVersion: staff.tokenVersion,
+      ttlSeconds: 300,
+    });
+  }
+
+  it('marks a member profile and redemption history no-store', async () => {
+    const token = await memberToken();
+
+    for (const path of ['/member/me', '/member/me/redemptions']) {
+      const response = await request(app.server)
+        .get(path)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(response.status, path).toBe(200);
+      expect(response.headers['cache-control'], path).toBe('no-store');
+      expect(response.headers['pragma'], path).toBe('no-cache');
+    }
+  });
+
+  it('also marks rejected protected responses no-store', async () => {
+    const response = await request(app.server).get('/member/me');
+
+    expect(response.status).toBe(401);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['pragma']).toBe('no-cache');
+  });
+
+  it('marks staff responses no-store too', async () => {
+    const response = await request(app.server)
+      .get('/admin/members')
+      .set('Authorization', `Bearer ${await administratorToken()}`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['pragma']).toBe('no-cache');
+  });
+
+  it('keeps published benefits cacheable for the offline member app', async () => {
+    const response = await request(app.server)
+      .get('/benefits')
+      .set('Authorization', `Bearer ${await memberToken()}`);
+
+    expect(response.status).toBe(200);
+    expect(String(response.headers['cache-control'] ?? '')).not.toContain('no-store');
+    expect(response.headers['pragma']).toBeUndefined();
+  });
+
+  it('does not impose authenticated cache policy on public routes', async () => {
+    const response = await request(app.server).get('/health');
+
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBeUndefined();
+    expect(response.headers['pragma']).toBeUndefined();
   });
 });

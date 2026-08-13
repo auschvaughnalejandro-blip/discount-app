@@ -82,7 +82,21 @@ export default defineConfig({
             },
           },
           {
-            // The member's own profile and history, same reasoning.
+            /**
+             * The member's own profile and history, same reasoning — with one
+             * extra consideration the benefits rule does not have.
+             *
+             * The history is written by an *outlet*, at the counter, after this
+             * app loaded. So the member's copy can be wrong while the member is
+             * standing there looking at it, and a cached response would keep it
+             * wrong. `api.redemptions(true)` therefore asks with a query string,
+             * and the `$` below is what lets that through: a URL carrying a
+             * search string does not match this pattern, so it never reaches
+             * this cache and always goes to the network.
+             *
+             * Dropping the `$` would silently restore the stale history this was
+             * written to prevent. `client-invariants.test.ts` holds it.
+             */
             urlPattern: /\/api\/member\/me(\/redemptions)?$/,
             handler: 'NetworkFirst',
             options: {

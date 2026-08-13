@@ -125,7 +125,7 @@ afterAll(async () => {
 });
 
 describe('§4 — the refresh token is a cookie no script can read', () => {
-  it('sets httpOnly, SameSite=Strict, and scopes it to the refresh endpoint', () => {
+  it('sets httpOnly, SameSite=Strict, and scopes it to the auth namespace', () => {
     expect(signInHeader, 'signing in set no refresh cookie').toBeDefined();
 
     // Without this the cookie is readable by `document.cookie`, and the whole
@@ -137,7 +137,11 @@ describe('§4 — the refresh token is a cookie no script can read', () => {
     expect(signInHeader).toMatch(/SameSite=Strict/i);
 
     // A cookie sent to every route is a cookie every route could be tricked
-    // into acting on. Exactly one endpoint reads this.
+    // into acting on. Refresh and logout are siblings, so `/api/auth` is their
+    // narrowest common browser-visible path; only those handlers read it. Caddy
+    // strips `/api` before Fastify handles `/auth/*`, so using the internal path
+    // would leave a real browser with a cookie it never sends.
+    expect(REFRESH_COOKIE_PATH).toBe('/api/auth');
     expect(signInHeader).toMatch(new RegExp(`Path=${REFRESH_COOKIE_PATH}`, 'i'));
   });
 

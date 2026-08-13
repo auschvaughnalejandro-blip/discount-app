@@ -61,6 +61,33 @@ const authorizationPlugin: FastifyPluginAsync = async (app) => {
     }
   });
 
+  /**
+   * Authenticated responses can contain membership records, outlet queues, or
+   * administrator reports. Neither a browser cache nor a shared intermediary
+   * may retain them after the session that requested them has ended.
+   *
+   * This is attached to the declared permission rather than to a list of URLs,
+   * so a newly-added protected route inherits the rule automatically. Published
+   * benefits are the one deliberate exception: their response is identical for
+   * every member and the installed member app keeps it for offline reading.
+   *
+   * `Pragma` covers older HTTP/1.0 clients and proxies. `Cache-Control` remains
+   * the authoritative directive for current clients.
+   */
+  app.addHook('onSend', async (request, reply, payload) => {
+    const { permission } = request.routeOptions.config ?? {};
+    if (
+      permission !== undefined &&
+      isRoutePermission(permission) &&
+      permission !== 'public' &&
+      permission !== 'benefits:read-published'
+    ) {
+      reply.header('Cache-Control', 'no-store');
+      reply.header('Pragma', 'no-cache');
+    }
+    return payload;
+  });
+
   app.addHook('preHandler', async (request) => {
     // No route matched this path. There is nothing to authorize, and the
     // not-found handler must be allowed to answer: a 403 here would both be

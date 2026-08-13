@@ -155,6 +155,76 @@ main > section > h3 {
   border-radius: 0;
 }
 
+/* Outlet management has exactly two operational concepts: the address that
+   receives notices and the devices whose private tokens can sign in. */
+.outlet-panel-body {
+  display: grid;
+  gap: var(--s-6);
+  padding: var(--s-4);
+}
+
+.outlet-signin-section {
+  display: grid;
+  gap: var(--s-4);
+  min-inline-size: 0;
+}
+
+.outlet-signin-section h4 {
+  margin: 0;
+  font-size: var(--f-md);
+  font-weight: var(--fw-semibold);
+}
+
+.outlet-signin-section h4 + .row-secondary {
+  margin-block-start: var(--s-1);
+}
+
+.outlet-device-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--s-3);
+}
+
+.outlet-device-form .field {
+  flex: 1 1 18rem;
+  margin: 0;
+}
+
+.device-actions,
+.device-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+/* The secret is deliberately selectable even though a Copy button is present:
+   clipboard permission may be unavailable on a locked-down hotel workstation. */
+.device-token > div {
+  display: grid;
+  gap: var(--s-3);
+  min-inline-size: 0;
+  flex: 1;
+}
+
+.device-token p {
+  margin: 0;
+}
+
+.device-token output {
+  display: block;
+  padding: var(--s-3);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-surface-sunken);
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--f-sm);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 /* ── KPI row ────────────────────────────────────────────────────────────
    The coloured-border stat tiles from the reference. `auto-fit` means four
    tiles on a desktop, two on a tablet and one on a phone with no breakpoints

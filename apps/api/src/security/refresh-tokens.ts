@@ -46,8 +46,11 @@ export interface IssueRefreshTokenInput {
   ttlSeconds: number;
 }
 
+/** The subset shared by PrismaClient and an interactive transaction client. */
+type RefreshTokenWriter = Pick<PrismaClient, 'refreshToken'>;
+
 export async function issueRefreshToken(
-  prisma: PrismaClient,
+  prisma: RefreshTokenWriter,
   input: IssueRefreshTokenInput,
 ): Promise<IssuedRefreshToken> {
   const token = generateOpaqueToken();

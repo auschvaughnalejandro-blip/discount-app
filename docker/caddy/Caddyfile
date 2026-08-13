@@ -43,8 +43,11 @@
 		# ever needs 'unsafe-inline' here, that is a signal to fix the build
 		# rather than to widen the policy.
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.{$DOMAIN}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
-		# Nothing here uses a microphone, geolocation or payment. The camera is
-		# granted only on the verification host, which overrides this.
+		# Nothing here uses a microphone, geolocation or payment, and only the
+		# outlet host uses a camera — it overrides this with its own policy. The
+		# member app is deliberately included in the denial: a guest presents a
+		# code, they never read one, so a camera permission prompt there would be
+		# unexplainable.
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		# Server banners tell an attacker what to look up.
 		-Server
@@ -97,6 +100,17 @@
 			not remote_ip {$INTERNAL_CIDR}
 		}
 		respond @admin_external "Not available from this network." 403 {
+			close
+		}
+
+		# The outlet screen and every outlet API path are staff-network only. This
+		# lives in the shared proxy so another public app hostname cannot become a
+		# bypass merely by proxying the same URL.
+		@outlet_external {
+			path /api/outlet/*
+			not remote_ip {$INTERNAL_CIDR}
+		}
+		respond @outlet_external "Not available from this network." 403 {
 			close
 		}
 
@@ -156,6 +170,35 @@ admin.{$DOMAIN} {
 	}
 }
 
+# ── outlet.<domain> — the counter screen ────────────────────────────────────
+#
+# Internal only. The per-device token remains the real credential; the network
+# rule is defence in depth and must name staff/VPN ranges rather than guest Wi-Fi.
+# A tablet on cellular is refused by design.
+outlet.{$DOMAIN} {
+	import internal_only
+	import static_security
+	import api_proxy
+
+	# The one host that needs a camera. `self` only — an embedded frame must not
+	# inherit it — and this deliberately overrides the blanket denial in
+	# `static_security`, which is imported above so this wins.
+	#
+	# Without this the scanner fails with a permissions-policy error rather than a
+	# permission prompt, which looks like a broken camera and is not.
+	header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=(), usb=()"
+
+	handle {
+		root * /srv/outlet
+		import spa
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
 # ── api.<domain> — the API ──────────────────────────────────────────────────
 # Public, because members need it. But not uniformly public.
 api.{$DOMAIN} {
@@ -171,6 +214,16 @@ api.{$DOMAIN} {
 		not remote_ip {$INTERNAL_CIDR}
 	}
 	respond @admin_external "Not available from this network." 403 {
+		close
+	}
+
+	# Direct access to api.<domain> must not bypass the restriction carried by
+	# the same-origin `/api` proxies.
+	@outlet_external {
+		path /outlet/*
+		not remote_ip {$INTERNAL_CIDR}
+	}
+	respond @outlet_external "Not available from this network." 403 {
 		close
 	}
 

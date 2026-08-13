@@ -47,14 +47,89 @@ interface SessionValue {
   error: string | null;
   /** A background offer refresh failed; kept separate from profile/history errors. */
   benefitsError: string | null;
+  /** A background history refresh failed; kept separate for the same reason. */
+  activityError: string | null;
   signIn: (tokens: { accessToken: string }) => void;
   signOut: () => void;
   /** Re-read the current offer configuration after an administrator changes it. */
   refreshBenefits: () => Promise<void>;
+  /**
+   * Re-read the redemption history after an outlet records a visit.
+   *
+   * The member is not the one who writes this. Staff record the visit on their
+   * own device, at the counter, while the member is standing there holding a
+   * phone that already loaded its history — so unlike every other value in here,
+   * this one goes stale through somebody else's action and nothing in the app
+   * would ever hear about it. Without an explicit re-read the visit is invisible
+   * until the member signs out and back in, which reads as the redemption not
+   * having been recorded at all.
+   */
+  refreshActivity: () => Promise<void>;
   setConsent: (channel: 'email' | 'sms', granted: boolean) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionValue | null>(null);
+
+/**
+ * The two fetches a screen may ask for again, as stable module-level functions.
+ *
+ * Defined out here so `useDedupedFetch` below receives the same identity on
+ * every render — a loader rebuilt per render would rebuild the refresh callback,
+ * which would restart the visibility listener effect on every render.
+ */
+const loadBenefits = (fresh: boolean) => api.benefits(fresh).then((result) => result.benefits);
+const loadRedemptions = (fresh: boolean) =>
+  api.redemptions(fresh).then((result) => result.redemptions);
+
+/**
+ * One in-flight request per resource, with the two guarantees the screens rely on.
+ *
+ * *Deduplication* — `Offers` and `Profile` each refresh their own data when they
+ * mount, moments after the initial `load` asked for the same thing. Sharing the
+ * pending promise means opening the app makes one request, not two.
+ *
+ * *Ordering* — a foreground refresh must not be swallowed by an older
+ * cache-eligible request, so it queues behind that request instead of joining
+ * it, and the sequence check makes the newest response the only one that reaches
+ * state. An earlier reply arriving late cannot overwrite a later one.
+ *
+ * Both rules were written for the benefit fetch and are needed verbatim by the
+ * history fetch. Keeping one copy is what stops the two drifting apart.
+ */
+function useDedupedFetch<T>(
+  load: (fresh: boolean) => Promise<T>,
+  apply: (value: T) => void,
+): (fresh?: boolean) => Promise<T> {
+  const inFlight = useRef<{ fresh: boolean; promise: Promise<T> } | null>(null);
+  const sequence = useRef(0);
+
+  return useCallback(
+    (fresh = false): Promise<T> => {
+      const current = inFlight.current;
+      if (current !== null && (!fresh || current.fresh)) return current.promise;
+
+      const waitForCurrent = current?.promise.then(
+        () => undefined,
+        () => undefined,
+      );
+      const ticket = ++sequence.current;
+      const pending = (waitForCurrent ?? Promise.resolve())
+        .then(() => load(fresh))
+        .then((result) => {
+          if (sequence.current === ticket) apply(result);
+          return result;
+        });
+      const request = { fresh, promise: pending };
+      inFlight.current = request;
+      const clearPending = () => {
+        if (inFlight.current === request) inFlight.current = null;
+      };
+      void pending.then(clearPending, clearPending);
+      return pending;
+    },
+    [load, apply],
+  );
+}
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>('resuming');
@@ -63,58 +138,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [redemptions, setRedemptions] = useState<Redemption[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [benefitsError, setBenefitsError] = useState<string | null>(null);
-  const benefitsRequest = useRef<{ fresh: boolean; promise: Promise<Benefit[]> } | null>(null);
-  const benefitsRequestSequence = useRef(0);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
-  const fetchBenefits = useCallback((fresh = false): Promise<Benefit[]> => {
-    const current = benefitsRequest.current;
-    if (current !== null && (!fresh || current.fresh)) return current.promise;
-
-    // A foreground refresh must not be swallowed by an older cache-eligible
-    // request. Queue it immediately after that request so the authoritative
-    // response is always the final one applied to state.
-    const waitForCurrent = current?.promise.then(
-      () => undefined,
-      () => undefined,
-    );
-    const sequence = ++benefitsRequestSequence.current;
-    const pending = (waitForCurrent ?? Promise.resolve())
-      .then(() => api.benefits(fresh))
-      .then((result) => {
-        if (benefitsRequestSequence.current === sequence) {
-          setBenefits(result.benefits);
-        }
-        return result.benefits;
-      });
-    const request = { fresh, promise: pending };
-    benefitsRequest.current = request;
-    const clearPending = () => {
-      if (benefitsRequest.current === request) benefitsRequest.current = null;
-    };
-    void pending.then(clearPending, clearPending);
-    return pending;
-  }, []);
+  const fetchBenefits = useDedupedFetch(loadBenefits, setBenefits);
+  const fetchRedemptions = useDedupedFetch(loadRedemptions, setRedemptions);
 
   const load = useCallback(async () => {
     try {
       // In parallel: none of the three depends on another, and on a hotel
       // network three round trips in series is the difference between a screen
       // that fills in and one that arrives.
-      const [me, , history] = await Promise.all([
-        api.me(),
-        fetchBenefits(),
-        api.redemptions(),
-      ]);
+      //
+      // The two fetches own their own state, so an older initial request can
+      // never overwrite a newer foreground refresh that overtook it.
+      const [me] = await Promise.all([api.me(), fetchBenefits(), fetchRedemptions()]);
       setProfile(me);
-      // `fetchBenefits` owns the benefit state so an older initial request can
-      // never overwrite a newer foreground refresh.
-      setRedemptions(history.redemptions);
       setError(null);
       setBenefitsError(null);
+      setActivityError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load your membership.');
     }
-  }, [fetchBenefits]);
+  }, [fetchBenefits, fetchRedemptions]);
 
   useEffect(() => {
     void (async () => {
@@ -142,6 +187,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setRedemptions(null);
     setError(null);
     setBenefitsError(null);
+    setActivityError(null);
   }, []);
 
   const refreshBenefits = useCallback(async () => {
@@ -153,27 +199,47 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, [fetchBenefits]);
 
+  const refreshActivity = useCallback(async () => {
+    try {
+      await fetchRedemptions(true);
+      setActivityError(null);
+    } catch (cause) {
+      // Deliberately not `setError`: the history already on screen is still
+      // worth reading, and a whole-screen alert over a failed background re-read
+      // would tell a member something is wrong with a membership that is fine.
+      setActivityError(cause instanceof Error ? cause.message : 'Could not refresh your visits.');
+    }
+  }, [fetchRedemptions]);
+
   useEffect(() => {
     if (status !== 'signed-in') return;
 
-    // A member may leave the installed app open for days. Re-read the current
-    // rates when they return to it so an administrator's edit does not wait for
-    // the next sign-in before it reaches the screen.
+    // A member may leave the installed app open for days. Re-read when they
+    // return to it, so neither an administrator's rate change nor a visit an
+    // outlet recorded at the counter waits for the next sign-in to appear.
+    //
+    // The history belongs here as much as the rates do, and for a stronger
+    // reason: the member cannot cause it to change from inside this app, so a
+    // foreground re-read is the *only* moment the app can learn about a
+    // redemption somebody else wrote.
+    const refreshAll = () => {
+      void refreshBenefits();
+      void refreshActivity();
+    };
+
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') {
-        void refreshBenefits();
+        refreshAll();
       }
     };
 
-    const refreshWhenOnline = () => void refreshBenefits();
-
     document.addEventListener('visibilitychange', refreshWhenVisible);
-    window.addEventListener('online', refreshWhenOnline);
+    window.addEventListener('online', refreshAll);
     return () => {
       document.removeEventListener('visibilitychange', refreshWhenVisible);
-      window.removeEventListener('online', refreshWhenOnline);
+      window.removeEventListener('online', refreshAll);
     };
-  }, [status, refreshBenefits]);
+  }, [status, refreshBenefits, refreshActivity]);
 
   const setConsent = useCallback(async (channel: 'email' | 'sms', granted: boolean) => {
     try {
@@ -198,9 +264,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       redemptions,
       error,
       benefitsError,
+      activityError,
       signIn,
       signOut,
       refreshBenefits,
+      refreshActivity,
       setConsent,
     }),
     [
@@ -210,9 +278,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       redemptions,
       error,
       benefitsError,
+      activityError,
       signIn,
       signOut,
       refreshBenefits,
+      refreshActivity,
       setConsent,
     ],
   );

@@ -1,0 +1,416 @@
+/**
+ * The outlet screen's styling.
+ *
+ * Designed for a different situation than either of the other two apps: a shared
+ * tablet, in a bright room, used by somebody standing up who has about three
+ * seconds. So the priorities are inverted from the member app's.
+ *
+ *   **Light, not dark.** The member app is a dark brand object held close in a
+ *   restaurant. This is a working screen under hotel lighting, often at an angle,
+ *   and dark-on-light stays legible where light-on-dark washes out.
+ *
+ *   **Large targets.** 44px minimum on anything tappable, because it will be
+ *   tapped with a thumb while holding a bill in the other hand.
+ *
+ *   **Two buttons per card, and they do not look alike.** Confirming a discount and
+ *   recording a no-show are irreversible in different directions, so the
+ *   destructive-by-accident case is the one made visually quieter.
+ *
+ * Brand tokens are borrowed from the programme palette so the screen is
+ * recognisably part of the same system, but nothing here tries to be the card.
+ */
+
+:root {
+  /* From the Privilege Guest palette. `--gold-line` is the only accent used. */
+  --base: #221c1b;
+  --gold-line: #b4954f;
+  --sand: #ecd7a3;
+
+  --ground: #f4f2ed;
+  --panel: #fff;
+  --ink: #221c1b;
+  --ink-muted: rgb(34 28 27 / 0.66);
+  --ink-faint: rgb(34 28 27 / 0.45);
+  --hairline: rgb(34 28 27 / 0.14);
+
+  --good: #2b6b5e;
+  --alert: #8b3527;
+
+  --r-input: 8px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--s-5) var(--s-4) var(--s-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.shell-centred {
+  min-block-size: 100vh;
+  justify-content: center;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding-block-end: var(--s-4);
+  border-block-end: 1px solid var(--hairline);
+}
+
+.head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.eyebrow {
+  margin: 0 0 var(--s-1);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold-line);
+}
+
+.lede {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.signin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  align-items: flex-start;
+  max-width: 28rem;
+}
+
+.signin h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+.token-signin {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-3);
+  inline-size: 100%;
+}
+
+.token-signin .field,
+.token-signin .btn {
+  inline-size: 100%;
+}
+
+.token-hint {
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: var(--s-1);
+  border-block-end: 1px solid var(--hairline);
+}
+
+.tab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: var(--s-3) var(--s-4);
+  /* Large enough to hit reliably standing up, with the label still readable. */
+  min-block-size: 44px;
+  font: inherit;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-block-end: 2px solid transparent;
+}
+
+.tab[aria-current='page'] {
+  color: var(--ink);
+  font-weight: 600;
+  border-block-end-color: var(--gold-line);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: -2px;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+/* Something that arrived since this screen was last looked at. A left edge rather
+   than a background tint, so it reads at a glance without making the text harder
+   to read in a bright room. */
+.card[data-new='true'] {
+  border-inline-start: 4px solid var(--gold-line);
+}
+
+.card-quiet {
+  background: none;
+  color: var(--ink-muted);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+/* The number staff read off the card in the guest's hand. Tabular so a column of
+   them lines up and a transposed digit is obvious. */
+.member-number {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.card-time {
+  font-size: 0.85rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-benefit {
+  margin: 0;
+}
+
+.card-note {
+  margin: 0;
+  padding: var(--s-3);
+  background: var(--ground);
+  border-radius: var(--r-input);
+  color: var(--ink-muted);
+  font-size: 0.95rem;
+}
+
+.card-terms {
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.card-terms summary {
+  cursor: pointer;
+  min-block-size: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.card-terms p {
+  margin: var(--s-2) 0 0;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.recent {
+  margin: var(--s-2) 0 0;
+  padding-inline-start: var(--s-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Controls ────────────────────────────────────────────────────────── */
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--base);
+  border-radius: var(--r-input);
+  background: var(--base);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  /* 44px: a thumb target on a device being held rather than sitting flat. */
+  min-block-size: 44px;
+  padding: var(--s-3) var(--s-5);
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: 2px;
+}
+
+/*
+ * The quieter of the two card actions.
+ *
+ * "Did not come" is not destructive — the entitlement survives — but it is the one
+ * a mis-tap should be less likely to reach, so it carries no fill.
+ */
+.btn-outline {
+  background: none;
+  color: var(--base);
+}
+
+.btn-quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--ink-muted);
+  font-weight: 400;
+  padding-inline: var(--s-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.field input {
+  font: inherit;
+  font-size: 1rem;
+  color: var(--ink);
+  padding: var(--s-3);
+  min-block-size: 44px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+  background: var(--panel);
+}
+
+.field input:focus-visible {
+  outline: 2px solid var(--gold-line);
+  outline-offset: -1px;
+}
+
+.lookup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-input);
+}
+
+/* ── Scanner ─────────────────────────────────────────────────────────── */
+
+.scanner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  align-items: flex-start;
+}
+
+.scanner-preview {
+  inline-size: 100%;
+  max-inline-size: 420px;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-input);
+  background: var(--base);
+  object-fit: cover;
+}
+
+/* ── Messages ────────────────────────────────────────────────────────── */
+
+.notice {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--ink-muted);
+}
+
+.notice-error {
+  color: var(--alert);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--s-5) var(--s-4);
+  background: var(--panel);
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-input);
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.resolved {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-block-start: var(--s-4);
+  border-block-start: 1px solid var(--hairline);
+}
+
+.resolved-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-3);
+  font-size: 1.1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

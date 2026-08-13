@@ -4,7 +4,6 @@ import { z } from 'zod';
 import type { Env } from '../config/env.js';
 import { writeAudit } from '../security/audit.js';
 import { logDeliveryOutcome } from '../notifications/code-sender.js';
-import { echoNoOtpForDevelopment, echoOtpForDevelopment } from '../security/dev-otp.js';
 import { normalizePhone } from '../security/phone.js';
 import { checkRateLimit } from '../security/rate-limit.js';
 import { verifyAgainstDummy, verifyPassword } from '../security/password.js';
@@ -168,14 +167,24 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     // (security-implementation.md §3 "Account enumeration"): a real Argon2
     // verification always runs, against either the account's own hash or a
     // fixed dummy hash, before any branch that could differ in shape returns.
-    const passwordOk = staff
-      ? await verifyPassword(body.password, staff.passwordHash)
-      : await verifyAgainstDummy();
+    //
+    // Outlet devices have no email or password hash; they use a separate
+    // high-entropy digest. Historical Google rows also have no password. Both
+    // still burn a dummy verification here, so row shape is not distinguishable
+    // by timing from "no such address".
+    const passwordOk =
+      staff && staff.passwordHash !== null
+        ? await verifyPassword(body.password, staff.passwordHash)
+        : await verifyAgainstDummy();
 
     if (
       !staff ||
       !passwordOk ||
       staff.status !== 'ACTIVE' ||
+      // Password sign-in is for administrators only. This explicit method/role
+      // gate avoids relying on a null hash to keep historical rows or token
+      // devices out of the dashboard login.
+      staff.authMethod !== 'PASSWORD' ||
       staff.role !== 'ADMINISTRATOR'
     ) {
       // §9: every authentication event. The email is not recorded — a failed
@@ -189,6 +198,37 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       });
 
       return reply.code(401).send({ error: 'invalid_credentials', message: 'Invalid credentials.' });
+    }
+
+    /**
+     * The one configuration in which a password alone completes sign-in.
+     *
+     * `STAFF_MFA_REQUIRED=false` is refused at boot when `NODE_ENV=production`
+     * (see config/env.ts), so this branch is unreachable on a live deployment —
+     * the check is restated here rather than assumed, because the cost of being
+     * wrong about it is single-factor access to every member's record.
+     *
+     * Audited distinctly from an ordinary success. "An administrator signed in"
+     * and "an administrator signed in without a second factor" are not the same
+     * event, and a trail that recorded them identically would hide the more
+     * interesting one.
+     */
+    if (!env.STAFF_MFA_REQUIRED && env.NODE_ENV !== 'production') {
+      await writeAudit(app.prisma, {
+        action: 'auth.mfa.skipped',
+        principal: { subjectId: staff.id, subjectType: 'STAFF', role: staff.role },
+        subjectType: 'StaffUser',
+        subjectId: staff.id,
+        metadata: { reason: 'STAFF_MFA_REQUIRED=false' },
+        ipAddress: request.ip,
+      });
+
+      const tokens = await completeStaffSignIn(app, env, { ...staff, role: 'ADMINISTRATOR' }, request.ip);
+      setRefreshCookie(reply, env, tokens.refreshToken, env.REFRESH_TOKEN_TTL_STAFF_SECONDS);
+      // `mfaRequired: false` rather than an absent field: the client branches on
+      // it, and a missing property that means "signed in" is the kind of shape a
+      // future edit silently inverts.
+      return reply.code(200).send({ mfaRequired: false, ...tokens });
     }
 
     // Password alone never yields an administrator token. A fresh account must
@@ -279,11 +319,19 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     // Suspended between password and second factor: no tokens. §3's "instant
     // revocation from the dashboard" has to hold inside this window too.
-    if (!staff || staff.status !== 'ACTIVE' || staff.role !== 'ADMINISTRATOR') {
+    if (
+      !staff ||
+      staff.status !== 'ACTIVE' ||
+      staff.role !== 'ADMINISTRATOR' ||
+      staff.email === null
+    ) {
       return { ok: false };
     }
 
-    return { ok: true, staff: { ...staff, role: 'ADMINISTRATOR' } };
+    return {
+      ok: true,
+      staff: { ...staff, email: staff.email, role: 'ADMINISTRATOR' },
+    };
   }
 
   /** One shape for every MFA rejection — never "wrong code" versus "expired". */
@@ -529,7 +577,6 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     if (phone && member && member.claimedAt !== null && member.status === 'ACTIVE') {
       const issued = await issueOtp(app.prisma, phone);
-      echoOtpForDevelopment(app.log, env, phone, issued.code);
 
       // Stage 18 (Q6). Delivered to the member's email, because the chosen
       // provider is SMTP — see notifications/code-sender.ts. The outcome is
@@ -544,20 +591,6 @@ const authRoutes: FastifyPluginAsync = async (app) => {
       };
       const outcome = await app.codeSender.send(delivery);
       logDeliveryOutcome(app.log, app.codeSender, delivery, outcome);
-    } else {
-      // The HTTP response below is identical either way; this line exists so
-      // the terminal is never silent when a code was asked for.
-      echoNoOtpForDevelopment(
-        env,
-        phone ?? body.phone,
-        !phone
-          ? 'that is not a usable phone number'
-          : !member
-            ? 'no member has that number'
-            : member.claimedAt === null
-              ? 'membership not activated yet - use the invitation code'
-              : 'membership is suspended',
-      );
     }
 
     // Identical response whether or not the number is registered — on a
@@ -646,7 +679,29 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     if (identity.subjectType === 'STAFF') {
       const staff = await app.prisma.staffUser.findUnique({ where: { id: identity.subjectId } });
-      if (!staff || staff.status !== 'ACTIVE' || staff.role !== 'ADMINISTRATOR') {
+      // Administrators and token-backed outlet devices both refresh here. MANAGER and SUPPORT
+      // do not: they survive as enum values on suspended historical rows, and a
+      // refresh token is a public-route credential, so this check is the one that
+      // has to refuse them rather than the permission matrix downstream.
+      //
+      // A non-token device, missing outlet, or closed outlet is refused too — the same rule
+      // resolvePrincipal applies, restated because a session that refreshes
+      // successfully and then fails every scoped query is worse than one that
+      // ends here.
+      const outlet =
+        staff?.role === 'OUTLET_STAFF' && staff.outletId !== null
+          ? await app.prisma.outlet.findUnique({
+              where: { id: staff.outletId },
+              select: { active: true },
+            })
+          : null;
+      const liveRole =
+        staff !== null &&
+        (staff.role === 'ADMINISTRATOR' ||
+          (staff.role === 'OUTLET_STAFF' &&
+            staff.authMethod === 'TOKEN' &&
+            outlet?.active === true));
+      if (!staff || staff.status !== 'ACTIVE' || !liveRole) {
         await revokeAllForSubject(app.prisma, identity.subjectId, identity.subjectType);
         clearRefreshCookie(reply, env);
         return reply.code(401).send({ error: 'invalid_refresh_token', message: 'Session expired.' });

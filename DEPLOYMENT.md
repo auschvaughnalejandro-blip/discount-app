@@ -12,7 +12,7 @@ Written to be followed in order. Stage numbers refer to `ROADMAP.md`.
 
 # 0. The shape of it
 
-Three things run. Two of them are static files.
+Four things run. Three of them are static files.
 
 ```
                          Internet
@@ -21,11 +21,12 @@ Three things run. Two of them are static files.
                      │    Caddy     │  TLS, routing, access control
                      └──────┬───────┘
     my.<domain>   ──────────┤   public          member app (static)
-    api.<domain>  ──────────┤   public          Fastify — /admin/* restricted
+    api.<domain>  ──────────┤   public          Fastify — staff routes restricted
+    outlet.<domain> ────────┤   internal only   outlet screen (static)
     admin.<domain>  ────────┤   internal only   dashboard (static)
                             │
                      ┌──────┴───────┐
-                     │  Fastify API │  one process, two audiences
+                     │  Fastify API │  one process, three audiences
                      └──────┬───────┘
                      ┌──────┴───────┐
                      │  PostgreSQL  │  never published, on any address
@@ -36,13 +37,24 @@ Three things run. Two of them are static files.
 plane, from another country. What is restricted is not "the backend" but which
 *routes* answer which *source addresses* — see §5.
 
+**The outlet screen is internal.** `INTERNAL_CIDR` must contain the hotel's
+staff/back-of-house VLAN and the VPN, not guest Wi-Fi. A counter tablet on
+cellular is refused by design; put it back on the staff network or VPN. This is
+defence in depth, not the credential: every physical counter device still needs
+its own high-entropy token, and losing one device does not expose another.
+
+**The outlet screen also needs TLS to do its main job.** `getUserMedia` refuses
+outside a secure context, so the camera does not work over plain HTTP at all.
+There is no configuration that changes this, and typing a membership number is
+the documented fallback.
+
 ---
 
 # 1. Before you touch a server
 
 These have lead times and block a launch more often than code does.
 
-- [ ] **A domain.** Three hostnames come off it (`my`, `api`, `admin`).
+- [ ] **A domain.** Four hostnames come off it (`my`, `api`, `admin`, `outlet`).
 - [ ] **A hosting account in a Doha region.** Azure Qatar Central or Google Cloud
       `me-central1`. §9 of the product definition is blunt about why in-region
       matters: the membership list is "a record of named, prominent individuals
@@ -50,6 +62,9 @@ These have lead times and block a launch more often than code does.
       there — regional coverage is thinner than in primary regions.
 - [ ] **A mail sender.** Gmail App Password works for a pilot (§6). A real SMS
       provider is the launch answer.
+- [ ] **The staff VLAN and VPN source ranges.** Do not use the hotel's public or
+      guest Wi-Fi range for `INTERNAL_CIDR`; verify a counter tablet actually
+      egresses through one of the ranges you intend to permit.
 - [ ] **A DPIA.** `SECURITY-REVIEW.md` records it as required before launch and
       explicitly not an engineering task.
 - [ ] **Privacy policy and terms, at a public URL.** The member profile screen
@@ -78,12 +93,13 @@ sudo usermod -aG docker "$USER"    # log out and back in
 
 ## DNS
 
-Three A records, all pointing at the VM:
+Four A records, all pointing at the VM:
 
 ```
 my.<domain>      A    <server-ip>
 api.<domain>     A    <server-ip>
 admin.<domain>   A    <server-ip>
+outlet.<domain>  A    <server-ip>
 ```
 
 Caddy obtains certificates over HTTP-01, so **DNS must resolve before the first
@@ -155,7 +171,6 @@ development values:
 openssl rand -hex 32   # JWT_SIGNING_KEY
 openssl rand -hex 32   # PASSWORD_PEPPER
 openssl rand -hex 32   # OTP_CODE_HMAC_SECRET
-openssl rand -hex 32   # VERIFICATION_SESSION_HMAC_SECRET
 openssl rand -hex 32   # MFA_SECRET_ENCRYPTION_KEY  (must be exactly 64 hex chars)
 ```
 
@@ -163,8 +178,7 @@ Settings that differ from development, and why:
 
 | Variable | Production value | Reason |
 |---|---|---|
-| `NODE_ENV` | `production` | Gates the dev OTP echo, among others |
-| `DEV_OTP_ECHO` | `false` | Printing passcodes to a log is the whole risk |
+| `NODE_ENV` | `production` | Stricter defaults across the service |
 | `OTP_DELIVERY_CHANNEL` | `smtp` | Otherwise no member can sign in |
 | `TRUST_PROXY` | `true` | **See below** |
 | `API_HOST` | `0.0.0.0` | So Caddy can reach it inside the compose network |
@@ -204,9 +218,70 @@ runs one reconciliation immediately and then at the configured interval. If the
 API is horizontally scaled, use one external scheduler instead; otherwise every
 replica will publish the same workbook.
 
-The API requires outbound HTTPS to Google's OAuth and Sheets endpoints. Failure
+The Sheets worker requires outbound HTTPS to Google's Sheets endpoints. Failure
 is isolated: application writes continue in PostgreSQL, the prior workbook stays
 visible, and the worker retries on its next interval.
+
+## Outlet sign-in — one token per device
+
+The outlet screen has no human password, email login or Google option. Its only
+credential is a separate, server-generated token for every physical tablet or
+counter computer. The API
+stores only its SHA-256 digest; the plaintext exists in one administrator response
+and must be copied to the intended device immediately. The standing token is
+exchanged for the same short-lived access token and rotating httpOnly refresh
+session used by the rest of the staff surface. It is never sent on queue, lookup
+or redemption requests.
+
+An outlet may separately have an **Email notices to** address. That address is a
+best-effort notification destination for new guest notices, not a `StaffUser`,
+login identifier, allowlist entry or recovery channel. Empty means the outlet
+works from its screen without email; it does not affect authentication.
+
+After the first administrator signs in:
+
+1. Open **Admin → Outlets** and choose the outlet.
+2. Under **Device sign-in**, enter a physical label such as *Spa reception iPad*
+   and press **Issue device token**.
+3. Copy the token from the one-time panel into the outlet screen. Do not put it in
+   `.env`, a ticket, a chat transcript or the device URL. It cannot be retrieved
+   later because the database has only its digest.
+4. Repeat for every physical device. Do not share one outlet-wide token: separate
+   rows are what let a lost tablet be disabled without taking the other counters
+   offline.
+
+The same panel is the lifecycle control:
+
+- **Rotate** when a token may have been copied or exposed. The old standing token
+  and every refresh session derived from it stop working; the replacement is
+  shown once.
+- **Revoke** when a device is lost, retired or reassigned. Revocation is one-way
+  and ends its sessions. A recovered device receives a newly issued row rather
+  than bringing a possibly copied token back to life.
+- **Last used** distinguishes a provisioned device that has never connected from
+  one in active service. Device labels become the outlet-level actor on immutable
+  redemption history, so name the station, not the person on shift.
+
+Test issuance, reload/resume, rotation and revocation before handover. A reload
+must resume through the secure cookie without asking for the standing token
+again; the rotated or revoked session must then fail on its next authenticated
+request.
+
+There is no development-only session minter or bypass. Local acceptance uses the
+same Admin-issued `pgo_…` token and `/outlet/auth/token` exchange as production,
+so a copied access/refresh bundle cannot be mistaken for a standing credential.
+
+## The card code secret
+
+`IDENTITY_CODE_HMAC_SECRET` keys the code printed on the back of every physical
+card and shown in the app.
+
+**Rotating it invalidates every printed card at once.** That is also the only
+recovery a printed credential has, so it is a deliberate trade — but it means the
+value must be in the secret manager and backed up before a print run, not
+generated casually at deploy time. §7 asks for a key management service; there is
+none in this build, and this is the same compromise already made for
+`PASSWORD_PEPPER`.
 
 ## `TRUST_PROXY` is not optional behind Caddy
 
@@ -228,13 +303,23 @@ Caddy does, and which a directly-exposed API does not.
 
 ## 5.2 What is internal
 
-`admin.<domain>`, and `/admin/*` on the public API host.
+`admin.<domain>`, `outlet.<domain>`, and both `/admin/*` and `/outlet/*` on the
+public API host.
 
-Set `INTERNAL_CIDR` in `.env` to the hotel's network range, plus your VPN range:
+Set `INTERNAL_CIDR` in `.env` to the hotel's staff network range, plus your VPN
+range:
 
 ```
 INTERNAL_CIDR=203.0.113.0/24 10.8.0.0/24
 ```
+
+Use the staff/back-of-house range, not guest Wi-Fi. Confirm this with hotel IT
+rather than assuming every address used inside the building is trusted. A tablet
+using cellular is outside these ranges and receives 403 by design; the remedy is
+the staff network or VPN, not widening `INTERNAL_CIDR` to a public carrier range.
+
+The per-device token remains the primary authentication control. The network
+rule reduces exposure and does not turn source IP into identity.
 
 **Restrict `/admin/*` on the API host as well as the dashboard's own hostname.**
 Restricting only the frontend leaves the endpoints it calls answering the whole
@@ -242,10 +327,11 @@ internet, and the restriction becomes decorative. The Caddyfile does both.
 
 ## 5.3 Every administrator account needs a second factor
 
-There is one hotel-facing account type: `ADMINISTRATOR`, and every such account
-requires MFA. Manager, support and outlet-staff accounts are not created or
-accepted by the application. Any legacy rows are suspended and retained only so
-historical redemptions keep their original attribution.
+Every named `ADMINISTRATOR` account requires MFA. `OUTLET_STAFF` is also live,
+but only as a labelled, outlet-scoped device principal authenticated by its
+one-time-issued token; it cannot reach the dashboard, member list, reports or
+another outlet's work. Historical MANAGER and SUPPORT rows remain suspended and
+inert so old redemptions keep their original attribution.
 
 ---
 
@@ -278,8 +364,9 @@ operation. That is suggested Stage 25 and it should land before launch, because
 Not a checklist to skim. Each of these has failed silently in a real system.
 
 ```bash
-# 1. TLS on all three hosts, valid certificate
-for h in my api admin; do
+# 1. TLS on all four hosts, valid certificate (403 is expected for internal
+#    hosts when this is run from outside; ssl_verify_result must still be 0)
+for h in my api admin outlet; do
   curl -sS -o /dev/null -w "$h %{http_code} %{ssl_verify_result}\n" \
     "https://$h.<domain>/"
 done
@@ -289,7 +376,9 @@ curl -sSI https://api.<domain>/health | grep -iE 'strict-transport|nosniff|frame
 
 # 3. The internal hosts refuse an outside address
 curl -sS -o /dev/null -w "%{http_code}\n" https://admin.<domain>/   # expect 403
+curl -sS -o /dev/null -w "%{http_code}\n" https://outlet.<domain>/  # expect 403
 curl -sS -o /dev/null -w "%{http_code}\n" https://api.<domain>/admin/members  # expect 403
+curl -sS -o /dev/null -w "%{http_code}\n" https://api.<domain>/outlet/me      # expect 403
 
 # 4. CORS does not answer a stranger
 curl -sSI -H 'Origin: https://evil.example' https://api.<domain>/health \
@@ -305,6 +394,13 @@ Then, by hand:
 - [ ] **R7 holds** — the raw `UPDATE` in §3 is refused.
 - [ ] **A member can sign in.** A real handset receives a real code.
 - [ ] **An administrator can complete MFA** and lands on the dashboard.
+- [ ] **A counter device can sign in with a newly issued token**, reload without
+      re-entering it, and reach only its own outlet. Rotate it and verify the old
+      token/session fails; then issue and revoke a disposable device and verify
+      that session fails too.
+- [ ] **The outlet boundary is real.** From guest Wi-Fi and cellular,
+      `outlet.<domain>` returns 403. From the staff VLAN or VPN it loads. Do not
+      accept “inside the hotel” as evidence if the test device is on guest Wi-Fi.
 - [ ] **The full Stage 13 acceptance journey passes against the deployed
       instance**, not just locally.
 - [ ] **No member name, phone or email appears in the container logs.** Grep for

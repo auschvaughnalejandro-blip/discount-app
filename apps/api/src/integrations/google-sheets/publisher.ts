@@ -233,11 +233,17 @@ export class GoogleSheetsPublisher {
 
     for (const [tableIndex, table] of snapshot.tables.entries()) {
       const sheet = refreshedByTitle.get(table.title);
-      const sheetId = sheet?.properties?.sheetId;
+      // Narrowed on the sheet itself rather than only on its id, so everything
+      // below can read `sheet.…` without re-testing. The id check alone left
+      // `sheet` possibly undefined, which is what the compiler was pointing at.
+      if (!sheet) {
+        throw new Error(`Google Sheets did not return the managed tab ${table.title}.`);
+      }
+      const sheetId = sheet.properties?.sheetId;
       if (sheetId === undefined || sheetId === null) {
         throw new Error(`Google Sheets did not return an ID for the managed tab ${table.title}.`);
       }
-      if (sheet?.properties?.sheetType !== undefined && sheet.properties.sheetType !== 'GRID') {
+      if (sheet.properties?.sheetType !== undefined && sheet.properties.sheetType !== 'GRID') {
         throw new Error(`The managed tab ${table.title} must be a normal grid worksheet.`);
       }
 

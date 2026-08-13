@@ -75,7 +75,13 @@
   --divider: rgb(245 241 234 / 0.1);
   --scrim: rgb(34 28 27 / 0.72);
 
-  --card-gradient: linear-gradient(135deg, #221c1b 0%, #4a4240 100%);
+  /* The membership card's ground, matched to the gradient inside
+     `/assets/card-face.svg` rather than approximated: the artwork runs its ramp
+     along (306.6, 486.6) over a 540 × 340 face, which is 147.8deg in CSS terms,
+     and holds the darkest value flat for the first tenth. It shows through in
+     the corners and for the moment before the face loads, so a 135deg guess
+     read as a seam against the artwork. */
+  --card-gradient: linear-gradient(147.8deg, #221c1b 0%, #221c1b 9%, #49413f 75%, #4a4240 100%);
 
   /* ── Type ──────────────────────────────────────────────────────────────
      Futura Std is a licensed Adobe face and no webfont file ships in this
@@ -147,8 +153,10 @@
 
   --h-input: 48px;
   --h-button: 52px;
+  /* One height on every screen that carries a bar. The boards drew 82px on
+     Offers, but the bar sits against the bottom of the viewport, so a second
+     height only moves its top edge when you change tabs. */
   --h-tabbar: 62px;
-  --h-tabbar-offers: 82px;
 
   /* ── Semantic remaps ───────────────────────────────────────────────────
      Everything @pgp/ui's base.css styles, pointed at the brand palette. */

@@ -44,10 +44,16 @@ import type { Env } from '../config/env.js';
  * it is the only one an administrator has ever been able to see.
  */
 export type CodePurpose = 'sign-in' | 'activation' | 'invitation';
+
+/**
+ * `request-approved` is gone, because nothing approves a request any more — the
+ * guest is already entitled and the notice only tells an outlet to expect them.
+ * `request-declined` became `request-not-used`, which is a different fact: not a
+ * refusal, just a visit that did not happen.
+ */
 export type LifecyclePurpose =
   | 'request-submitted'
-  | 'request-approved'
-  | 'request-declined'
+  | 'request-not-used'
   | 'redemption-recorded';
 
 export interface CodeDelivery {
@@ -78,7 +84,41 @@ export interface LifecycleDelivery {
   savedMinor?: number | null;
 }
 
+/**
+ * A notice sent to an outlet, telling them a guest is coming.
+ *
+ * ## Why this one may carry identifying detail
+ *
+ * Every other delivery in this file deliberately carries no membership number,
+ * name or benefit — §9 treats the membership list as a record of named prominent
+ * individuals, and a member's own inbox is not a place to restate who they are.
+ *
+ * This message is different in audience, not in principle. It goes to an internal
+ * operational mailbox at the hotel, and it is useless without the benefit and the
+ * number: an outlet cannot honour "somebody is coming for something". So it
+ * carries the membership **number**, which is what staff already read off the
+ * card, and never the member's name.
+ *
+ * The note is the guest's own free text and is the one field a hotel may decide
+ * not to send onward at all — `includeNote` is that decision, made by
+ * configuration rather than by this template. See DECISIONS.md.
+ */
+export interface OutletDelivery {
+  /** The outlet's notification address. `null` is a real, supported case. */
+  email: string | null;
+  purpose: 'outlet-request';
+  outletName: string;
+  /** Never the member's name (§9). */
+  memberNumber: string;
+  benefitTitle: string;
+  discountPct: string;
+  note?: string;
+  includeNote: boolean;
+}
+
 export type MemberDelivery = CodeDelivery | LifecycleDelivery;
+
+export type AnyDelivery = MemberDelivery | OutletDelivery;
 
 export type DeliveryOutcome =
   | { delivered: true }
@@ -90,14 +130,13 @@ export type DeliveryOutcome =
 
 export interface CodeSender {
   readonly name: string;
-  send(delivery: MemberDelivery): Promise<DeliveryOutcome>;
+  send(delivery: AnyDelivery): Promise<DeliveryOutcome>;
 }
 
 /**
  * The sender used when nothing is configured.
  *
- * Not an error: for stages 0–17 this was the only state, and the development
- * terminal echo (`src/security/dev-otp.ts`) covers local work. Returning a
+ * Not an error: for stages 0–17 this was the only state. Returning a
  * reason rather than throwing keeps a misconfigured production instance
  * answering requests normally while logging loudly, instead of failing every
  * sign-in with a 500 that also happens to confirm which numbers are members.
@@ -140,42 +179,75 @@ export function maskEmail(email: string): string {
 export function logDeliveryOutcome(
   log: FastifyBaseLogger,
   sender: CodeSender,
-  delivery: MemberDelivery,
+  delivery: AnyDelivery,
   outcome: DeliveryOutcome,
 ): void {
   const base = {
     sender: sender.name,
     purpose: delivery.purpose,
-    phone: maskPhone(delivery.phone),
+    // An outlet notice has no member phone number in it at all, so there is
+    // nothing to mask — and printing a mask for an absent value would suggest
+    // one had been sent.
+    ...('phone' in delivery ? { phone: maskPhone(delivery.phone) } : {}),
   };
 
   if (outcome.delivered) {
     log.info(
       { ...base, recipient: delivery.email ? maskEmail(delivery.email) : null },
-      'member message delivered',
+      'message delivered',
     );
     return;
   }
 
-  log.warn({ ...base, reason: outcome.reason }, 'member message delivery failed');
+  log.warn({ ...base, reason: outcome.reason }, 'message delivery failed');
 }
 
 /**
  * Builds the configured sender. Called once at startup.
  *
- * `smtp` is loaded lazily so a deployment that has not configured mail does not
- * pay for the transport, and so the SMTP module's own configuration errors
- * surface here rather than at import time.
+ * Each transport is loaded lazily so a deployment that has not configured mail
+ * or SMS does not pay for the dependency, and so a module's own configuration
+ * errors surface here rather than at import time.
+ *
+ * `sms` is not an alternative to `smtp` but a layer over it: passcodes go to
+ * the carrier and everything else falls through to mail. `env.ts` refuses to
+ * start without both, so the SMTP sender below is always constructible by the
+ * time this runs.
  */
 export async function createCodeSender(env: Env, log: FastifyBaseLogger): Promise<CodeSender> {
   if (env.OTP_DELIVERY_CHANNEL === 'none') {
     log.warn(
       'OTP_DELIVERY_CHANNEL is "none": one-time passcodes are generated but not delivered. ' +
-        'Members cannot sign in unless DEV_OTP_ECHO is also enabled for local development.',
+        'Members cannot sign in.',
     );
     return nullSender;
   }
 
   const { createSmtpSender } = await import('./smtp-sender.js');
-  return createSmtpSender(env, log);
+  const smtp = createSmtpSender(env, log);
+
+  if (env.OTP_DELIVERY_CHANNEL === 'smtp') {
+    return smtp;
+  }
+
+  const [{ createSmsSender }, { createHttpTransport, createLoggingTransport }] = await Promise.all([
+    import('./sms-sender.js'),
+    import('./sms-transport.js'),
+  ]);
+
+  const transport =
+    env.SMS_PROVIDER === 'log'
+      ? createLoggingTransport(log)
+      : createHttpTransport({
+          name: 'http',
+          // Present by construction: superRefine requires all four when the
+          // channel is 'sms' and the provider is 'http'.
+          endpoint: env.SMS_API_URL!,
+          senderId: env.SMS_SENDER_ID!,
+          username: env.SMS_API_USER!,
+          password: env.SMS_API_PASSWORD!,
+          timeoutMs: env.SMS_TIMEOUT_MS,
+        });
+
+  return createSmsSender({ transport, fallback: smtp, env, log });
 }

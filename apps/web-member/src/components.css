@@ -536,10 +536,31 @@
 
 /* ── Lockup ─────────────────────────────────────────────────────────────── */
 
+/**
+ * The artwork at the size it is drawn: 144 × 53 on the 390px board.
+ *
+ * Fixed, not fluid. The lockup is a mark, and a mark that grows with the
+ * viewport is a different object on every screen size — the board draws it at
+ * one size beside a 26px heading, and that relationship is the design.
+ */
 .lockup {
+  display: block;
+  inline-size: 144px;
+  block-size: 53px;
+}
+
+/**
+ * The stack that stands in when the artwork does not load. It keeps the
+ * artwork's height so a failed load does not also move the hero's contents,
+ * and gives its own width back — the property line runs wider set as one row
+ * than the two lines it replaces.
+ */
+.lockup-text {
   display: grid;
+  align-content: center;
   justify-items: center;
   gap: 3px;
+  inline-size: auto;
   text-align: center;
 }
 
@@ -560,65 +581,52 @@
   color: var(--text-muted);
 }
 
-/**
- * The mark on the membership card.
- *
- * Measured off both boards, which agree to the pixel: 46px wide with a 4.1px
- * cap height on a 341px card — a third the size of the hero lockup, and cool
- * grey rather than gold.
- *
- * Both of those read as mistakes until you see it next to the artwork. The
- * building is the only gold object on the card; a gold wordmark competes with
- * it, and a large one turns a credential into a poster. Small and quiet is
- * what makes it look like something a hotel would hand you.
- *
- * Sized in `cqw` against the card's own width so the proportions survive the
- * card being rendered at any size, with a px fallback first for engines
- * without container queries.
- */
-.lockup-card .lockup-brand {
-  font-size: 6px;
-  font-size: 1.76cqw;
-  font-weight: var(--w-book);
-  letter-spacing: 0.08em;
-  color: var(--grey);
-}
-
-.lockup-card .lockup-property {
-  font-size: 4.8px;
-  font-size: 1.4cqw;
-  letter-spacing: 0.18em;
-  color: var(--paper);
-}
-
 /* ── Membership card ────────────────────────────────────────────────────── */
 
 /**
- * The membership card — every value below measured off the A3 and A4 boards,
- * which agree to the pixel on a 341 × 215 face.
+ * The membership card.
  *
- * `container-type: inline-size` makes the card its own layout context, so the
- * mark, the name and the number are all expressed as a share of the card's
- * width in `cqw`. The alternative — fixed pixels — was what made the first
- * attempt wrong: the type stayed put while the card flexed, and the
- * relationships the design is built on came apart. Each rule states a px
- * fallback first for engines without container queries.
+ * The face is `/assets/card-face.svg` — the design file itself, not a
+ * reconstruction — so the only values left to set here are the two live fields
+ * laid over it. Those are stated in the artwork's own 540 × 340 coordinate
+ * space and converted at 1cqw = 5.4 units, which is what keeps them registered
+ * to the artwork at any rendered size.
  *
- * Nothing here uses padding. The three elements sit at measured offsets, which
- * is the honest way to reproduce a laid-out card and keeps the artwork's
- * position independent of the text around it.
+ * `container-type: inline-size` is what makes that conversion possible: it
+ * makes the card its own layout context so the type is a share of the card's
+ * width rather than a fixed pixel size that stays put while the card flexes.
+ * Each rule states a px fallback first for engines without container queries.
+ *
+ * Nothing here uses padding — the text sits at measured offsets, which keeps it
+ * independent of everything except the artwork underneath.
  */
 .membership-card {
   position: relative;
   display: block;
   inline-size: 100%;
-  /* Expressed as a ratio so the card stays a card on a 320px screen. */
-  aspect-ratio: 341 / 215;
-  border-radius: var(--r-card);
+  /* The artwork's own ratio, expressed as one so the card stays a card on a
+     320px screen. Matching it exactly is what stops the face being letterboxed
+     or cropped by a fraction of a pixel. */
+  aspect-ratio: 540 / 340;
+  /**
+   * The artwork's corner is a 24-unit radius on a 540 × 340 face, so it scales
+   * with the card. A fixed `--r-card` does not: the two arcs agree at exactly
+   * one width (16px ≈ 24 units at 342px) and drift apart either side of it.
+   * Whichever is squarer is the one you see — the artwork is transparent
+   * outside its arc and this rule clips everything outside its own — so a fixed
+   * radius means the card's corner stops being the design's at every size but
+   * one.
+   *
+   * Percentages resolve per axis, so the pair below is 24 horizontally
+   * (4.4444% of 540) and 24 vertically (7.0588% of 340). With `aspect-ratio`
+   * holding the face at 540 / 340 those stay equal at any size, which is the
+   * only way to express a circular corner that scales.
+   */
+  border-radius: 4.4444% / 7.0588%;
+  /* Shows through only in the corners, where it continues the artwork's own
+     rounding, and for the moment before the face loads. Same ramp, same angle
+     — see --card-gradient. */
   background: var(--card-gradient);
-  /* A hairline, not an edge: the boards show the card lifting off the base
-     rather than being outlined. The previous 40% read as a drawn border. */
-  border: 1px solid rgb(180 149 79 / 0.22);
   overflow: hidden;
   text-decoration: none;
   container-type: inline-size;
@@ -632,87 +640,219 @@
 }
 
 /**
- * The building, at the position it occupies on both boards: 0.6% in from the
- * left, 99.3% of the card's width, starting 27.5% down and 50.5% tall.
- *
- * `contain`, not `cover`. The artwork's own aspect is 3.148 and the box's is
- * 3.140 — so close that either behaves the same, and `contain` is the one that
- * cannot silently crop the roofline if the asset is ever re-exported at a
- * different ratio.
- *
- * Full opacity: the fill is already the design's exact #b4954f, and dimming it
- * would render a colour the boards never specified.
+ * The two physical sides shown together on Profile. Keeping the gap on their
+ * wrapper means each side retains the artwork's exact aspect ratio and the
+ * stat bar below remains responsible for its own spacing.
  */
-.card-lineart {
-  position: absolute;
-  inset-inline-start: 0.6%;
-  inset-block-start: 27.5%;
-  inline-size: 99.3%;
-  block-size: 50.5%;
-  object-fit: contain;
-  pointer-events: none;
-}
-
-/* Centred, 27px down — measured. Not top-left. */
-.card-head {
-  position: absolute;
-  inset-inline: 0;
-  inset-block-start: 27px;
-  inset-block-start: 8cqw;
+.membership-card-sides {
   display: grid;
-  justify-items: center;
-}
-
-/**
- * Name and number share a baseline near the foot.
- *
- * They sit ~29px above the bottom edge rather than flush against it, which is
- * what leaves the card its lower margin and stops the two lines reading as a
- * footer bar.
- */
-.card-foot {
-  position: absolute;
-  inset-inline: 15px;
-  inset-inline: 4.5cqw;
-  inset-block-end: 29px;
-  inset-block-end: 8.4cqw;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
   gap: var(--s-4);
 }
 
+/**
+ * The back reuses `.membership-card` for its dimensions and clipping, but it
+ * must not share the front's view-transition name: two elements with the same
+ * name on one page make that transition invalid.
+ */
+.membership-card-back {
+  view-transition-name: none;
+}
+
+/**
+ * The supplied back artwork leaves this rounded well blank for member data.
+ * Its bounds are measured from the SVG's 404.88 × 255 viewBox:
+ * x 153.761719, y 59.136719, width and height 97.355469.
+ *
+ * Each child is inset by 8.8889%: four modules out of the complete 45-module
+ * footprint (37 live modules plus a four-module quiet zone on each side).
+ */
+.card-back-qr-quiet-zone {
+  position: absolute;
+  inset-block-start: 23.1909%;
+  inset-inline-start: 37.9771%;
+  inline-size: 24.0455%;
+  block-size: 38.1786%;
+  box-sizing: border-box;
+  border-radius: 10%;
+  background: #fff;
+  line-height: 0;
+}
+
+.card-back-qr-quiet-zone > svg,
+.card-back-qr-placeholder {
+  position: absolute;
+  inset: 8.8889%;
+  display: block;
+  inline-size: 82.2222%;
+  block-size: 82.2222%;
+}
+
+.card-back-qr-placeholder {
+  border-radius: 2px;
+}
+
+/**
+ * The whole face, edge to edge — gradient, wordmark, line art and lettering,
+ * all of it the design file.
+ *
+ * `inset: 0` rather than a measured box: the artwork *is* the card, so there is
+ * no placement decision left to get wrong. `object-fit: cover` is belt and
+ * braces against a re-export at a different ratio — the card's own
+ * `aspect-ratio` already matches the artwork's.
+ */
+.card-face {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/**
+ * Name and number, laid into the gap the artwork leaves for them.
+ *
+ * Every value is measured off the glyphs that were removed from the SVG, in its
+ * 540 × 340 space, then divided by 5.4 to reach cqw:
+ *
+ *   name    ink starts x 24.7, baseline y 294.4, cap height 12.06
+ *   number  ink ends   x 514.5, baseline y 293.6, cap height 10.56
+ *
+ * The two baselines are 0.8 units apart — a rounding difference in the export,
+ * not a design decision — so they are set flush here.
+ *
+ * ## Why grid + `end`, and not flex + `baseline`
+ *
+ * The name wraps to a second line (see `.card-name`), and flexbox baseline
+ * alignment uses an item's *first* baseline. A two-line name would therefore
+ * align the number to the name's **top** line and drag it up off the 293.6
+ * baseline the artwork was drawn around — the one thing here that must not move.
+ *
+ * `align-items: end` with `line-height: 1` aligns the bottom of the last line
+ * box instead. Both fields are the same font, so their descenders differ only by
+ * the font-size ratio: 0.21em × 10.60 = 2.23px against 0.21em × 9.30 = 1.95px,
+ * 0.28px apart at the reference width. That is finer than the 0.8-unit (0.51px)
+ * baseline discrepancy the design already tolerates, so bottom-aligning and
+ * baseline-aligning are the same picture here.
+ *
+ * `minmax(0, 1fr)` rather than `1fr`: the default `1fr` floors at min-content,
+ * so one long unbroken name would widen the column and push the number out of
+ * position rather than wrapping.
+ */
+.card-foot {
+  position: absolute;
+  /* The ink edges of the outermost glyphs — 24.7 in, and 540 − 514.5 — less
+     the sidebearing the live text carries and the artwork's outlines do not. */
+  inset-inline: 15px 16px;
+  inset-inline: 4.45cqw 4.72cqw;
+  /* Sets the bottom of the line box, not the baseline, so this is the 45.6-unit
+     baseline plus the descender the font hangs below it. Measured against the
+     design's own render rather than derived: font metrics vary across the
+     --font-display fallbacks and the baseline is what has to land. */
+  inset-block-end: 27px;
+  inset-block-end: 8cqw;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  /* Was `var(--s-4)`, a fixed 16px — the one value in this block that did not
+     scale with the card. It grew from 5.2% of the foot at a 390px viewport to
+     6.5% at 320px, which quietly moved the wrap threshold with screen size (49
+     characters against 46). In cqw the name budget is the same share of the
+     card at every width, so a name that wraps on one phone wraps on all. */
+  gap: 16px;
+  gap: 4.7cqw;
+  line-height: 1;
+}
+
+/**
+ * 12.06 cap ÷ 0.72, the cap-height ratio the --font-display stack settles on.
+ *
+ * ## Two lines, not one line with an ellipsis
+ *
+ * The single line this replaces held 257.30px at the reference width — about 49
+ * characters of mixed-case text, measured against the stack rather than
+ * guessed. That fits every ordinary name and the specimen the card was drawn
+ * around ("Sheikha Noora Al-Thani", 120.46px), and it fits the long formal
+ * forms this programme actually issues to: "Sheikha Noora bint Hamad bin
+ * Khalifa Al-Thani" is 45 characters and 243.62px, inside the budget with room
+ * to spare. It runs out in the mid-50s — honorific, patronymic chain, *and* a
+ * second family name — where the old rule shaved the tail off in an ellipsis.
+ *
+ * A guest whose card shows a cut-off name is the failure worth avoiding here,
+ * so the name now takes a second line instead. Both lines are capped by the
+ * same grid column, so the wrap point is the same on each — roughly 98
+ * characters in total, past any name this programme will see.
+ *
+ * The block is anchored by `inset-block-end`, so a second line grows *upward*:
+ * the last line stays on the artwork's 294.4 baseline next to the number, and
+ * the first line rises into the face above it. That is the only direction
+ * available — there are 45.6 units between the baseline and the card's bottom
+ * edge, which a second line would overrun.
+ *
+ * Clamped at two rather than left unbounded: `fullName` accepts 200 characters
+ * (admin-members.ts), and a name long enough for a third line would climb into
+ * the building line art. Anything past two lines still ellipses, so the clamp
+ * is the same guarantee the old rule gave, one line further out.
+ */
 .card-name {
-  font-size: 12px;
-  font-size: 3.5cqw;
+  font-size: 11px;
+  font-size: 3.1cqw;
   font-weight: var(--w-book);
   letter-spacing: 0.01em;
   color: var(--paper);
-  /* A long name shortens rather than colliding with the number. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Wraps at spaces normally; breaks only a single "word" too long to fit,
+     which is the one case that would otherwise overflow the column. */
+  overflow-wrap: break-word;
 }
 
+/**
+ * 10.56 cap ÷ 0.72, and untracked.
+ *
+ * The tracking here used to be 0.1em on the reasoning that a number read across
+ * a counter wants air between its digits. The artwork disagrees: "PG-0003" is
+ * 53.4 units wide, which is the font's own fit. Tabular figures stay — they
+ * cost nothing and stop the number reflowing as it counts up.
+ */
 .card-number {
   flex: none;
-  font-size: 10px;
-  font-size: 2.9cqw;
-  letter-spacing: 0.1em;
+  font-size: 9.5px;
+  font-size: 2.72cqw;
   font-variant-numeric: var(--fv-tabular);
   color: var(--gold-soft);
 }
 
+/**
+ * Each bar is its line's cap height — 12.06 and 10.56 units — so it occupies
+ * exactly the band the text will. The card does not shift when the profile
+ * arrives.
+ *
+ * `.card-foot` aligns to `end` rather than `baseline` now that the name wraps,
+ * and those are not the same line: `end` is the bottom of the line box, which
+ * sits a descender below the baseline the glyphs land on. Without correction
+ * each bar would render ~2px low and then jump up as the real text replaced it
+ * — exactly the shift these dimensions exist to prevent. The margin below is
+ * that descender, 0.21em of each field's own size, lifting the bar's bottom
+ * edge back onto the baseline.
+ */
 .card-name-skeleton {
   display: block;
   inline-size: 25cqw;
-  block-size: 3cqw;
+  block-size: 2.23cqw;
+  /* 0.21em × 3.1cqw */
+  margin-block-end: 0.65cqw;
 }
 
 .card-number-skeleton {
   display: block;
   inline-size: 11cqw;
-  block-size: 2.5cqw;
+  block-size: 1.96cqw;
+  /* 0.21em × 2.72cqw */
+  margin-block-end: 0.57cqw;
 }
 
 /* ── Benefit card ───────────────────────────────────────────────────────── */

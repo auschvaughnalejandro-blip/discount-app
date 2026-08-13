@@ -63,8 +63,10 @@ export interface HotelSheetsSource {
     requestedAt: Date;
     memberNumber: string;
     benefit: string;
+    /** Which outlet was told. Null on rows that predate the guest being asked. */
+    outlet: string | null;
     status: string;
-    decidedAt: Date | null;
+    closedAt: Date | null;
     fulfilledAt: Date | null;
   }>;
   redemptions: Array<{
@@ -208,10 +210,13 @@ export async function readHotelSheetsSource(prisma: PrismaClient): Promise<Hotel
         select: {
           requestedAt: true,
           status: true,
-          decidedAt: true,
+          closedAt: true,
           fulfilledAt: true,
           member: { select: { memberNumber: true } },
           benefit: { select: { title: true } },
+          outlet: { select: { name: true } },
+          // `note` is deliberately absent. The standing export policy excludes
+          // request free text from anything that leaves the system.
         },
       }),
       prisma.redemption.findMany({
@@ -265,8 +270,9 @@ export async function readHotelSheetsSource(prisma: PrismaClient): Promise<Hotel
       requestedAt: row.requestedAt,
       memberNumber: row.member.memberNumber,
       benefit: row.benefit.title,
+      outlet: row.outlet?.name ?? null,
       status: row.status,
-      decidedAt: row.decidedAt,
+      closedAt: row.closedAt,
       fulfilledAt: row.fulfilledAt,
     })),
     redemptions: redemptionRows.map((row) => ({
@@ -337,13 +343,15 @@ export function buildHotelSheetsSnapshot(
     rows: [
       [`Last updated: ${formatQatarDateTime(generatedAt)} Qatar time`, '', '', '', '', '', '', ''],
       ['', '', '', '', '', '', '', ''],
-      ['Active Members', '', 'App Activated', '', 'Pending Requests', '', 'Redemptions This Month', ''],
+      ['Active Members', '', 'App Activated', '', 'Awaiting Guest', '', 'Redemptions This Month', ''],
       [
         activeMembers.length,
         '',
         `${activatedMembers} (${activationRate.toFixed(1)}%)`,
         '',
-        source.requests.filter((row) => row.status === 'PENDING').length,
+        // Announced and not yet confirmed by an outlet. Not "pending approval" —
+        // nothing approves these; the guest simply has not arrived yet.
+        source.requests.filter((row) => row.status === 'SENT').length,
         '',
         redemptionsThisMonth,
         '',
@@ -401,16 +409,18 @@ export function buildHotelSheetsSnapshot(
       'Requested At',
       'Membership Number',
       'Benefit',
+      'Outlet Told',
       'Status',
-      'Decision Date',
-      'Fulfilled Date',
+      'Closed At',
+      'Used At',
     ],
     rows: source.requests.map((row) => [
       formatQatarDateTime(row.requestedAt),
       row.memberNumber,
       row.benefit,
+      row.outlet ?? '',
       titleCase(row.status),
-      row.decidedAt === null ? '' : formatQatarDateTime(row.decidedAt),
+      row.closedAt === null ? '' : formatQatarDateTime(row.closedAt),
       row.fulfilledAt === null ? '' : formatQatarDateTime(row.fulfilledAt),
     ]),
   };

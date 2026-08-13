@@ -2,11 +2,14 @@ import type { Prisma } from '@prisma/client';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
-import { NotFoundError } from '../errors.js';
+import { NotFoundError, RateLimitedError } from '../errors.js';
 import { logDeliveryOutcome } from '../notifications/code-sender.js';
+import { toCsv } from '../reporting/csv.js';
 import { writeAudit } from '../security/audit.js';
 import { generateClaimCode } from '../security/claim-codes.js';
+import { issueCardCode } from '../security/identity-codes.js';
 import { normalizePhone } from '../security/phone.js';
+import { checkRateLimit } from '../security/rate-limit.js';
 import { revokeAllForSubject } from '../security/refresh-tokens.js';
 import { scopeForMember, scopedWhere } from '../security/scope.js';
 
@@ -41,6 +44,23 @@ const listQuerySchema = z
   .strict();
 
 const idParamSchema = z.object({ id: z.string().uuid() }).strict();
+
+const cardExportQuerySchema = z
+  .object({
+    status: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
+    // A top-up print run: the members added since the last batch went to the
+    // bureau, rather than re-exporting — and paying to reprint — the whole
+    // membership every time.
+    since: z.string().datetime().optional(),
+  })
+  .strict();
+
+/**
+ * A print run is not a report: truncating one silently means a member who never
+ * receives a card, discovered weeks later at a counter. So the export refuses
+ * past this rather than returning a partial file, and says how to narrow it.
+ */
+const CARD_EXPORT_MAX_ROWS = 5000;
 
 /**
  * The invitation code exists in plaintext for exactly as long as it takes to
@@ -297,6 +317,143 @@ const adminMemberRoutes: FastifyPluginAsync = async (app) => {
       })),
     };
   });
+
+  /**
+   * ── GET /admin/members/card-export ────────────────────────────────────
+   *
+   * The file the card bureau prints from: membership number, name, card code.
+   *
+   * Registered before `/admin/members/:id`, though it need not be — find-my-way
+   * matches a static segment ahead of a parametric one regardless of order, and
+   * `card-export` is not a UUID so it would 400 rather than leak. Stated here so
+   * a later reorder is not mistaken for a fix.
+   *
+   * ## This file carries names, and the redemption export deliberately does not
+   *
+   * `reports.ts` exports membership numbers and no names at all — §12, asserted
+   * by `reporting.test.ts`, on the reasoning that a spreadsheet leaves the
+   * building and a screen behind an admin login does not. That rule is right and
+   * it is not being relaxed: this is a second file that cannot obey it, because
+   * **the name is the thing being printed**. A card export without names
+   * produces blank cards.
+   *
+   * So the disclosure is narrowed everywhere else instead:
+   *
+   *   - Its own permission (`members:export-cards`), so holding `reports:export`
+   *     never implies this and a future narrower role can be given one alone.
+   *   - Three columns and no contact details. The bureau needs to print a card;
+   *     it does not need a phone number or an email address, and §12's objection
+   *     is to a ready-made contact list more than to a name.
+   *   - The same rate limit bucket size as the report export — a handful a day,
+   *     for an action that should never be routine.
+   *   - Audited by row count, so "who took the membership list" is answerable.
+   *
+   * ## On putting card codes in a file
+   *
+   * `identity-codes.ts` argues a static code is acceptable because it identifies
+   * and grants nothing — no weaker than the membership number already printed in
+   * plain text on the front of the same card. That argument holds per-code and
+   * it holds here, but a file of every code at once is still a bigger object
+   * than any one of them, which is what the guards above are for. If the code
+   * ever becomes worth something on its own, this route and that file have to be
+   * revisited together.
+   */
+  app.get(
+    '/admin/members/card-export',
+    { config: { permission: 'members:export-cards' } },
+    async (request, reply) => {
+      const query = cardExportQuerySchema.parse(request.query);
+      const principal = request.principal;
+      if (!principal) {
+        throw new NotFoundError();
+      }
+
+      const limit = checkRateLimit(`card-export:${principal.subjectId}`, {
+        windowSeconds: env.RATE_LIMIT_EXPORT_WINDOW_SECONDS,
+        max: env.RATE_LIMIT_EXPORT_PER_USER_MAX,
+      });
+      if (!limit.allowed) {
+        // Logged before refusing: a burst of attempts is itself the signal.
+        await writeAudit(app.prisma, {
+          action: 'member.cards.export.throttled',
+          principal,
+          subjectType: 'Member',
+          ipAddress: request.ip,
+        });
+        throw new RateLimitedError(limit.retryAfterSeconds);
+      }
+
+      const filters: Prisma.MemberWhereInput = {
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.since ? { joinedAt: { gte: new Date(query.since) } } : {}),
+      };
+
+      const members = await app.prisma.member.findMany({
+        where: scopedWhere(filters, scopeForMember(principal)),
+        orderBy: { memberNumber: 'asc' },
+        // One past the cap, so a full batch is distinguishable from an
+        // overflowing one without a second count query.
+        take: CARD_EXPORT_MAX_ROWS + 1,
+        select: { id: true, memberNumber: true, fullName: true, status: true },
+      });
+
+      if (members.length > CARD_EXPORT_MAX_ROWS) {
+        return reply.code(400).send({
+          error: 'export_too_large',
+          message:
+            `More than ${CARD_EXPORT_MAX_ROWS} members match. Narrow the export with ` +
+            '`since` or `status` — a truncated print run would leave members without a card.',
+        });
+      }
+
+      await writeAudit(app.prisma, {
+        action: 'member.cards.exported',
+        principal,
+        subjectType: 'Member',
+        metadata: {
+          rows: members.length,
+          status: query.status ?? null,
+          since: query.since ?? null,
+        },
+        ipAddress: request.ip,
+      });
+
+      const csv = toCsv(
+        [
+          'membership_number',
+          'full_name',
+          // What the QR encodes, byte for byte. It must reach the bureau's
+          // artwork unmodified: the payload is base64url, so it is
+          // case-sensitive and contains `-` and `_`. Software that uppercases
+          // it — which some barcode tooling does by default, because
+          // uppercase-only mode yields a physically smaller symbol — produces a
+          // card that scans cleanly and then fails signature verification at the
+          // counter.
+          'card_code',
+          // So a suspended member is not sent to print by accident. The filter
+          // above is optional, matching `/admin/members`; this column is how the
+          // caller sees what they are about to print either way.
+          'status',
+        ],
+        members.map((member) => [
+          member.memberNumber,
+          member.fullName,
+          // Derived, never stored — see `issueCardCode`. Regenerating this file
+          // for a lost card yields the identical code, which is what makes a
+          // replacement a straight reprint.
+          issueCardCode(member.id),
+          member.status,
+        ]),
+      );
+
+      const filename = `privilege-guest-cards-${new Date().toISOString().slice(0, 10)}.csv`;
+
+      return reply
+        .type('text/csv; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${filename}"`)
+        .send(csv);
+    },
+  );
 
   // ── GET /admin/members/:id ────────────────────────────────────────────
   app.get('/admin/members/:id', { config: { permission: 'members:read' } }, async (request) => {

@@ -244,6 +244,7 @@ describe('the redaction layer keeps personal data out of application logs', () =
       redact({
         password: 'hunter2',
         passwordHash: '$argon2id$v=19$...',
+        outletTokenHash: 'device-token-sha256-digest',
         accessToken: 'eyJhbGciOi...',
         refreshToken: 'opaque-token',
         authorization: 'Bearer abc',
@@ -257,6 +258,7 @@ describe('the redaction layer keeps personal data out of application logs', () =
     for (const secret of [
       'hunter2',
       '$argon2id$',
+      'device-token-sha256-digest',
       'eyJhbGciOi',
       'opaque-token',
       'Bearer abc',

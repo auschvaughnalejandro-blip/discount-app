@@ -33,13 +33,20 @@ export type AuditAction =
   | 'verification.lookup.success'
   | 'verification.lookup.failure'
   | 'redemption.recorded'
+  // Where a redemption came from. Split three ways because the questions asked
+  // after an incident are different for each: a dashboard entry was typed by an
+  // administrator, an outlet confirmation was somebody at a counter closing out a
+  // notice, and a scan means a card was physically presented. Rolling them into
+  // one action would leave "was the card actually there?" unanswerable.
+  | 'redemption.recorded.outlet'
+  | 'redemption.recorded.scan'
   | 'redemption.reversed'
-  // A benefit request and its decision. The decision is the accountable act:
-  // "who approved 40% off for whom" is the question this programme will be
-  // asked first, and the reason a member cannot approve their own.
+  // A notice and how it ended. `request.approved` and `request.declined` are
+  // gone: nothing approves a notice, because the guest is already entitled.
+  // Historical rows keep those action strings — the column is free text and this
+  // union constrains only what is written from now on.
   | 'request.created'
-  | 'request.approved'
-  | 'request.declined'
+  | 'request.not_used'
   | 'report.viewed'
   | 'report.exported'
   | 'report.export.throttled'
@@ -52,6 +59,13 @@ export type AuditAction =
   | 'member.suspended'
   | 'member.reinstated'
   | 'member.claim_code_issued'
+  // The card-print export, kept distinct from `report.exported` because it is a
+  // different disclosure answering a different question: that file is a list of
+  // membership numbers, this one is every member's name and card code together.
+  // "Who took the membership list, and when" has to be answerable on its own
+  // rather than inferred from an action name shared with finance's monthly CSV.
+  | 'member.cards.exported'
+  | 'member.cards.export.throttled'
   | 'member.claimed'
   | 'member.consent_changed'
   // Stage 25. Who was granted an account, who lost one, and who cleared
@@ -63,8 +77,26 @@ export type AuditAction =
   | 'staff.mfa_reset'
   | 'staff.password_set'
   | 'staff.password_changed'
+  // Outlet configuration and historical Google-account lifecycle events. The
+  // account actions remain in the type because immutable audit rows may already
+  // contain them; no live route emits them now.
+  | 'outlet.updated'
+  | 'outlet.account_created'
+  | 'outlet.account_suspended'
+  | 'outlet.account_reinstated'
+  // The sole live outlet sign-in credentials. Creation and rotation are the only
+  // times plaintext exists; revocation destroys the stored digest and every
+  // session belonging to that one device.
+  | 'outlet.device_created'
+  | 'outlet.device_rotated'
+  | 'outlet.device_revoked'
   | 'auth.login.success'
   | 'auth.login.failure'
+  // Outlet sign-in, kept distinct from the dashboard's. TOKEN attempts identify
+  // the method in metadata and have a narrower blast radius than an administrator
+  // session. The names also remain compatible with historical Google audit rows.
+  | 'auth.outlet.login.success'
+  | 'auth.outlet.login.failure'
   // Stage 19. A password accepted but a second factor still outstanding is not
   // a successful login, and recording it as one would misreport who was in the
   // dashboard. §9 wants "every authentication event", and these are events.
@@ -74,6 +106,12 @@ export type AuditAction =
   | 'auth.mfa.enrolled'
   // A recovery code spends a credential and should stand out in the trail.
   | 'auth.mfa.recovery_used'
+  // A password that completed sign-in on its own, under `STAFF_MFA_REQUIRED=false`.
+  // Impossible in production — env.ts refuses to boot in that combination — so any
+  // row carrying this action is either local development or evidence that
+  // something started with a configuration nothing should have accepted. Kept
+  // distinct from `auth.login.success` for exactly that reason.
+  | 'auth.mfa.skipped'
   | 'auth.logout'
   | 'auth.logout_all'
   | 'auth.refresh.reuse_detected'

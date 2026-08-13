@@ -49,8 +49,9 @@ function source(): HotelSheetsSource {
         requestedAt: new Date('2026-08-09T08:00:00.000Z'),
         memberNumber: 'PG-0003',
         benefit: 'Dining',
-        status: 'PENDING',
-        decidedAt: null,
+        outlet: 'Main Restaurant',
+        status: 'SENT',
+        closedAt: null,
         fulfilledAt: null,
       },
     ],
@@ -258,6 +259,7 @@ describe('Google Sheets configuration', () => {
     JWT_AUDIENCE_STAFF: 'staff',
     JWT_SIGNING_KEY: 'a-secure-jwt-signing-key-at-least-32-bytes',
     MFA_SECRET_ENCRYPTION_KEY: '00'.repeat(32),
+    IDENTITY_CODE_HMAC_SECRET: 'a-secure-identity-code-secret',
   } satisfies NodeJS.ProcessEnv;
 
   it('is disabled by default and does not require Google credentials at API startup', () => {

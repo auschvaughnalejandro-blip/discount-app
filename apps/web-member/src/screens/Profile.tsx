@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatMoney } from '@pgp/ui/format';
 
 import { ActivityRow } from '../components/ActivityRow.js';
@@ -6,6 +6,7 @@ import { AppShell } from '../components/AppShell.js';
 import { Button } from '../components/Button.js';
 import { Eyebrow } from '../components/Eyebrow.js';
 import { MembershipCard } from '../components/MembershipCard.js';
+import { MembershipCardBack } from '../components/MembershipCardBack.js';
 import { StatBar } from '../components/StatBar.js';
 import { Toggle } from '../components/Toggle.js';
 import { useAppNavigate } from '../navigation.js';
@@ -57,8 +58,25 @@ function netVisits(redemptions: Redemption[]): Redemption[] {
 
 export function Profile() {
   const navigate = useAppNavigate();
-  const { profile, benefits, redemptions, error, signOut, setConsent } = useSession();
+  const { profile, benefits, redemptions, error, activityError, signOut, setConsent, refreshActivity } =
+    useSession();
   const [expanded, setExpanded] = useState(false);
+
+  /**
+   * Re-read the history every time this screen opens.
+   *
+   * This is the screen that answers "did that get recorded?", and the answer was
+   * written by somebody else — an outlet, on their own device, after this app
+   * loaded. Everything below is derived from `redemptions`, so without this the
+   * stats and the activity list keep reporting whatever was true at sign-in and
+   * a visit recorded five minutes ago reads as a visit that never happened.
+   *
+   * The session layer shares an in-flight request, so arriving here right after
+   * sign-in refreshes rather than fetching the same history twice.
+   */
+  useEffect(() => {
+    void refreshActivity();
+  }, [refreshActivity]);
 
   const stats = useMemo(() => {
     // The one state that may render as a skeleton: the history has not arrived,
@@ -100,11 +118,17 @@ export function Profile() {
         <h1 className="title">Profile</h1>
       </header>
 
-      <MembershipCard
-        fullName={profile?.fullName ?? null}
-        memberNumber={profile?.memberNumber ?? null}
-        href="/profile/card"
-      />
+      <div className="membership-card-sides">
+        <MembershipCard
+          fullName={profile?.fullName ?? null}
+          memberNumber={profile?.memberNumber ?? null}
+          href="/profile/card"
+        />
+        <MembershipCardBack
+          cardCode={profile?.cardCode ?? null}
+          memberNumber={profile?.memberNumber ?? null}
+        />
+      </div>
 
       <StatBar
         stats={[
@@ -114,9 +138,9 @@ export function Profile() {
         ]}
       />
 
-      {error === null ? null : (
+      {error === null && activityError === null ? null : (
         <p role="alert" className="screen-alert">
-          {error}
+          {error ?? activityError}
         </p>
       )}
 
