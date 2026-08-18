@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_apps_api_prisma_migrations_20260729140100_redemption_immutability_migration_sql", "label": "migration.sql", "file_type": "code", "source_file": "apps/api/prisma/migrations/20260729140100_redemption_immutability/migration.sql", "source_location": null}], "edges": []}

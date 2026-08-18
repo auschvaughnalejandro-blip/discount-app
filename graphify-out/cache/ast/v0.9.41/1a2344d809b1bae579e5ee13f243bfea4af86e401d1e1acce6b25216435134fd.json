@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_apps_api_prisma_migrations_20260812100100_outlet_login_tokens_migration_sql", "label": "migration.sql", "file_type": "code", "source_file": "apps/api/prisma/migrations/20260812100100_outlet_login_tokens/migration.sql", "source_location": null}], "edges": []}

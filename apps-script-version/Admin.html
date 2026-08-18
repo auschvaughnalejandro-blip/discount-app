@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<title>Privilege Guest — Administrator</title>
+<style>
+/* Desk software. Denser than the member app, lighter ground — this gets read
+   for an hour at a time under office lighting, not glanced at on a phone. */
+:root{
+  --bg:#edeae4; --panel:#fff; --ink:#221c1b;
+  --ink-muted:rgb(34 28 27/.62); --ink-faint:rgb(34 28 27/.42);
+  --accent:#8d7237; --accent-quiet:#b4954f; --sand:#ecd7a3;
+  --rule:rgb(34 28 27/.14); --hair:rgb(34 28 27/.07);
+  --good:#3f6f66; --good-bg:rgb(63 111 102/.1);
+  --warn:#a2503f; --warn-bg:rgb(162 80 63/.1);
+  --dark:#221c1b; --dark-ink:#f5f1ea;
+  --font:'Jost','Century Gothic','Futura','Trebuchet MS',ui-sans-serif,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55}
+.shell{display:grid;grid-template-columns:15rem 1fr;min-height:100vh}
+@media(max-width:820px){.shell{grid-template-columns:1fr}.rail{position:sticky;top:0;z-index:5}}
+
+.rail{background:var(--dark);color:var(--dark-ink);padding:1.5rem 0;display:flex;flex-direction:column;gap:.15rem}
+.rail .brand{padding:0 1.4rem 1.3rem;border-bottom:1px solid rgb(245 241 234/.12);margin-bottom:1rem}
+.rail .brand .e{font-size:.62rem;letter-spacing:.2em;color:var(--sand);font-weight:700;text-transform:uppercase}
+.rail .brand .n{font-size:1.05rem;margin-top:.25rem}
+.nav{background:none;border:0;color:rgb(245 241 234/.62);font-family:var(--font);font-size:.92rem;
+  text-align:left;padding:.7rem 1.4rem;cursor:pointer;border-left:2px solid transparent}
+.nav:hover{color:var(--dark-ink)}
+.nav.on{color:var(--sand);border-left-color:var(--sand);background:rgb(245 241 234/.05)}
+.rail .foot{margin-top:auto;padding:1rem 1.4rem 0;border-top:1px solid rgb(245 241 234/.12);
+  font-size:.78rem;color:rgb(245 241 234/.5)}
+
+.main{padding:2rem clamp(1rem,3vw,2.5rem);max-width:74rem}
+.head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;
+  padding-bottom:1rem;border-bottom:2px solid rgb(34 28 27/.3);margin-bottom:1.5rem}
+h1{font-size:1.7rem;font-weight:500;letter-spacing:-.01em}
+.hint{color:var(--ink-muted);font-size:.88rem;margin-top:.2rem}
+.view{display:none}.view.on{display:block}
+
+.panel{background:var(--panel);border:1px solid var(--rule);padding:1.4rem;margin-bottom:1.25rem}
+.panel h2{font-size:1.05rem;font-weight:650;margin-bottom:.9rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:1px;
+  background:var(--rule);border:1px solid var(--rule);margin-bottom:1.25rem}
+.cell{background:var(--panel);padding:1.1rem 1.2rem}
+.cell .n{font-family:var(--mono);font-size:1.8rem;color:var(--accent);line-height:1.1}
+.cell .l{font-size:.68rem;text-transform:uppercase;letter-spacing:.13em;color:var(--ink-faint);margin-top:.35rem}
+
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.88rem;min-width:34rem}
+th,td{text-align:left;padding:.65rem .9rem .65rem 0;border-bottom:1px solid var(--hair);vertical-align:top}
+th{font-size:.68rem;text-transform:uppercase;letter-spacing:.11em;color:var(--ink-faint);
+  font-weight:650;border-bottom:1px solid rgb(34 28 27/.3)}
+td:last-child,th:last-child{padding-right:0}
+.num{text-align:right;font-family:var(--mono);white-space:nowrap}
+
+label{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;
+  color:var(--ink-faint);margin-bottom:.4rem;font-weight:650}
+input,select,textarea{width:100%;background:#fff;border:1px solid var(--rule);border-radius:2px;
+  color:var(--ink);font-family:var(--font);font-size:.95rem;padding:.7rem .8rem;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent-quiet)}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem;margin-bottom:1rem}
+button.go{background:var(--dark);color:var(--dark-ink);border:0;border-radius:2px;padding:.75rem 1.3rem;
+  font-family:var(--font);font-size:.88rem;font-weight:600;cursor:pointer;letter-spacing:.03em}
+button.go:disabled{opacity:.45;cursor:not-allowed}
+button.mini{background:none;border:1px solid var(--rule);border-radius:2px;padding:.35rem .7rem;
+  font-family:var(--font);font-size:.78rem;cursor:pointer;color:var(--ink)}
+button.mini:hover{border-color:var(--accent-quiet)}
+button.mini.danger{color:var(--warn);border-color:rgb(162 80 63/.3)}
+
+.msg{font-size:.88rem;padding:.8rem 1rem;border-radius:2px;border:1px solid;margin:.9rem 0}
+.msg.err{color:var(--warn);border-color:rgb(162 80 63/.3);background:var(--warn-bg)}
+.msg.ok{color:var(--good);border-color:rgb(63 111 102/.3);background:var(--good-bg)}
+.pill{display:inline-block;font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;
+  font-weight:700;padding:.2em .55em;border-radius:2px}
+.pill.ok{color:var(--good);background:var(--good-bg)}
+.pill.no{color:var(--warn);background:var(--warn-bg)}
+.code{font-family:var(--mono);font-size:1.15rem;letter-spacing:.16em;background:var(--bg);
+  padding:.8rem 1rem;border:1px dashed var(--accent-quiet);display:inline-block;margin-top:.5rem}
+
+/* Sign-in */
+.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
+.gate .box{background:var(--panel);border:1px solid var(--rule);padding:2rem;width:100%;max-width:23rem}
+</style>
+</head>
+<body>
+
+<!-- Sign in ─────────────────────────────────────────────────────────────── -->
+<div id="gate" class="gate">
+  <div class="box">
+    <div style="font-size:.62rem;letter-spacing:.2em;color:var(--accent);font-weight:700;text-transform:uppercase">Privilege Guest</div>
+    <h1 style="font-size:1.4rem;margin:.3rem 0 1.2rem">Administrator</h1>
+    <div style="margin-bottom:.9rem">
+      <label for="i-email">Email</label>
+      <input id="i-email" type="email" autocomplete="username">
+    </div>
+    <div style="margin-bottom:1rem">
+      <label for="i-pass">Password</label>
+      <input id="i-pass" type="password" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')signIn()">
+    </div>
+    <div id="m-gate"></div>
+    <button class="go" style="width:100%" onclick="signIn()">Sign in</button>
+  </div>
+</div>
+
+<!-- Panel ───────────────────────────────────────────────────────────────── -->
+<div id="shell" class="shell" style="display:none">
+  <aside class="rail">
+    <div class="brand"><div class="e">Privilege Guest</div><div class="n">Administrator</div></div>
+    <button class="nav on" data-v="overview"    onclick="go('overview')">Overview</button>
+    <button class="nav"    data-v="requests"    onclick="go('requests')">Requests</button>
+    <button class="nav"    data-v="members"     onclick="go('members')">Members</button>
+    <button class="nav"    data-v="redemptions" onclick="go('redemptions')">Redemptions</button>
+    <button class="nav"    data-v="reports"     onclick="go('reports')">Reports</button>
+    <button class="nav"    data-v="benefits"    onclick="go('benefits')">Benefits</button>
+    <button class="nav"    data-v="outlets"     onclick="go('outlets')">Outlets</button>
+    <div class="foot"><div id="who"></div>
+      <button class="mini" style="margin-top:.6rem" onclick="signOut()">Sign out</button></div>
+  </aside>
+
+  <main class="main">
+
+    <section id="v-overview" class="view on">
+      <div class="head"><div><h1>Overview</h1><p class="hint">Headline figures and what needs attention</p></div></div>
+      <div class="grid" id="o-grid"></div>
+      <div class="panel"><h2>Waiting</h2><div id="o-req"><p class="hint">Loading…</p></div></div>
+    </section>
+
+    <section id="v-requests" class="view">
+      <div class="head"><div><h1>Requests</h1><p class="hint">Who each outlet is expecting</p></div>
+        <button class="mini" onclick="loadRequests()">Refresh</button></div>
+      <div class="panel"><div class="scroll" id="r-table"><p class="hint">Loading…</p></div></div>
+    </section>
+
+    <section id="v-members" class="view">
+      <div class="head"><div><h1>Members</h1><p class="hint">Create, suspend and reinstate memberships</p></div></div>
+      <div class="panel">
+        <h2>Invite a member</h2>
+        <div class="fields">
+          <div><label for="n-name">Full name</label><input id="n-name" type="text"></div>
+          <div><label for="n-phone">Mobile (+974)</label><input id="n-phone" type="tel"></div>
+          <div><label for="n-email">Email</label><input id="n-email" type="email"></div>
+        </div>
+        <p class="hint" style="margin-bottom:.8rem">An email address is required — sign-in passcodes are delivered by email.</p>
+        <button class="go" onclick="createMember()">Create and send invitation</button>
+        <div id="m-new"></div>
+      </div>
+      <div class="panel"><h2>All members</h2><div class="scroll" id="m-table"><p class="hint">Loading…</p></div></div>
+    </section>
+
+    <section id="v-redemptions" class="view">
+      <div class="head"><div><h1>Redemptions</h1><p class="hint">The immutable log</p></div>
+        <button class="mini" onclick="loadRedemptions()">Refresh</button></div>
+      <div class="panel">
+        <p class="hint" style="margin-bottom:.9rem">Entries are never edited or deleted. A correction records a
+          <strong>reversal</strong> and both rows remain.</p>
+        <div class="scroll" id="d-table"><p class="hint">Loading…</p></div>
+      </div>
+    </section>
+
+    <section id="v-reports" class="view">
+      <div class="head"><div><h1>Reports</h1><p class="hint">Programme activity in detail</p></div></div>
+      <div class="grid" id="rep-grid"></div>
+      <div class="panel"><h2>By benefit</h2><div class="scroll" id="rep-benefit"></div></div>
+      <div class="panel"><h2>By month</h2><div class="scroll" id="rep-month"></div></div>
+      <p class="hint">Figures below <span id="rep-min">five</span> are shown as “—”, so no number can be traced
+        back to one identifiable member.</p>
+    </section>
+
+    <section id="v-benefits" class="view">
+      <div class="head"><div><h1>Benefits</h1><p class="hint">Discounts, caps and terms</p></div></div>
+      <p class="hint" style="margin-bottom:1rem">Changing a discount is a form field, not a development request.
+        Every change is versioned and attributed.</p>
+      <div id="b-list"><p class="hint">Loading…</p></div>
+    </section>
+
+    <section id="v-outlets" class="view">
+      <div class="head"><div><h1>Outlets</h1><p class="hint">Notification addresses and outlet sign-in</p></div></div>
+      <div class="panel">
+        <h2>Add an outlet</h2>
+        <div class="fields">
+          <div><label for="ol-name">Name</label><input id="ol-name" type="text" placeholder="The Opal Spa"></div>
+          <div><label for="ol-cat">Benefit category</label><select id="ol-cat"></select></div>
+          <div><label for="ol-mail">Notification email</label><input id="ol-mail" type="email"></div>
+        </div>
+        <button class="go" onclick="addOutlet()">Add outlet</button>
+        <div id="m-outlet"></div>
+      </div>
+      <div id="ol-list"><p class="hint">Loading…</p></div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+var TOKEN = null, ME = null, BENEFITS = [], LOGIN_GENERATION = 0;
+
+function api(action, data) {
+  var callToken = TOKEN;
+  var callGeneration = LOGIN_GENERATION;
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (callToken !== TOKEN || callGeneration !== LOGIN_GENERATION) return;
+        try { r = typeof r === 'string' ? JSON.parse(r) : r; }
+        catch (error) { reject(error); return; }
+        if (r && !r.success && String(r.code || '').toUpperCase() === 'UNAUTHENTICATED') {
+          lockAdmin('Your session ended. Sign in again.');
+          return;
+        }
+        resolve(r);
+      })
+      .withFailureHandler(function (error) {
+        if (callToken === TOKEN && callGeneration === LOGIN_GENERATION) reject(error);
+      })
+      .apiCall(action, data || {}, callToken);
+  });
+}
+function lockAdmin(message) {
+  LOGIN_GENERATION += 1;
+  TOKEN = null; ME = null;
+  try { localStorage.removeItem('pgp_admin_token'); } catch (e) {}
+  clearLoginFields();
+  resetAdminViews();
+  document.getElementById('shell').style.display = 'none';
+  document.getElementById('gate').style.display = 'flex';
+  say('gate', message || 'Sign in required.');
+}
+function say(w, t, k) {
+  var el = document.getElementById('m-' + w);
+  if (!el) return;
+  el.replaceChildren();
+  if (!t) return;
+  var message = document.createElement('div');
+  message.className = 'msg ' + (k === 'ok' ? 'ok' : 'err');
+  message.textContent = String(t);
+  el.appendChild(message);
+}
+function sayClaimCode(memberNumber, claimCode) {
+  var el = document.getElementById('m-new');
+  if (!el) return;
+  el.replaceChildren();
+  var message = document.createElement('div'); message.className = 'msg err';
+  message.appendChild(document.createTextNode('Created ' + String(memberNumber || '') +
+    ', but the invitation email could not be sent. Pass this activation code to the member by hand:'));
+  var code = document.createElement('div'); code.className = 'code'; code.textContent = String(claimCode || '');
+  message.appendChild(code); el.appendChild(message);
+}
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function jsArg(value) {
+  return esc(JSON.stringify(String(value === null || value === undefined ? '' : value))
+    .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029'));
+}
+function money(m) { return (m === null || m === undefined) ? '—' : (m / 100).toFixed(0); }
+function stored(k, v) {
+  try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; }
+}
+
+/* ── Auth ─────────────────────────────────────────────────────────────── */
+
+function signIn() {
+  var generation = ++LOGIN_GENERATION;
+  var email = document.getElementById('i-email').value.trim();
+  var pass  = document.getElementById('i-pass').value;
+  if (!email || !pass) return say('gate', 'Enter your email and password.');
+  TOKEN = null; ME = null;
+  try { localStorage.removeItem('pgp_admin_token'); } catch (e) {}
+  resetAdminViews();
+  say('gate', '');
+  api('staffLogin', { email: email, password: pass }).then(function (r) {
+    if (generation !== LOGIN_GENERATION) return;
+    if (!r.success) return say('gate', r.error);
+    TOKEN = r.token; ME = r.staff; stored('pgp_admin_token', TOKEN);
+    clearLoginFields();
+    open_();
+  }).catch(function () { if (generation === LOGIN_GENERATION) say('gate', 'Something went wrong. Try again.'); });
+}
+
+function clearLoginFields() {
+  document.getElementById('i-email').value = '';
+  document.getElementById('i-pass').value = '';
+}
+
+function resetAdminViews() {
+  BENEFITS = [];
+  document.getElementById('who').textContent = '';
+  ['o-grid', 'o-req', 'r-table', 'm-table', 'd-table', 'rep-grid', 'rep-benefit',
+    'rep-month', 'b-list', 'ol-list', 'm-new', 'm-outlet'].forEach(function (id) {
+      document.getElementById(id).replaceChildren();
+    });
+  document.getElementById('rep-min').textContent = '';
+  ['n-name', 'n-phone', 'n-email', 'ol-name', 'ol-mail'].forEach(function (id) {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('ol-cat').replaceChildren();
+}
+
+function signOut() {
+  api('signOut', {}).catch(function () {});
+  lockAdmin('Signed out.');
+}
+
+function open_() {
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('shell').style.display = 'grid';
+  document.getElementById('who').textContent = ME ? ME.fullName : '';
+  loadBenefits(); go('overview');
+}
+
+function go(view) {
+  ['overview','requests','members','redemptions','reports','benefits','outlets'].forEach(function (v) {
+    document.getElementById('v-' + v).classList.toggle('on', v === view);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.nav'), function (b) {
+    b.classList.toggle('on', b.getAttribute('data-v') === view);
+  });
+  window.scrollTo(0, 0);
+  ({ overview: loadOverview, requests: loadRequests, members: loadMembers,
+     redemptions: loadRedemptions, reports: loadReports,
+     benefits: paintBenefits, outlets: loadOutlets }[view] || function () {})();
+}
+
+/* ── Overview ─────────────────────────────────────────────────────────── */
+
+function loadOverview() {
+  api('getReports', {}).then(function (r) {
+    if (!r.success) return;
+    document.getElementById('o-grid').innerHTML =
+      cell(r.totalMembers, 'Members') +
+      cell(r.activeMembers, 'Have redeemed') +
+      cell(r.dormantMembers, 'Never redeemed');
+  });
+  api('listRequests', {}).then(function (r) {
+    var el = document.getElementById('o-req');
+    if (!r.success || !r.requests.length) return el.innerHTML = '<p class="hint">Nothing waiting.</p>';
+    el.innerHTML = '<div class="scroll">' + table(
+      ['Member', 'Benefit', 'Requested'],
+      r.requests.slice(0, 8).map(function (q) {
+        return ['<strong>' + esc(q.member) + '</strong><br><span class="hint">' + esc(q.memberNumber) + '</span>',
+                esc(q.benefit), esc(String(q.createdAt).slice(0, 16).replace('T', ' '))];
+      })) + '</div>';
+  });
+}
+function cell(n, l) { return '<div class="cell"><div class="n">' + esc(n) + '</div><div class="l">' + esc(l) + '</div></div>'; }
+function table(headers, rows) {
+  return '<table><thead><tr>' + headers.map(function (h) { return '<th>' + h + '</th>'; }).join('') +
+    '</tr></thead><tbody>' + rows.map(function (r) {
+      return '<tr>' + r.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+}
+
+/* ── Requests ─────────────────────────────────────────────────────────── */
+
+function loadRequests() {
+  api('listRequests', {}).then(function (r) {
+    var el = document.getElementById('r-table');
+    if (!r.success) return el.innerHTML = '<p class="hint">' + esc(r.error) + '</p>';
+    if (!r.requests.length) return el.innerHTML = '<p class="hint">Nothing waiting.</p>';
+    el.innerHTML = table(['Member', 'Number', 'Benefit', 'Requested', 'Note'],
+      r.requests.map(function (q) {
+        return [esc(q.member), '<span class="num">' + esc(q.memberNumber) + '</span>', esc(q.benefit),
+                esc(String(q.createdAt).slice(0, 16).replace('T', ' ')), esc(q.note)];
+      }));
+  });
+}
+
+/* ── Members ──────────────────────────────────────────────────────────── */
+
+function loadMembers() {
+  api('listMembers', {}).then(function (r) {
+    var el = document.getElementById('m-table');
+    if (!r.success) return el.innerHTML = '<p class="hint">' + esc(r.error) + '</p>';
+    if (!r.members.length) return el.innerHTML = '<p class="hint">No members yet.</p>';
+    el.innerHTML = table(['Number', 'Name', 'Status', 'Joined', 'Visits', 'Saved', ''],
+      r.members.map(function (m) {
+        var on = m.status === 'ACTIVE';
+        return [
+          '<span class="num">' + esc(m.memberNumber) + '</span>',
+          esc(m.fullName) + '<br><span class="hint">' + esc(m.email) + '</span>',
+          '<span class="pill ' + (on ? 'ok' : 'no') + '">' + esc(m.status) + '</span>' +
+            (m.claimedAt ? '' : '<br><span class="hint">not activated</span>'),
+          esc(String(m.joinedAt).slice(0, 10)),
+          '<span class="num">' + esc(m.visits) + '</span>',
+          '<span class="num">' + esc(money(m.savedMinor)) + '</span>',
+          '<button class="mini ' + (on ? 'danger' : '') + '" onclick="setStatus(' + jsArg(m.id) + ',' +
+            jsArg(on ? 'SUSPENDED' : 'ACTIVE') + ')">' + (on ? 'Suspend' : 'Reinstate') + '</button>'
+        ];
+      }));
+  });
+}
+
+function createMember() {
+  var name  = document.getElementById('n-name').value.trim();
+  var phone = document.getElementById('n-phone').value.trim();
+  var email = document.getElementById('n-email').value.trim();
+  say('new', '');
+  api('createMember', { fullName: name, phone: phone, email: email }).then(function (r) {
+    if (!r.success) return say('new', r.error);
+    if (r.delivered) {
+      say('new', 'Created ' + r.memberNumber + '. The invitation is on its way.', 'ok');
+    } else {
+      // Delivery failed, so the code must reach the administrator instead —
+      // otherwise the member simply cannot activate.
+      sayClaimCode(r.memberNumber, r.claimCode);
+    }
+    ['n-name', 'n-phone', 'n-email'].forEach(function (id) { document.getElementById(id).value = ''; });
+    loadMembers();
+  }).catch(function () { say('new', 'Something went wrong. Try again.'); });
+}
+
+function setStatus(id, status) {
+  if (status === 'SUSPENDED' &&
+      !confirm('Suspend this membership? They will be signed out immediately and cannot use benefits.')) return;
+  api('setMemberStatus', { memberId: id, status: status }).then(function () { loadMembers(); });
+}
+
+/* ── Redemptions ──────────────────────────────────────────────────────── */
+
+function loadRedemptions() {
+  api('listRedemptions', { limit: 200 }).then(function (r) {
+    var el = document.getElementById('d-table');
+    if (!r.success) return el.innerHTML = '<p class="hint">' + esc(r.error) + '</p>';
+    if (!r.redemptions.length) return el.innerHTML = '<p class="hint">Nothing recorded yet.</p>';
+    el.innerHTML = table(['When', 'Member', 'Benefit', 'Outlet', 'Party', 'Saved', ''],
+      r.redemptions.map(function (x) {
+        return [
+          esc(String(x.recordedAt).slice(0, 16).replace('T', ' ')),
+          esc(x.member) + '<br><span class="hint">' + esc(x.memberNumber) + '</span>',
+          esc(x.benefit) + (x.reversal ? ' <span class="pill no">Reversal</span>' : ''),
+          esc(x.outlet),
+          '<span class="num">' + esc(x.partySize) + '</span>',
+          '<span class="num">' + esc(money(x.savedMinor)) + '</span>',
+          x.reversal ? '' : '<button class="mini danger" onclick="reverse(' + jsArg(x.id) + ')">Reverse</button>'
+        ];
+      }));
+  });
+}
+
+function reverse(id) {
+  var why = prompt('Reversing does not delete the original — it records a correction alongside it.\n\nReason:');
+  if (why === null) return;
+  api('reverseRedemption', { redemptionId: id, reason: why }).then(function (r) {
+    if (!r.success) alert(r.error);
+    loadRedemptions();
+  });
+}
+
+/* ── Reports ──────────────────────────────────────────────────────────── */
+
+function loadReports() {
+  api('getReports', {}).then(function (r) {
+    if (!r.success) return;
+    document.getElementById('rep-min').textContent = r.minCohort;
+    document.getElementById('rep-grid').innerHTML =
+      cell(r.totalMembers, 'Members') +
+      cell(r.activeMembers, 'Have redeemed') +
+      cell(r.dormantMembers, 'Never redeemed');
+
+    var pair = function (obj) {
+      var keys = Object.keys(obj).sort();
+      if (!keys.length) return '<p class="hint">No data yet.</p>';
+      return table(['', 'Redemptions'], keys.map(function (k) {
+        return [esc(k), '<span class="num">' + esc(obj[k] === null ? '—' : obj[k]) + '</span>'];
+      }));
+    };
+    document.getElementById('rep-benefit').innerHTML = pair(r.byBenefit);
+    document.getElementById('rep-month').innerHTML   = pair(r.byMonth);
+  });
+}
+
+/* ── Benefits ─────────────────────────────────────────────────────────── */
+
+function loadBenefits() {
+  api('getBenefits', {}).then(function (r) {
+    if (r.success) { BENEFITS = r.benefits; paintBenefits(); paintCategories(); }
+  });
+}
+
+function paintBenefits() {
+  var el = document.getElementById('b-list');
+  if (!el) return;
+  if (!BENEFITS.length) return el.innerHTML = '<p class="hint">No benefits configured.</p>';
+  el.innerHTML = BENEFITS.map(function (b, i) {
+    return '<div class="panel"><h2>' + esc(b.title) + ' <span class="hint">· v' + esc(b.version) + '</span></h2>' +
+      '<div class="fields">' +
+textField('bf-cat-' + i, 'Category', b.category) +
+textField('bf-disc-' + i, 'Discount', b.discount) +
+textField('bf-max-' + i, 'Max party', b.maxParty === null ? '' : b.maxParty) +
+textField('bf-tel-' + i, 'Reservations', b.reservationPhone) +
+      '<div><label for="bf-pub-' + i + '">Visibility</label>' +
+      '<label><input id="bf-pub-' + i + '" type="checkbox" ' + (b.published ? 'checked' : '') + '> Published to members</label></div>' +
+      '</div>' +
+      '<label for="bf-terms-' + i + '">Terms</label>' +
+      '<textarea id="bf-terms-' + i + '" rows="2">' + esc(b.terms) + '</textarea>' +
+      '<div style="margin-top:.9rem"><button class="go" onclick="saveBenefit(' + i + ')">Save</button></div>' +
+      '<div id="m-bf-' + i + '"></div></div>';
+  }).join('');
+}
+/** One labelled text input, used to build the benefit editor rows. */
+function textField(id, label, value) {
+  return '<div><label for="' + id + '">' + label + '</label>' +
+    '<input id="' + id + '" type="text" value="' + esc(value) + '"></div>';
+}
+
+function saveBenefit(i) {
+  var b = BENEFITS[i];
+  var v = function (p) { return document.getElementById(p + '-' + i).value.trim(); };
+  api('upsertBenefit', { benefit: {
+    id: b.id, slug: b.slug, title: b.title,
+    category: v('bf-cat'), discount: v('bf-disc'),
+    maxParty: v('bf-max'), reservationPhone: v('bf-tel'), terms: v('bf-terms'),
+    published: document.getElementById('bf-pub-' + i).checked
+  }}).then(function (r) {
+    var el = document.getElementById('m-bf-' + i);
+    el.innerHTML = '<div class="msg ' + (r.success ? 'ok' : 'err') + '">' +
+      (r.success ? 'Saved. Members see the change immediately.' : esc(r.error)) + '</div>';
+    if (r.success) loadBenefits();
+  });
+}
+
+/* ── Outlets ──────────────────────────────────────────────────────────── */
+
+function paintCategories() {
+  var sel = document.getElementById('ol-cat');
+  if (!sel) return;
+  var cats = {};
+  BENEFITS.forEach(function (b) { cats[b.category] = true; });
+  sel.innerHTML = Object.keys(cats).map(function (c) {
+    return '<option value="' + esc(c) + '">' + esc(c) + '</option>';
+  }).join('');
+}
+
+function loadOutlets() {
+  paintCategories();
+  api('listOutlets', {}).then(function (r) {
+    var el = document.getElementById('ol-list');
+    if (!r.success) return el.innerHTML = '<p class="hint">' + esc(r.error) + '</p>';
+    if (!r.outlets.length) return el.innerHTML = '<p class="hint">No outlets yet.</p>';
+    el.innerHTML = r.outlets.map(function (o) {
+      return '<div class="panel"><h2>' + esc(o.name) +
+        ' <span class="pill ' + (o.active ? 'ok' : 'no') + '">' + (o.active ? 'Active' : 'Inactive') + '</span></h2>' +
+        '<div class="scroll">' + table(['Category', 'Notifications'],
+          [[esc(o.category), esc(o.notifyEmail) || '<span class="hint">none set</span>']]) + '</div>' +
+        '<h2 style="margin-top:1.1rem;font-size:.95rem">Devices</h2>' +
+        (o.devices.length
+          ? '<div class="scroll">' + table(['Label', 'Issued', ''], o.devices.map(function (d) {
+              return [esc(d.label), esc(String(d.issuedAt).slice(0, 10)),
+                '<button class="mini danger" onclick="revokeDevice(' + jsArg(d.id) + ')">Revoke</button>'];
+            })) + '</div>'
+          : '<p class="hint">No devices authorised.</p>') +
+        '<div style="margin-top:.9rem;display:flex;gap:.6rem;flex-wrap:wrap">' +
+          '<input id="dev-' + esc(o.id) + '" type="text" placeholder="Counter tablet" style="max-width:16rem">' +
+          '<button class="go" onclick="issueDevice(' + jsArg(o.id) + ')">Issue device token</button></div>' +
+        '<div id="m-dev-' + esc(o.id) + '"></div></div>';
+    }).join('');
+  });
+}
+
+function addOutlet() {
+  var name = document.getElementById('ol-name').value.trim();
+  var cat  = document.getElementById('ol-cat').value;
+  var mail = document.getElementById('ol-mail').value.trim();
+  say('outlet', '');
+  api('upsertOutlet', { outlet: { name: name, category: cat, notifyEmail: mail } }).then(function (r) {
+    if (!r.success) return say('outlet', r.error);
+    say('outlet', 'Outlet added.', 'ok');
+    document.getElementById('ol-name').value = '';
+    document.getElementById('ol-mail').value = '';
+    loadOutlets();
+  });
+}
+
+function issueDevice(outletId) {
+  var label = document.getElementById('dev-' + outletId).value.trim() || 'Counter device';
+  api('issueOutletToken', { outletId: outletId, label: label }).then(function (r) {
+    var el = document.getElementById('m-dev-' + outletId);
+    if (!r.success) return el.innerHTML = '<div class="msg err">' + esc(r.error) + '</div>';
+    // Shown once and never again — the sheet holds only its hash.
+    el.innerHTML = '<div class="msg ok">Token for <strong>' + esc(label) +
+      '</strong>. Enter it on that device now — it cannot be shown again.' +
+      '<div class="code">' + esc(r.deviceToken) + '</div></div>';
+    document.getElementById('dev-' + outletId).value = '';
+  });
+}
+
+function revokeDevice(id) {
+  if (!confirm('Revoke this device? It will be signed out immediately.')) return;
+  api('revokeOutletToken', { tokenId: id }).then(function () { loadOutlets(); });
+}
+
+/* ── Boot ─────────────────────────────────────────────────────────────── */
+
+(function () {
+  var saved = stored('pgp_admin_token');
+  if (!saved) return;
+  TOKEN = saved;
+  api('whoAmI', {}).then(function (r) {
+    if (r.success && r.type === 'staff') { ME = { fullName: r.name, role: r.role }; open_(); }
+    else { TOKEN = null; try { localStorage.removeItem('pgp_admin_token'); } catch (e) {} }
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>
