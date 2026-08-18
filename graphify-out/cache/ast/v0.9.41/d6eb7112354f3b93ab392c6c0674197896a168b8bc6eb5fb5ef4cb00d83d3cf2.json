@@ -1,0 +1,1 @@
+{"nodes": [{"id": "$graphify-root$_apps_api_prisma_migrations_20260812090200_request_closure_constraint_migration_sql", "label": "migration.sql", "file_type": "code", "source_file": "apps/api/prisma/migrations/20260812090200_request_closure_constraint/migration.sql", "source_location": null}], "edges": []}

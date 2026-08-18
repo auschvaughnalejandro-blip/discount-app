@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<title>Privilege Guest — Outlet</title>
+<style>
+/* Counter tablet. Bigger targets, less decoration than the member app — this is
+   used standing up, in a hurry, often one-handed. */
+:root{
+  --base:#221c1b; --surface:#382f2d; --surface-2:#4a4240;
+  --text:#f5f1ea; --text-muted:rgb(245 241 234/.6); --text-faint:rgb(245 241 234/.42);
+  --sand:#ecd7a3; --gold-line:#b4954f; --gold-bright:#ebd79b;
+  --mint:#bfe1db; --peach:#edbab4;
+  --hairline:rgb(245 241 234/.12); --divider:rgb(245 241 234/.1);
+  --font:'Jost','Century Gothic','Futura','Trebuchet MS',ui-sans-serif,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--base);color:var(--text);font-family:var(--font);font-size:17px;line-height:1.5}
+.app{max-width:46rem;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+.screen{display:none;flex:1;flex-direction:column}
+.screen.on{display:flex}
+
+.bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:1rem 1.25rem;border-bottom:1px solid var(--hairline)}
+.eyebrow{font-size:.66rem;text-transform:uppercase;letter-spacing:.2em;color:var(--sand);font-weight:600}
+.title{font-size:1.1rem;font-weight:600}
+.pad{padding:1.25rem}
+.stack{display:flex;flex-direction:column;gap:1.1rem}
+.muted{color:var(--text-muted);font-size:.92rem}
+.faint{color:var(--text-faint);font-size:.82rem}
+
+label{display:block;font-size:.7rem;text-transform:uppercase;letter-spacing:.14em;
+  color:var(--text-faint);margin-bottom:.45rem;font-weight:600}
+.field{display:flex;align-items:center;background:var(--surface);
+  border:1px solid var(--hairline);border-radius:2px}
+.field:focus-within{border-color:var(--gold-line)}
+input,select{flex:1;background:none;border:0;color:var(--text);font-family:var(--font);
+  font-size:1.05rem;padding:1rem;outline:none;min-width:0}
+select{appearance:none;cursor:pointer}
+select option{background:var(--surface);color:var(--text)}
+input.big{font-family:var(--mono);font-size:1.4rem;letter-spacing:.12em;text-align:center}
+button.primary{width:100%;background:var(--sand);color:var(--base);border:0;border-radius:2px;
+  padding:1.1rem;font-family:var(--font);font-size:1rem;font-weight:650;letter-spacing:.04em;
+  cursor:pointer;text-transform:uppercase}
+button.primary:disabled{opacity:.4;cursor:not-allowed}
+button.ghost{background:none;border:1px solid var(--hairline);color:var(--text);
+  font-family:var(--font);font-size:.9rem;cursor:pointer;padding:.75rem 1rem;border-radius:2px}
+.msg{font-size:.9rem;padding:.85rem 1rem;border-radius:2px;border:1px solid}
+.msg.err{color:var(--peach);border-color:rgb(237 186 180/.35);background:rgb(237 186 180/.08)}
+.msg.ok{color:var(--mint);border-color:rgb(191 225 219/.35);background:rgb(191 225 219/.08)}
+
+/* Verdict panel — must be readable across a counter at a glance */
+.verdict{border:2px solid;border-radius:3px;padding:1.25rem}
+.verdict.valid{border-color:var(--mint);background:rgb(191 225 219/.07)}
+.verdict.invalid{border-color:var(--peach);background:rgb(237 186 180/.07)}
+.verdict .flag{font-size:1.3rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.verdict.valid .flag{color:var(--mint)}
+.verdict.invalid .flag{color:var(--peach)}
+.verdict .who{font-size:1.35rem;font-weight:600;margin-top:.5rem}
+.verdict .num{font-family:var(--mono);color:var(--sand);letter-spacing:.16em;margin-top:.2rem}
+
+.q{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  padding:1rem 0;border-bottom:1px solid var(--divider)}
+.q>div{min-width:0}
+.q .n{font-size:1.05rem;font-weight:600}
+.q .d{font-size:.8rem;color:var(--text-faint);margin-top:.15rem;overflow-wrap:anywhere}
+.row{display:flex;justify-content:space-between;gap:1rem;padding:.7rem 0;
+  border-bottom:1px solid var(--divider);font-size:.9rem}
+.row .k{color:var(--text-faint)}
+.row .v{font-family:var(--mono);text-align:right}
+.pill{display:inline-block;font-size:.62rem;text-transform:uppercase;letter-spacing:.12em;
+  font-weight:700;padding:.22em .6em;border-radius:2px}
+.pill.ok{color:var(--mint);background:rgb(191 225 219/.12)}
+.pill.no{color:var(--peach);background:rgb(237 186 180/.12)}
+
+.tabs{position:sticky;bottom:0;display:grid;grid-template-columns:repeat(3,1fr);
+  background:var(--base);border-top:1px solid var(--hairline)}
+.tab{background:none;border:0;color:var(--text-faint);font-family:var(--font);font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.12em;padding:1.05rem .3rem;cursor:pointer}
+.tab.on{color:var(--sand)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Device sign-in ───────────────────────────────────────────────────── -->
+  <section id="s-auth" class="screen on">
+    <div class="pad stack" style="justify-content:center;flex:1;max-width:26rem;margin:0 auto;width:100%">
+      <div>
+        <div class="eyebrow">Privilege Guest</div>
+        <h1 style="font-size:1.6rem;font-weight:500;margin-top:.3rem">Outlet screen</h1>
+        <p class="muted" style="margin-top:.5rem">Enter this device's token. An administrator issues one per tablet.</p>
+      </div>
+      <div>
+        <label for="i-dev">Device token</label>
+        <div class="field"><input id="i-dev" class="big" type="text" autocapitalize="characters" placeholder="XXXXXXXX"></div>
+      </div>
+      <div id="m-auth"></div>
+      <button class="primary" onclick="deviceLogin()">Sign in</button>
+      <p class="faint">The token belongs to this device, not to you. It stays signed in between shifts.</p>
+    </div>
+  </section>
+
+  <!-- Queue ────────────────────────────────────────────────────────────── -->
+  <section id="s-queue" class="screen">
+    <div class="bar">
+      <div><div class="eyebrow" id="q-outlet">Outlet</div><div class="title">Expected today</div></div>
+      <button class="ghost" onclick="loadQueue()">Refresh</button>
+    </div>
+    <div class="pad"><div id="queue"><p class="muted">Loading…</p></div></div>
+    <nav class="tabs">
+      <button class="tab on" onclick="tab('queue')">Queue</button>
+      <button class="tab" onclick="tab('lookup')">Look up</button>
+      <button class="tab" onclick="tab('history')">History</button>
+    </nav>
+  </section>
+
+  <!-- Lookup + record ──────────────────────────────────────────────────── -->
+  <section id="s-lookup" class="screen">
+    <div class="bar"><div><div class="eyebrow" id="l-outlet">Outlet</div><div class="title">Look up a member</div></div></div>
+    <div class="pad stack">
+      <div>
+        <label for="i-q">Membership number or card code</label>
+        <div class="field"><input id="i-q" type="text" placeholder="PG-0003" autocapitalize="characters"></div>
+      </div>
+      <button class="primary" onclick="lookup()">Look up</button>
+      <div id="m-lookup"></div>
+
+      <div id="result" style="display:none" class="stack">
+        <div id="verdict" class="verdict"></div>
+        <div>
+          <label for="i-benefit">Benefit</label>
+          <div class="field"><select id="i-benefit"></select></div>
+        </div>
+        <div>
+          <label for="i-party">Party size <span style="color:var(--peach)">· required</span></label>
+          <div class="field"><input id="i-party" type="number" min="1" value="1"></div>
+          <p class="faint" id="cap-note" style="margin-top:.4rem"></p>
+        </div>
+        <div>
+          <label for="i-bill">Bill total, QAR <span style="color:var(--text-faint)">· optional</span></label>
+          <div class="field"><input id="i-bill" type="number" min="0" step="0.01" placeholder="Leave blank if not known"></div>
+          <p class="faint" style="margin-top:.4rem">Entering the bill is what lets the member see what they saved. Leave it blank rather than guessing.</p>
+        </div>
+        <div id="m-record"></div>
+        <button id="record-button" class="primary" type="button" onclick="record()">Record redemption</button>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab" onclick="tab('queue')">Queue</button>
+      <button class="tab on" onclick="tab('lookup')">Look up</button>
+      <button class="tab" onclick="tab('history')">History</button>
+    </nav>
+  </section>
+
+  <!-- History ──────────────────────────────────────────────────────────── -->
+  <section id="s-history" class="screen">
+    <div class="bar">
+      <div><div class="eyebrow">This outlet</div><div class="title">Recorded</div></div>
+      <button class="ghost" onclick="loadHistory()">Refresh</button>
+    </div>
+    <div class="pad"><div id="history"><p class="muted">Loading…</p></div></div>
+    <nav class="tabs">
+      <button class="tab" onclick="tab('queue')">Queue</button>
+      <button class="tab" onclick="tab('lookup')">Look up</button>
+      <button class="tab on" onclick="tab('history')">History</button>
+    </nav>
+  </section>
+
+</div>
+
+<script>
+var TOKEN = null, OUTLET = null, FOUND = null, BENEFITS = [], RECORDING = false, QUEUED_REQUEST = null;
+var LOGIN_GENERATION = 0, LOOKUP_GENERATION = 0, RECORD_GENERATION = 0, SUCCESS_TIMER = null;
+
+function api(action, data) {
+  var callToken = TOKEN;
+  var callGeneration = LOGIN_GENERATION;
+  return new Promise(function (resolve, reject) {
+    google.script.run
+      .withSuccessHandler(function (r) {
+        if (callToken !== TOKEN || callGeneration !== LOGIN_GENERATION) return;
+        try { r = typeof r === 'string' ? JSON.parse(r) : r; }
+        catch (error) { reject(error); return; }
+        if (r && !r.success && String(r.code || '').toUpperCase() === 'UNAUTHENTICATED') {
+          lockOutlet('This device session ended. Enter the device token again.');
+          return;
+        }
+        resolve(r);
+      })
+      .withFailureHandler(function (error) {
+        if (callToken === TOKEN && callGeneration === LOGIN_GENERATION) reject(error);
+      })
+      .apiCall(action, data || {}, callToken);
+  });
+}
+function lockOutlet(message) {
+  LOGIN_GENERATION += 1; LOOKUP_GENERATION += 1; RECORD_GENERATION += 1;
+  if (SUCCESS_TIMER !== null) window.clearTimeout(SUCCESS_TIMER);
+  SUCCESS_TIMER = null;
+  TOKEN = null; OUTLET = null; FOUND = null; BENEFITS = [];
+  RECORDING = false; QUEUED_REQUEST = null;
+  try { localStorage.removeItem('pgp_outlet_token'); } catch (e) {}
+  resetOutletViews();
+  tab('auth');
+  say('auth', message || 'Device sign-in required.');
+}
+function tab(name) {
+  ['auth','queue','lookup','history'].forEach(function (n) {
+    var el = document.getElementById('s-' + n);
+    if (el) el.classList.toggle('on', n === name);
+  });
+  window.scrollTo(0, 0);
+  if (name === 'queue')   loadQueue();
+  if (name === 'history') loadHistory();
+}
+function say(w, t, k) {
+  var el = document.getElementById('m-' + w);
+  if (!el) return;
+  el.replaceChildren();
+  if (!t) return;
+  var message = document.createElement('div');
+  message.className = 'msg ' + (k === 'ok' ? 'ok' : 'err');
+  message.textContent = String(t);
+  el.appendChild(message);
+}
+function money(m) { return (m === null || m === undefined) ? '—' : (m / 100).toFixed(0); }
+function paragraph(className, value) {
+  var p = document.createElement('p'); p.className = className; p.textContent = String(value); return p;
+}
+function recordingKey() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+  return String(Date.now()) + '-' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+function setRecordBusy(busy) {
+  RECORDING = busy;
+  var button = document.getElementById('record-button');
+  if (!button) return;
+  button.disabled = busy;
+  button.textContent = busy ? 'Recording…' : 'Record redemption';
+}
+function resetOutletViews() {
+  ['q-outlet', 'l-outlet'].forEach(function (id) { document.getElementById(id).textContent = 'Outlet'; });
+  document.getElementById('queue').replaceChildren();
+  document.getElementById('history').replaceChildren();
+  document.getElementById('i-q').value = '';
+  document.getElementById('verdict').className = 'verdict';
+  document.getElementById('verdict').replaceChildren();
+  var benefits = document.getElementById('i-benefit');
+  benefits.replaceChildren(); benefits.disabled = false; benefits.onchange = null;
+  var party = document.getElementById('i-party');
+  party.value = '1'; party.min = '1'; party.removeAttribute('max');
+  document.getElementById('i-bill').value = '';
+  document.getElementById('cap-note').textContent = '';
+  document.getElementById('result').style.display = 'none';
+  say('lookup', ''); say('record', '');
+  setRecordBusy(false);
+  document.getElementById('record-button').disabled = true;
+}
+function stored(k, v) {
+  try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; }
+}
+
+/* ── Device sign-in ───────────────────────────────────────────────────── */
+
+function deviceLogin() {
+  var generation = ++LOGIN_GENERATION;
+  var t = document.getElementById('i-dev').value.trim();
+  if (!t) return say('auth', 'Enter the device token.');
+  LOOKUP_GENERATION += 1; RECORD_GENERATION += 1;
+  if (SUCCESS_TIMER !== null) window.clearTimeout(SUCCESS_TIMER);
+  SUCCESS_TIMER = null;
+  TOKEN = null; OUTLET = null; FOUND = null; BENEFITS = [];
+  RECORDING = false; QUEUED_REQUEST = null;
+  try { localStorage.removeItem('pgp_outlet_token'); } catch (e) {}
+  resetOutletViews();
+  say('auth', '');
+  api('outletLogin', { deviceToken: t }).then(function (r) {
+    if (generation !== LOGIN_GENERATION) return;
+    if (!r.success) return say('auth', r.error);
+    TOKEN = r.token; OUTLET = r.outlet; stored('pgp_outlet_token', TOKEN);
+    document.getElementById('i-dev').value = '';
+    paintOutlet(); tab('queue');
+  }).catch(function () { if (generation === LOGIN_GENERATION) say('auth', 'Something went wrong. Try again.'); });
+}
+
+function paintOutlet() {
+  ['q-outlet', 'l-outlet'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el && OUTLET) el.textContent = OUTLET.name;
+  });
+}
+
+/* ── Queue ────────────────────────────────────────────────────────────── */
+
+function loadQueue() {
+  api('getOutletQueue', {}).then(function (r) {
+    var el = document.getElementById('queue');
+    el.replaceChildren();
+    if (!r.success) { el.appendChild(paragraph('muted', r.error || 'Could not load.')); return; }
+    if (!r.queue.length) { el.appendChild(paragraph('muted', 'Nobody expected right now.')); return; }
+    r.queue.forEach(function (q) {
+      var row = document.createElement('div'); row.className = 'q';
+      var copy = document.createElement('div');
+      var name = document.createElement('div'); name.className = 'n';
+      name.appendChild(document.createTextNode(String(q.member || '') + ' '));
+      var validity = document.createElement('span');
+      validity.className = 'pill ' + (q.valid ? 'ok' : 'no');
+      validity.textContent = q.valid ? 'Valid' : 'Not valid';
+      name.appendChild(validity);
+      var detail = document.createElement('div'); detail.className = 'd';
+      detail.textContent = [q.memberNumber || '', q.benefit || '', String(q.requestedAt || '').slice(11, 16)].filter(Boolean).join(' · ');
+      copy.append(name, detail);
+      if (q.note) {
+        var note = document.createElement('div'); note.className = 'd'; note.textContent = String(q.note);
+        copy.appendChild(note);
+      }
+      var recordButton = document.createElement('button');
+      recordButton.type = 'button'; recordButton.className = 'ghost'; recordButton.textContent = 'Record';
+      recordButton.addEventListener('click', function () {
+        fromQueue(String(q.memberNumber || ''), String(q.id || ''), String(q.benefitId || ''));
+      });
+      row.append(copy, recordButton); el.appendChild(row);
+    });
+  }).catch(function () {
+    var el = document.getElementById('queue'); el.replaceChildren(paragraph('muted', 'Could not load.'));
+  });
+}
+
+function fromQueue(number, requestId, benefitId) {
+  if (RECORDING) return;
+  QUEUED_REQUEST = { id: requestId, benefitId: benefitId };
+  tab('lookup');
+  document.getElementById('i-q').value = number;
+  lookup(true);
+}
+
+/* ── Lookup and record ────────────────────────────────────────────────── */
+
+function lookup(fromQueued) {
+  if (RECORDING) return;
+  var generation = ++LOOKUP_GENERATION;
+  FOUND = null; BENEFITS = [];
+  if (!fromQueued) QUEUED_REQUEST = null;
+  var q = document.getElementById('i-q').value.trim();
+  say('lookup', ''); say('record', '');
+  setRecordBusy(false);
+  document.getElementById('record-button').disabled = true;
+  document.getElementById('result').style.display = 'none';
+  if (!q) return say('lookup', 'Enter a membership number or card code.');
+
+  api('resolveMember', { query: q }).then(function (r) {
+    if (generation !== LOOKUP_GENERATION) return;
+    if (!r.success) return say('lookup', r.error);
+    FOUND = r; FOUND.idempotencyKey = recordingKey(); BENEFITS = Array.isArray(r.benefits) ? r.benefits : [];
+
+    var v = document.getElementById('verdict');
+    v.className = 'verdict ' + (r.valid ? 'valid' : 'invalid');
+    v.replaceChildren();
+    var flag = document.createElement('div'); flag.className = 'flag';
+    flag.textContent = r.valid ? 'Valid membership' : 'Not valid — do not apply';
+    var who = document.createElement('div'); who.className = 'who';
+    who.textContent = r.valid ? String(r.member.fullName || 'Member') : 'Membership unavailable';
+    var number = document.createElement('div'); number.className = 'num'; number.textContent = String(r.member.memberNumber || '');
+    v.append(flag, who, number);
+    if (!r.valid) {
+      var warning = paragraph('muted', 'This membership is not active. Do not apply the discount.');
+      warning.style.marginTop = '.6rem'; v.appendChild(warning);
+    }
+
+    var sel = document.getElementById('i-benefit');
+    sel.replaceChildren();
+    BENEFITS.forEach(function (b) {
+      var option = document.createElement('option'); option.value = String(b.id || '');
+      option.textContent = String(b.title || 'Benefit') + ' · ' + String(b.discount || '');
+      sel.appendChild(option);
+    });
+    if (QUEUED_REQUEST && QUEUED_REQUEST.benefitId) sel.value = QUEUED_REQUEST.benefitId;
+    sel.disabled = !!(QUEUED_REQUEST && QUEUED_REQUEST.benefitId);
+    sel.onchange = capNote; capNote();
+    var queuedBenefitMissing = !!(QUEUED_REQUEST && QUEUED_REQUEST.benefitId &&
+      sel.value !== QUEUED_REQUEST.benefitId);
+    document.getElementById('record-button').disabled = !r.valid || BENEFITS.length === 0 || queuedBenefitMissing;
+    if (r.valid && BENEFITS.length === 0)
+      say('record', 'This outlet has no configured benefit it can record. Ask an administrator.');
+    else if (queuedBenefitMissing)
+      say('record', 'The announced benefit is not configured for this outlet. Ask an administrator.');
+
+    document.getElementById('result').style.display = '';
+  }).catch(function () { if (generation === LOOKUP_GENERATION) say('lookup', 'Something went wrong. Try again.'); });
+}
+
+function capNote() {
+  var id = document.getElementById('i-benefit').value;
+  var b = BENEFITS.filter(function (x) { return String(x.id || '') === id; })[0];
+  var note = document.getElementById('cap-note');
+  var party = document.getElementById('i-party');
+  var minimum = b ? guestLimit(b.minGuests) : null;
+  var maximum = b ? guestLimit(b.maxParty) : null;
+  party.min = String(minimum || 1);
+  if (maximum) party.max = String(maximum); else party.removeAttribute('max');
+  var current = Number(party.value || 0);
+  if (!current || current < (minimum || 1)) party.value = String(minimum || 1);
+  else if (maximum && current > maximum) party.value = String(maximum);
+  if (minimum && maximum) note.textContent = 'This benefit requires ' + minimum + ' to ' + maximum + ' people.';
+  else if (minimum) note.textContent = 'This benefit requires at least ' + minimum + ' people.';
+  else if (maximum) note.textContent = 'This benefit allows a maximum of ' + maximum + ' people.';
+  else note.textContent = 'No party limit on this benefit.';
+}
+function guestLimit(value) {
+  var number = Number(value);
+  return isFinite(number) && Math.floor(number) === number && number > 0 ? number : null;
+}
+
+function record() {
+  if (!FOUND || RECORDING) return;
+  if (!FOUND.valid) return say('record', 'This membership is not valid. Do not record a redemption.');
+  var party = Number(document.getElementById('i-party').value || 0);
+  if (!party) return say('record', 'Party size is required.');
+  var benefitId = document.getElementById('i-benefit').value;
+  var selectedBenefit = BENEFITS.filter(function (benefit) { return String(benefit.id || '') === benefitId; })[0];
+  if (!selectedBenefit) return say('record', 'Choose an available benefit.');
+  var minimum = guestLimit(selectedBenefit.minGuests); var maximum = guestLimit(selectedBenefit.maxParty);
+  if (minimum && party < minimum) return say('record', 'This benefit requires at least ' + minimum + ' people.');
+  if (maximum && party > maximum) return say('record', 'This benefit allows a maximum of ' + maximum + ' people.');
+  var billStr = document.getElementById('i-bill').value.trim();
+  var billMinor = billStr === '' ? null : Math.round(parseFloat(billStr) * 100);
+  var found = FOUND; var queuedRequest = QUEUED_REQUEST;
+  var generation = ++RECORD_GENERATION; var lookupGeneration = LOOKUP_GENERATION;
+
+  say('record', '');
+  setRecordBusy(true);
+  api('recordRedemption', {
+    memberId: found.member.id,
+    benefitId: benefitId,
+    partySize: party,
+    billMinor: billMinor,
+    requestId: queuedRequest ? queuedRequest.id : '',
+    verificationSession: found.verificationSession,
+    idempotencyKey: found.idempotencyKey
+  }).then(function (r) {
+    if (generation !== RECORD_GENERATION || lookupGeneration !== LOOKUP_GENERATION) return;
+    if (!r.success) { setRecordBusy(false); return say('record', r.error); }
+    say('record', 'Recorded' + (r.savedMinor !== null && r.savedMinor !== undefined
+      ? ' — the member saved QAR ' + money(r.savedMinor) : '') + '.', 'ok');
+    document.getElementById('i-bill').value = '';
+    document.getElementById('i-party').value = 1;
+    if (SUCCESS_TIMER !== null) window.clearTimeout(SUCCESS_TIMER);
+    SUCCESS_TIMER = window.setTimeout(function () {
+      if (generation !== RECORD_GENERATION || lookupGeneration !== LOOKUP_GENERATION) return;
+      SUCCESS_TIMER = null;
+      document.getElementById('result').style.display = 'none';
+      document.getElementById('i-q').value = '';
+      FOUND = null; BENEFITS = []; QUEUED_REQUEST = null;
+      setRecordBusy(false);
+    }, 2500);
+  }).catch(function () {
+    if (generation !== RECORD_GENERATION || lookupGeneration !== LOOKUP_GENERATION) return;
+    setRecordBusy(false); say('record', 'Something went wrong. Try again.');
+  });
+}
+
+/* ── History ──────────────────────────────────────────────────────────── */
+
+function loadHistory() {
+  api('listRedemptions', { limit: 60 }).then(function (r) {
+    var el = document.getElementById('history');
+    el.replaceChildren();
+    if (!r.success) { el.appendChild(paragraph('muted', r.error || 'Could not load.')); return; }
+    if (!r.redemptions.length) { el.appendChild(paragraph('muted', 'Nothing recorded yet.')); return; }
+    r.redemptions.forEach(function (x) {
+      var row = document.createElement('div'); row.className = 'row';
+      var copy = document.createElement('span'); copy.className = 'k';
+      copy.appendChild(document.createTextNode([x.member || '', x.benefit || '', x.reversal ? 'reversed' : ''].filter(Boolean).join(' · ')));
+      copy.appendChild(document.createElement('br'));
+      var meta = document.createElement('span'); meta.className = 'faint';
+      meta.textContent = String(x.recordedAt || '').slice(0, 16).replace('T', ' ') +
+        (x.partySize === null || x.partySize === undefined ? '' : ' · ' + String(x.partySize) + ' guests');
+      copy.appendChild(meta);
+      var value = document.createElement('span'); value.className = 'v'; value.textContent = money(x.savedMinor);
+      row.append(copy, value); el.appendChild(row);
+    });
+  }).catch(function () {
+    var el = document.getElementById('history'); el.replaceChildren(paragraph('muted', 'Could not load.'));
+  });
+}
+
+/* ── Boot ─────────────────────────────────────────────────────────────── */
+
+(function () {
+  var saved = stored('pgp_outlet_token');
+  if (!saved) return;
+  TOKEN = saved;
+  api('whoAmI', {}).then(function (r) {
+    if (r.success && r.type === 'outlet') {
+      OUTLET = { id: r.outletId, name: r.name, category: r.category };
+      paintOutlet(); tab('queue');
+    } else {
+      lockOutlet('This device session ended. Enter the device token again.');
+    }
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

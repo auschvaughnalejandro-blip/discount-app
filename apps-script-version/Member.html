@@ -1,0 +1,1612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="dark">
+  <meta id="asset-config" data-base="<?= assetBase ?>">
+  <title>Privilege Guest</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      --font-mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+      --font-display: "Futura Std", "Futura PT", Futura, Jost, "Century Gothic", "URW Gothic", var(--font-sans);
+      --font-wordmark: "Fairplex Narrow OT", "Fairplex Narrow", "PT Serif Caption", Georgia, serif;
+      --base: #221c1b;
+      --surface: #382f2d;
+      --surface-2: #4a4240;
+      --paper: #edeae4;
+      --text: #f5f1ea;
+      --text-muted: rgb(245 241 234 / .6);
+      --text-faint: rgb(245 241 234 / .42);
+      --sand: #ecd7a3;
+      --gold-line: #b4954f;
+      --gold-bright: #ebd79b;
+      --gold-soft: #d6be8a;
+      --mint: #bfe1db;
+      --peach: #edbab4;
+      --grey: #c1c6c8;
+      --hairline: rgb(245 241 234 / .12);
+      --divider: rgb(245 241 234 / .1);
+      --card-gradient: linear-gradient(147.8deg, #221c1b 0%, #221c1b 9%, #49413f 75%, #4a4240 100%);
+      --c-ok: #7fc9a9;
+      --c-ok-soft: rgb(127 201 169 / .12);
+      --c-ok-ink: #a8dcc5;
+      --c-warn: #e2c268;
+      --c-warn-soft: rgb(226 194 104 / .12);
+      --c-warn-ink: #edd694;
+      --c-critical: #e88f86;
+      --c-critical-soft: rgb(232 143 134 / .12);
+      --c-critical-ink: #f0b3ac;
+      --t-title: 30px;
+      --t-title-auth: 26px;
+      --t-hero: 52px;
+      --t-card-title: 17px;
+      --t-body: 13px;
+      --t-body-sm: 12.5px;
+      --t-body-xs: 12px;
+      --t-meta: 11.5px;
+      --t-meta-sm: 10.5px;
+      --t-eyebrow: 9.5px;
+      --t-label: 9px;
+      --t-micro: 8px;
+      --w-book: 400;
+      --w-medium: 500;
+      --w-bold: 700;
+      --gutter: 24px;
+      --column: 342px;
+      --r-card: 16px;
+      --r-panel: 16px;
+      --r-input: 12px;
+      --r-pill: 999px;
+      --h-input: 48px;
+      --h-button: 52px;
+      --h-tabbar: 62px;
+      --tap-min: 44px;
+      --s-1: 4px;
+      --s-2: 8px;
+      --s-3: 12px;
+      --s-4: 16px;
+      --s-5: 20px;
+      --s-6: 24px;
+      --s-8: 32px;
+      --s-10: 40px;
+      --s-12: 48px;
+      --s-16: 64px;
+      --t-fast: 90ms;
+      --t-base: 150ms;
+      --t-screen: 260ms;
+      --t-modal: 320ms;
+      --ease: cubic-bezier(.4, 0, .2, 1);
+      --ease-emphasized: cubic-bezier(.2, 0, 0, 1);
+      --fv-tabular: tabular-nums;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    * { margin: 0; }
+    html { min-width: 320px; scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; }
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      background: var(--base);
+      color: var(--text);
+      font-family: var(--font-display);
+      font-size: var(--t-body);
+      font-weight: var(--w-book);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    img, svg { display: block; max-width: 100%; }
+    button, input, textarea, select { color: inherit; font: inherit; }
+    button { border: 0; background: none; cursor: pointer; }
+    button:disabled { cursor: default; }
+    h1, h2, p, li, dd, dt { overflow-wrap: break-word; }
+    ul { padding: 0; list-style: none; }
+    [hidden] { display: none !important; }
+    :where(a, button, input, textarea, select, [role="switch"]):focus-visible {
+      outline: 2px solid var(--sand);
+      outline-offset: 2px;
+      border-radius: var(--r-input);
+    }
+    .route-focus:focus { outline: 0; }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
+    }
+    .skip-link {
+      position: fixed;
+      inset: -80px auto auto 16px;
+      z-index: 1000;
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: var(--sand);
+      color: var(--base);
+      text-decoration: none;
+      transition: inset-block-start var(--t-base) var(--ease);
+    }
+    .skip-link:focus { inset-block-start: 16px; }
+    .shell { min-height: 100dvh; background: var(--base); }
+    .shell-main {
+      width: 100%;
+      max-width: 390px;
+      min-height: 100dvh;
+      margin-inline: auto;
+      padding: calc(var(--s-6) + env(safe-area-inset-top, 0px)) var(--gutter)
+        calc(var(--s-10) + env(safe-area-inset-bottom, 0px));
+    }
+    .shell[data-bleed="true"] .shell-main { padding-inline: 0; padding-block-start: 0; }
+    .shell[data-bleed="true"] :is(.auth, .detail, .screen-head, .section, .legal) { padding-inline: var(--gutter); }
+    .shell[data-tabs="offers"] .shell-main,
+    .shell[data-tabs="profile"] .shell-main {
+      padding-block-end: calc(var(--h-tabbar) + var(--s-6) + env(safe-area-inset-bottom, 0px));
+    }
+    .boot { display: grid; place-items: center; min-height: 100dvh; background: var(--base); }
+    .boot-mark {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--hairline);
+      border-top-color: var(--sand);
+      border-radius: 50%;
+      animation: boot-spin 900ms linear infinite;
+    }
+    @keyframes boot-spin { to { rotate: 360deg; } }
+    .title { color: var(--text); font-size: var(--t-title); font-weight: var(--w-medium); letter-spacing: -.3px; line-height: 1.1; }
+    .title-auth { color: var(--text); font-size: var(--t-title-auth); font-weight: var(--w-medium); letter-spacing: -.2px; line-height: 1.15; }
+    .lede { margin-top: var(--s-2); color: var(--text-muted); font-size: var(--t-body); line-height: 1.45; }
+    .legal { margin-top: var(--s-6); color: var(--text-faint); font-size: var(--t-micro); letter-spacing: 1.2px; line-height: 1.6; }
+    .eyebrow { color: var(--text-muted); font-size: var(--t-eyebrow); font-weight: var(--w-medium); letter-spacing: 2px; line-height: 1; text-transform: uppercase; }
+    .eyebrow-sand { color: var(--sand); }
+    .hero-figure { color: var(--sand); font-size: var(--t-hero); font-weight: var(--w-bold); font-variant-numeric: var(--fv-tabular); letter-spacing: -1px; line-height: 1; }
+    .text-link { display: inline; min-height: 0; padding: 0; border: 0; background: none; color: var(--sand); font: inherit; font-size: var(--t-body-sm); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    .text-link:hover { color: var(--gold-bright); }
+    .rule { height: 1px; margin-block: var(--s-5); border: 0; background: var(--divider); }
+    .rule-sand { background: rgb(236 215 163 / .35); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); min-height: var(--h-button); padding-inline: var(--s-6); border: 1px solid rgb(245 241 234 / .22); border-radius: var(--r-pill); background: transparent; color: var(--text); font-size: var(--t-body); font-weight: var(--w-medium); letter-spacing: .2px; text-align: center; text-decoration: none; transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); }
+    .btn-full { width: 100%; }
+    .btn-primary { border-color: var(--sand); background: var(--sand); color: var(--surface); }
+    .btn-primary:hover:not(:disabled) { border-color: var(--gold-bright); background: var(--gold-bright); }
+    .btn-outline:hover:not(:disabled) { border-color: rgb(245 241 234 / .34); background: rgb(245 241 234 / .06); }
+    .btn:disabled { opacity: .38; }
+    .btn:active:not(:disabled) { translate: 0 1px; }
+    .btn-label { display: inline-flex; align-items: center; justify-content: center; }
+    .spinner { width: 14px; height: 14px; border: 2px solid rgb(56 47 45 / .3); border-top-color: var(--surface); border-radius: 50%; animation: boot-spin 700ms linear infinite; }
+    .hero { position: relative; width: 100%; overflow: hidden; background: var(--surface-2); }
+    .hero-image { width: 100%; height: 100%; object-fit: cover; }
+    .hero-placeholder { display: grid; place-items: center; width: 100%; height: 100%; border: 1px dashed rgb(245 241 234 / .2); background: var(--surface-2); color: var(--text-faint); font-size: var(--t-meta); letter-spacing: 2px; text-transform: uppercase; }
+    .hero-scrim { position: absolute; inset: 0; background: linear-gradient(to bottom, rgb(34 28 27 / .15) 0%, rgb(34 28 27 / .45) 45%, var(--base) 100%); pointer-events: none; }
+    .hero-content { position: absolute; inset: 0; display: grid; align-content: end; justify-items: center; gap: var(--s-3); padding: calc(var(--gutter) + env(safe-area-inset-top, 0px)) var(--gutter) var(--s-10); }
+    .lockup { display: block; width: 144px; height: 53px; }
+    .lockup-text { display: grid; align-content: center; justify-items: center; gap: 3px; width: auto; text-align: center; }
+    .lockup-brand { color: var(--text); font: 400 15px/1 var(--font-wordmark); letter-spacing: 3.4px; text-transform: uppercase; }
+    .lockup-property { color: var(--text-muted); font-size: 8px; letter-spacing: 2.6px; text-transform: uppercase; }
+    .back-button, .close-button { position: relative; display: grid; place-items: center; width: var(--tap-min); height: var(--tap-min); min-height: 0; padding: 0; color: var(--text); }
+    .back-button::before, .close-button::before { content: ""; position: absolute; width: 36px; height: 36px; border: 1px solid var(--hairline); border-radius: 50%; background: rgb(34 28 27 / .55); backdrop-filter: blur(8px); }
+    .back-button svg, .close-button svg { position: relative; width: 20px; height: 20px; }
+    .hero .back-button { position: absolute; inset: calc(var(--s-2) + env(safe-area-inset-top, 0px)) auto auto var(--s-3); z-index: 2; }
+    .auth { position: relative; padding-top: var(--s-2); }
+    .panel-card { margin-top: var(--s-6); padding: var(--s-6); border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--surface); }
+    .panel-card .btn { margin-top: var(--s-6); }
+    .field + .field { margin-top: var(--s-5); }
+    .field-label { display: block; margin-bottom: var(--s-2); color: var(--text-muted); font-size: var(--t-label); font-weight: var(--w-medium); letter-spacing: 1.8px; text-transform: uppercase; }
+    .field-well { display: flex; align-items: stretch; height: var(--h-input); overflow: hidden; border: 1px solid var(--hairline); border-radius: var(--r-input); background: rgb(245 241 234 / .05); transition: border-color var(--t-fast) var(--ease); }
+    .field-well:focus-within { border-color: var(--sand); }
+    .field-well[data-invalid="true"] { border-color: var(--c-critical); }
+    .field-prefix { display: flex; align-items: center; padding-inline: var(--s-4); border-right: 1px solid var(--hairline); background: rgb(245 241 234 / .03); color: var(--text-muted); user-select: none; }
+    .field-input { flex: 1; width: 100%; min-width: 0; min-height: 0; padding-inline: var(--s-4); border: 0; outline: 0; background: none; color: var(--text); font-family: var(--font-display); font-size: var(--t-body); }
+    .field-input::placeholder, .request-note::placeholder { color: var(--text-faint); }
+    .field-helper { margin-top: var(--s-2); color: var(--text-faint); font-size: var(--t-meta); }
+    .field-error { display: block; margin-top: var(--s-2); padding: 0; border: 0; background: none; color: var(--c-critical-ink); font-size: var(--t-meta); line-height: 1.4; }
+    .auth-alt { margin-top: var(--s-5); text-align: center; }
+    .resend { margin-top: var(--s-4); color: var(--text-muted); font-size: var(--t-body-sm); text-align: center; }
+    .otp-group { display: flex; justify-content: space-between; gap: 8px; margin-top: var(--s-2); padding: 0; border: 0; }
+    .otp-box { width: 43px; height: 54px; min-height: 0; padding: 0; border: 1px solid var(--hairline); border-radius: var(--r-input); outline: 0; background: rgb(245 241 234 / .05); color: var(--text); caret-color: var(--sand); font-family: var(--font-display); font-size: 20px; font-weight: var(--w-medium); text-align: center; transition: border-color var(--t-fast) var(--ease); }
+    .otp-box::placeholder { color: var(--text-faint); font-size: 14px; }
+    .otp-box:focus { border-color: var(--sand); }
+    .otp-group[data-error="true"] .otp-box { border-color: var(--c-critical); }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); min-height: var(--tap-min); padding-block: var(--s-2); }
+    .toggle-row + .toggle-row { border-top: 1px solid var(--divider); }
+    .toggle-text { display: grid; gap: 2px; }
+    .toggle-label { color: var(--text); font-size: var(--t-body); }
+    .toggle-description { color: var(--text-faint); font-size: var(--t-meta); }
+    .toggle { position: relative; flex: none; width: 44px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: var(--r-pill); background: rgb(255 255 255 / .16); transition: background var(--t-base) var(--ease); }
+    .toggle-knob { position: absolute; inset: 3px auto auto 3px; width: 18px; height: 18px; border-radius: 50%; background: rgb(255 255 255 / .55); transition: translate var(--t-base) var(--ease), background var(--t-base) var(--ease); }
+    .toggle[aria-checked="true"] { background: var(--sand); }
+    .toggle[aria-checked="true"] .toggle-knob { translate: 20px 0; background: var(--surface); }
+    .toggle:disabled { opacity: .4; }
+    .screen-head { margin-bottom: var(--s-6); }
+    .screen-head-inset { padding-top: calc(var(--s-4) + env(safe-area-inset-top, 0px)); }
+    .screen-alert { margin-block: var(--s-4); padding: var(--s-3) var(--s-4); border: 1px solid var(--c-critical); border-left-width: 4px; border-radius: 8px; background: var(--c-critical-soft); color: var(--c-critical-ink); font-size: var(--t-body-sm); line-height: 1.4; }
+    .benefit-list { display: grid; gap: var(--s-4); }
+    .benefit-card { padding: var(--s-5); border: 1px solid var(--hairline); border-radius: var(--r-card); background: var(--surface); }
+    .benefit-title { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); color: var(--text); font-size: var(--t-card-title); font-weight: var(--w-medium); letter-spacing: .2px; line-height: 1.3; }
+    .benefit-rate { flex: none; color: var(--sand); font-weight: var(--w-bold); font-variant-numeric: var(--fv-tabular); }
+    .benefit-sub { margin-top: var(--s-2); color: var(--text-muted); font-size: var(--t-body-xs); line-height: 1.5; }
+    .benefit-sub-rate { color: var(--text); }
+    .benefit-sub-sep { color: var(--text-faint); }
+    .benefit-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
+    .chip { display: inline-flex; align-items: center; min-height: 24px; padding-inline: var(--s-3); border: 1px solid var(--hairline); border-radius: var(--r-pill); color: var(--text-muted); font-size: var(--t-meta-sm); line-height: 1; white-space: nowrap; }
+    .benefit-details { display: inline-flex; align-items: center; min-height: var(--tap-min); margin-left: auto; padding-inline: var(--s-4); border-radius: var(--r-pill); background: rgb(245 241 234 / .08); color: var(--sand); font-size: var(--t-body-sm); }
+    .benefit-details:hover { color: var(--gold-bright); background: rgb(245 241 234 / .12); }
+    .benefit-card-skeleton { display: grid; gap: var(--s-3); }
+    .detail { position: relative; margin-top: calc(-1 * var(--s-6)); }
+    .detail-figure { display: flex; align-items: center; gap: var(--s-4); margin-top: var(--s-4); }
+    .detail-qualifier { color: var(--text-muted); font-size: var(--t-body-xs); line-height: 1.35; }
+    .detail-list { margin: 0; }
+    .detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-4); padding-block: var(--s-3); border-bottom: 1px solid var(--divider); }
+    .detail-label { color: var(--text-muted); font-size: var(--t-body-sm); }
+    .detail-value { margin: 0; color: var(--text); font-size: var(--t-body-sm); font-weight: var(--w-medium); text-align: right; }
+    .detail-value-sand { color: var(--sand); font-variant-numeric: var(--fv-tabular); }
+    .info-panel { margin-block: var(--s-6); padding: var(--s-4) var(--s-5); border: 1px solid rgb(191 225 219 / .22); border-radius: var(--r-card); background: rgb(191 225 219 / .1); }
+    .info-panel-body { margin-top: var(--s-2); color: var(--text-muted); font-size: var(--t-body-xs); line-height: 1.6; }
+    .request-status { display: grid; gap: var(--s-2); margin-top: var(--s-6); padding: var(--s-4); border: 1px solid var(--hairline); border-radius: var(--r-panel); background: rgb(245 241 234 / .04); color: var(--text-muted); font-size: var(--t-body-sm); }
+    .request-status strong { color: var(--text); font-size: var(--t-body); font-weight: var(--w-medium); }
+    .request-status[data-status="sent"], .request-status[data-status="fulfilled"] { border-color: var(--c-ok); background: var(--c-ok-soft); }
+    .request-status[data-status="pending"] { border-color: var(--c-warn); background: var(--c-warn-soft); }
+    .request-status[data-status="declined"] { border-color: var(--c-critical); background: var(--c-critical-soft); }
+    .request-action { display: grid; gap: var(--s-3); margin-top: var(--s-6); }
+    .field-optional { color: var(--text-faint); text-transform: none; }
+    .request-note, .request-outlet { width: 100%; padding: var(--s-3) var(--s-4); border: 1px solid var(--hairline); border-radius: var(--r-input); outline: 0; background: rgb(245 241 234 / .05); color: var(--text); font: inherit; }
+    .request-note { min-height: 88px; resize: vertical; }
+    .request-outlet { color-scheme: dark; }
+    .request-note:focus, .request-outlet:focus { border-color: var(--sand); }
+    .request-error { margin-top: var(--s-3); }
+    .reservation-call { width: 100%; margin-top: var(--s-4); }
+    .membership-card-sides { display: grid; gap: var(--s-4); }
+    .membership-card { position: relative; display: block; width: 100%; min-height: 0; aspect-ratio: 540 / 340; padding: 0; overflow: hidden; border: 0; border-radius: 4.4444% / 7.0588%; background: var(--card-gradient); container-type: inline-size; text-align: initial; text-decoration: none; view-transition-name: membership-card; }
+    .membership-card-back { view-transition-name: none; }
+    .card-face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+    .card-foot { position: absolute; inset: auto 4.72cqw 8cqw 4.45cqw; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 4.7cqw; line-height: 1; }
+    .card-name { display: -webkit-box; overflow: hidden; color: var(--paper); font-size: 3.1cqw; font-weight: var(--w-book); letter-spacing: .01em; overflow-wrap: break-word; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+    .card-number { flex: none; color: var(--gold-soft); font-size: 2.72cqw; font-variant-numeric: var(--fv-tabular); }
+    .card-name-skeleton { display: block; width: 25cqw; height: 2.23cqw; margin-bottom: .65cqw; }
+    .card-number-skeleton { display: block; width: 11cqw; height: 1.96cqw; margin-bottom: .57cqw; }
+    .card-back-qr-quiet-zone { position: absolute; inset: 23.1909% auto auto 37.9771%; width: 24.0455%; height: 38.1786%; overflow: hidden; border-radius: 10%; background: #fff; line-height: 0; }
+    .card-back-qr-quiet-zone > svg, .card-back-qr-placeholder { position: absolute; inset: 8.8889%; display: block; width: 82.2222%; height: 82.2222%; }
+    .card-back-qr-placeholder { border-radius: 2px; }
+    .statbar { display: grid; grid-template-columns: repeat(3, 1fr); margin-block: var(--s-5); padding-block: var(--s-4); border-block: 1px solid var(--divider); }
+    .statbar-cell { display: grid; justify-items: center; gap: var(--s-1); text-align: center; }
+    .statbar-cell + .statbar-cell { border-left: 1px solid var(--divider); }
+    .statbar-value { margin: 0; color: var(--text); font-size: var(--t-card-title); font-weight: var(--w-medium); font-variant-numeric: var(--fv-tabular); }
+    .statbar-value-sand { color: var(--sand); }
+    .statbar-label { color: var(--text-faint); font-size: var(--t-meta-sm); }
+    .statbar-skeleton { display: block; width: 56px; height: 14px; }
+    .section { margin-top: var(--s-8); }
+    .section > .eyebrow { margin-bottom: var(--s-3); }
+    .activity-row { display: flex; align-items: center; gap: var(--s-3); padding-block: var(--s-3); }
+    .activity-row + .activity-row { border-top: 1px solid var(--divider); }
+    .activity-tile { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--grey); color: var(--surface); font-size: var(--t-meta); font-weight: var(--w-medium); letter-spacing: .4px; }
+    .activity-tile[data-category="spa"] { background: var(--mint); }
+    .activity-tile[data-category="dining"], .activity-tile[data-category="fnb"] { background: var(--peach); }
+    .activity-tile[data-category="rooms"] { background: var(--gold-soft); }
+    .activity-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+    .activity-title { display: flex; align-items: center; gap: var(--s-2); color: var(--text); font-size: var(--t-body-sm); }
+    .activity-meta { overflow: hidden; color: var(--text-faint); font-size: var(--t-meta-sm); text-overflow: ellipsis; white-space: nowrap; }
+    .activity-figures { flex: none; display: grid; justify-items: end; gap: 2px; text-align: right; }
+    .activity-date { color: var(--text-faint); font-size: var(--t-meta-sm); }
+    .activity-saved { color: var(--text); font-size: var(--t-body-sm); font-weight: var(--w-medium); font-variant-numeric: var(--fv-tabular); }
+    .badge { display: inline-flex; align-items: center; padding: 2px var(--s-2); border: 1px solid currentColor; border-radius: var(--r-pill); color: var(--c-warn-ink); background: var(--c-warn-soft); font-size: 8px; font-weight: var(--w-bold); letter-spacing: .4px; text-transform: uppercase; white-space: nowrap; }
+    .empty { color: var(--text-faint); font-size: var(--t-body-sm); }
+    .view-all { margin-top: var(--s-4); }
+    .shell[data-tabs] .btn-outline { width: 100%; margin-top: var(--s-8); }
+    .tabbar { position: fixed; inset: auto 0 0; z-index: 10; padding-bottom: env(safe-area-inset-bottom, 0px); border-top: 1px solid rgb(236 215 163 / .14); background: var(--surface); }
+    .tabbar-list { display: flex; max-width: var(--column); margin-inline: auto; }
+    .tabbar-item { flex: 1; }
+    .tabbar-link { display: grid; justify-items: center; align-content: center; gap: var(--s-1); width: 100%; min-height: var(--h-tabbar); padding: 0; border: 0; border-radius: 0; color: var(--text-faint); transition: color var(--t-fast) var(--ease); }
+    .tabbar-link[aria-current="page"] { color: var(--sand); }
+    .tabbar-glyph { width: 18px; height: 18px; }
+    .tabbar-label { font-size: var(--t-meta-sm); letter-spacing: .6px; }
+    .modal { display: grid; justify-items: center; gap: var(--s-4); text-align: center; }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: var(--s-2); }
+    .code-block { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+    .qr-quiet-zone { display: grid; place-items: center; width: 240px; height: 240px; padding: 12px; border-radius: var(--r-input); background: #fff; line-height: 0; }
+    .qr-quiet-zone svg { width: 216px; height: 216px; }
+    .code-fallback { max-width: 240px; overflow-wrap: anywhere; color: var(--text-faint); font: var(--t-meta)/1.4 var(--font-mono); user-select: all; }
+    .modal-caption { color: var(--text-muted); font-size: var(--t-body-sm); }
+    .modal-validity, .modal-note { color: var(--text-faint); font-size: var(--t-meta); }
+    .modal .btn { width: 100%; margin-top: var(--s-2); }
+    .skeleton { border-radius: var(--r-input); background: linear-gradient(90deg, rgb(245 241 234 / .06) 25%, rgb(245 241 234 / .12) 37%, rgb(245 241 234 / .06) 63%); background-size: 200% 100%; animation: shimmer 1.4s ease-in-out infinite; }
+    .skeleton-line { display: block; width: 100%; height: 12px; }
+    .skeleton-title { width: 60%; height: 18px; }
+    .skeleton-sub { width: 40%; }
+    .skeleton-action { width: 30%; height: 34px; margin-left: auto; }
+    .skeleton-figure { display: block; width: 110px; height: 44px; }
+    @keyframes shimmer { to { background-position-x: -200%; } }
+    @keyframes rise-in { from { opacity: 0; transform: translateY(12px); } }
+    @keyframes settle-in { from { opacity: 0; } }
+    @keyframes digit-in { from { opacity: 0; transform: scale(.85); } }
+    @keyframes shake { 10%, 90% { transform: translateX(-2px); } 30%, 70% { transform: translateX(4px); } 50% { transform: translateX(-4px); } }
+    .enter-stagger { animation: rise-in var(--t-screen) var(--ease-emphasized) both; animation-delay: calc(var(--enter-index, 0) * 40ms); }
+    .settle-in { animation: settle-in var(--t-base) var(--ease) both; }
+    .otp-box[data-filled="true"] { animation: digit-in 120ms var(--ease-emphasized); }
+    .otp-group[data-error="true"] { animation: shake 240ms var(--ease); }
+    ::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--t-screen); animation-fill-mode: both; animation-timing-function: var(--ease-emphasized); mix-blend-mode: normal; }
+    @keyframes screen-enter-from-end { from { transform: translateX(100%); } }
+    @keyframes screen-exit-to-start { to { opacity: .4; transform: translateX(-25%); } }
+    @keyframes screen-enter-from-start { from { opacity: .4; transform: translateX(-25%); } }
+    @keyframes screen-exit-to-end { to { transform: translateX(100%); } }
+    @keyframes fade-in { from { opacity: 0; } }
+    @keyframes fade-out { to { opacity: 0; } }
+    html[data-nav="push"]::view-transition-new(root) { z-index: 2; animation-name: screen-enter-from-end; }
+    html[data-nav="push"]::view-transition-old(root) { z-index: 1; animation-name: screen-exit-to-start; }
+    html[data-nav="pop"]::view-transition-new(root) { z-index: 1; animation-name: screen-enter-from-start; }
+    html[data-nav="pop"]::view-transition-old(root) { z-index: 2; animation-name: screen-exit-to-end; }
+    html[data-nav="fade"]::view-transition-new(root) { animation: fade-in 120ms var(--ease) both; }
+    html[data-nav="fade"]::view-transition-old(root) { animation: fade-out 120ms var(--ease) both; }
+    html[data-nav="modal"]::view-transition-old(root), html[data-nav="modal"]::view-transition-new(root) { animation-duration: var(--t-modal); }
+    html[data-nav="modal"]::view-transition-new(root) { animation-name: fade-in; }
+    html[data-nav="modal"]::view-transition-old(root) { animation-name: fade-out; }
+    ::view-transition-group(membership-card) { z-index: 10; animation-duration: var(--t-modal); animation-timing-function: var(--ease-emphasized); }
+    @media (max-width: 359px) { :root { --gutter: 16px; } .otp-box { flex: 1; width: 0; } .activity-meta { max-width: 150px; } }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+      ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+      .boot-mark, .spinner, .enter-stagger, .otp-box[data-filled="true"], .otp-group[data-error="true"], .skeleton { animation: none; }
+      .skeleton { background: rgb(245 241 234 / .08); }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="app">
+    <section id="s-boot" class="route-screen boot" aria-label="Loading membership">
+      <span class="boot-mark" aria-hidden="true"></span>
+    </section>
+
+    <section id="s-signin" class="route-screen shell" data-bleed="true" data-tabs="none" hidden>
+      <main id="main-signin" class="shell-main route-focus" tabindex="-1">
+        <div class="hero" style="height:260px">
+          <div class="hero-placeholder"><span>Image</span></div>
+          <img id="signin-hero" class="hero-image" alt="" fetchpriority="high" hidden>
+          <div class="hero-scrim" aria-hidden="true"></div>
+          <div class="hero-content">
+            <div class="lockup-wrap">
+              <img class="lockup brand-lockup" alt="Steigenberger Hotel &amp; Residence Doha" fetchpriority="high" hidden>
+              <p class="lockup lockup-text lockup-fallback"><span class="lockup-brand">Steigenberger</span><span class="lockup-property">Hotel &amp; Residence Doha</span></p>
+            </div>
+            <p class="eyebrow eyebrow-sand">Privilege Guest</p>
+          </div>
+        </div>
+        <section class="auth">
+          <h1 class="title-auth">Welcome back</h1>
+          <p class="lede">Sign in with your mobile number.</p>
+          <form id="signin-form" class="panel-card" novalidate>
+            <div class="field">
+              <label class="field-label" for="signin-phone">Mobile number</label>
+              <div id="signin-phone-well" class="field-well"><span class="field-prefix">+974</span><input id="signin-phone" class="field-input" type="tel" inputmode="tel" autocomplete="tel-national" maxlength="9" placeholder="3312 3456"></div>
+              <p id="signin-error" class="field-error" role="alert" hidden></p>
+            </div>
+            <button id="signin-submit" class="btn btn-primary btn-full" type="submit" disabled><span class="btn-label">Send passcode</span></button>
+          </form>
+          <p class="auth-alt"><button class="text-link" type="button" data-route="activate" data-kind="push">Have an invitation code?</button></p>
+          <p class="legal">Membership is by invitation. By continuing you agree to the programme terms and to us contacting you about your membership.</p>
+        </section>
+      </main>
+    </section>
+
+    <section id="s-verify" class="route-screen shell" data-bleed="true" data-tabs="none" hidden>
+      <main id="main-verify" class="shell-main route-focus" tabindex="-1">
+        <div class="hero" style="height:260px">
+          <div class="hero-placeholder"><span>Image</span></div>
+          <img id="verify-hero" class="hero-image" alt="" fetchpriority="high" hidden>
+          <div class="hero-scrim" aria-hidden="true"></div>
+          <div class="hero-content">
+            <div class="lockup-wrap">
+              <img class="lockup brand-lockup" alt="Steigenberger Hotel &amp; Residence Doha" fetchpriority="high" hidden>
+              <p class="lockup lockup-text lockup-fallback"><span class="lockup-brand">Steigenberger</span><span class="lockup-property">Hotel &amp; Residence Doha</span></p>
+            </div>
+            <p class="eyebrow eyebrow-sand">Privilege Guest</p>
+          </div>
+        </div>
+        <section class="auth">
+          <h1 class="title-auth">Enter your passcode</h1>
+          <p id="verify-lede" class="lede">We emailed a passcode to your registered address.</p>
+          <form id="verify-form" class="panel-card" novalidate>
+            <fieldset id="otp-group" class="otp-group" data-error="false">
+              <legend class="visually-hidden">Passcode</legend>
+              <input class="otp-box" aria-label="Digit 1 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+              <input class="otp-box" aria-label="Digit 2 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+              <input class="otp-box" aria-label="Digit 3 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+              <input class="otp-box" aria-label="Digit 4 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+              <input class="otp-box" aria-label="Digit 5 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+              <input class="otp-box" aria-label="Digit 6 of 6" inputmode="numeric" autocomplete="one-time-code" maxlength="1" placeholder="•">
+            </fieldset>
+            <p id="verify-error" class="field-error" role="alert" hidden></p>
+            <p class="resend"><span id="resend-count" aria-live="off">Resend code in 0:42</span><button id="resend-button" class="text-link" type="button" hidden>Send a new code</button></p>
+            <button id="verify-submit" class="btn btn-primary btn-full" type="submit" disabled><span class="btn-label">Verify</span></button>
+          </form>
+          <p class="auth-alt"><button id="change-number" class="text-link" type="button">Change number</button></p>
+        </section>
+      </main>
+    </section>
+
+    <section id="s-activate" class="route-screen shell" data-bleed="true" data-tabs="none" hidden>
+      <main id="main-activate" class="shell-main route-focus" tabindex="-1">
+        <div class="hero" style="height:196px">
+          <div class="hero-placeholder"><span>Image</span></div>
+          <img id="activate-hero" class="hero-image" alt="" fetchpriority="high" hidden>
+          <div class="hero-scrim" aria-hidden="true"></div>
+          <button class="back-button" type="button" aria-label="Back to sign in" data-route="signin" data-kind="pop">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7M8 12h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <section class="auth">
+          <p class="eyebrow eyebrow-sand">Activate membership</p>
+          <h1 class="title-auth" style="margin-top:12px">Welcome, Privilege Guest</h1>
+          <p class="lede">Use the code from your welcome email.</p>
+          <form id="activate-form" class="panel-card" novalidate>
+            <div class="field">
+              <label class="field-label" for="activation-code">Invitation code</label>
+              <div id="activation-code-well" class="field-well"><input id="activation-code" class="field-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="64" placeholder="PG–XXXX–XXXX"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="activation-phone">Mobile number</label>
+              <div id="activation-phone-well" class="field-well"><span class="field-prefix">+974</span><input id="activation-phone" class="field-input" type="tel" inputmode="tel" autocomplete="tel-national" maxlength="9" placeholder="3312 3456"></div>
+              <p class="field-helper">This becomes your sign-in method.</p>
+              <p id="activation-error" class="field-error" role="alert" hidden></p>
+            </div>
+            <hr class="rule">
+            <p class="eyebrow">Notifications</p>
+            <div class="toggle-row"><span id="activation-email-label" class="toggle-label">Email</span><button id="activation-email" class="toggle" type="button" role="switch" aria-checked="true" aria-labelledby="activation-email-label"><span class="toggle-knob"></span></button></div>
+            <div class="toggle-row"><span id="activation-sms-label" class="toggle-label">SMS</span><button id="activation-sms" class="toggle" type="button" role="switch" aria-checked="false" aria-labelledby="activation-sms-label"><span class="toggle-knob"></span></button></div>
+            <button id="activation-submit" class="btn btn-primary btn-full" type="submit" disabled><span class="btn-label">Activate membership</span></button>
+          </form>
+          <p class="auth-alt"><button class="text-link" type="button" data-route="signin" data-kind="pop">Already activated? Sign in</button></p>
+        </section>
+      </main>
+    </section>
+
+    <section id="s-offers" class="route-screen shell" data-bleed="false" data-tabs="offers" hidden>
+      <main id="main-offers" class="shell-main route-focus" tabindex="-1">
+        <header class="screen-head"><h1 class="title">Your benefits</h1><p class="lede">Every privilege included with your membership.</p></header>
+        <p id="offers-alert" class="screen-alert" role="alert" hidden></p>
+        <ul id="benefit-list" class="benefit-list" aria-live="polite"></ul>
+      </main>
+      <nav class="tabbar" aria-label="Sections">
+        <ul class="tabbar-list">
+          <li class="tabbar-item"><button class="tabbar-link" type="button" data-route="offers" data-kind="fade" aria-current="page"><svg class="tabbar-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span class="tabbar-label">Offers</span></button></li>
+          <li class="tabbar-item"><button class="tabbar-link" type="button" data-route="profile" data-kind="fade"><svg class="tabbar-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg><span class="tabbar-label">Profile</span></button></li>
+        </ul>
+      </nav>
+    </section>
+
+    <section id="s-offer" class="route-screen shell" data-bleed="true" data-tabs="none" hidden>
+      <main id="main-offer" class="shell-main route-focus" tabindex="-1">
+        <div class="hero" style="height:300px">
+          <div id="offer-hero-placeholder" class="hero-placeholder"><span>Image</span></div>
+          <img id="offer-hero" class="hero-image" alt="" fetchpriority="high" hidden>
+          <div class="hero-scrim" aria-hidden="true"></div>
+          <button class="back-button" type="button" aria-label="Back to benefits" data-route="offers" data-kind="pop"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7M8 12h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <section id="offer-detail" class="detail">
+          <h1 id="offer-title" class="title"><span class="skeleton skeleton-line skeleton-title"></span></h1>
+          <div class="detail-figure"><p id="offer-rate" class="hero-figure"><span class="skeleton skeleton-figure"></span></p><p class="detail-qualifier">off across<br>this benefit</p></div>
+          <hr class="rule rule-sand">
+          <dl id="offer-rows" class="detail-list"></dl>
+          <aside id="offer-info" class="info-panel" hidden><p class="eyebrow">Good to know</p><div class="info-panel-body"><p id="offer-terms"></p></div></aside>
+          <div id="request-state"></div>
+          <div id="request-action" class="request-action" hidden>
+            <div id="outlet-field" hidden><label class="field-label" for="request-outlet">Where are you going?</label><select id="request-outlet" class="request-outlet"><option value="">Choose an outlet…</option></select></div>
+            <label class="field-label" for="request-note">Anything they should know <span class="field-optional">(optional)</span></label>
+            <textarea id="request-note" class="request-note" maxlength="500" rows="3" placeholder="Anything the outlet should know"></textarea>
+            <button id="request-submit" class="btn btn-primary btn-full" type="button"><span class="btn-label">Let the outlet know</span></button>
+          </div>
+          <p id="request-error" class="field-error request-error" role="alert" hidden></p>
+          <a id="reservation-call" class="btn btn-outline reservation-call" href="tel:" hidden></a>
+          <p class="legal">Benefits are subject to change. You will be notified of significant changes.</p>
+        </section>
+      </main>
+    </section>
+
+    <section id="s-profile" class="route-screen shell" data-bleed="false" data-tabs="profile" hidden>
+      <main id="main-profile" class="shell-main route-focus" tabindex="-1">
+        <header class="screen-head"><h1 class="title">Profile</h1></header>
+        <div id="profile-cards" class="membership-card-sides"></div>
+        <dl class="statbar">
+          <div class="statbar-cell"><dd id="stat-saved" class="statbar-value statbar-value-sand"><span class="skeleton statbar-skeleton"></span></dd><dt class="statbar-label">Saved</dt></div>
+          <div class="statbar-cell"><dd id="stat-visits" class="statbar-value"><span class="skeleton statbar-skeleton"></span></dd><dt class="statbar-label">Visits</dt></div>
+          <div class="statbar-cell"><dd id="stat-used" class="statbar-value"><span class="skeleton statbar-skeleton"></span></dd><dt class="statbar-label">Benefits used</dt></div>
+        </dl>
+        <p id="profile-alert" class="screen-alert" role="alert" hidden></p>
+        <section class="section"><h2 class="eyebrow">Recent activity</h2><ul id="activity-list" class="activity-list" aria-live="polite"></ul><button id="activity-more" class="text-link view-all" type="button" aria-expanded="false" hidden></button></section>
+        <section class="section">
+          <h2 class="eyebrow">Notifications</h2>
+          <div class="toggle-row"><span class="toggle-text"><span id="profile-email-label" class="toggle-label">Email</span></span><button id="profile-email" class="toggle" type="button" role="switch" aria-checked="false" aria-labelledby="profile-email-label" disabled><span class="toggle-knob"></span></button></div>
+          <div class="toggle-row"><span class="toggle-text"><span id="profile-sms-label" class="toggle-label">SMS</span></span><button id="profile-sms" class="toggle" type="button" role="switch" aria-checked="false" aria-labelledby="profile-sms-label" disabled><span class="toggle-knob"></span></button></div>
+        </section>
+        <button id="signout-button" class="btn btn-outline" type="button">Sign out</button>
+      </main>
+      <nav class="tabbar" aria-label="Sections">
+        <ul class="tabbar-list">
+          <li class="tabbar-item"><button class="tabbar-link" type="button" data-route="offers" data-kind="fade"><svg class="tabbar-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span class="tabbar-label">Offers</span></button></li>
+          <li class="tabbar-item"><button class="tabbar-link" type="button" data-route="profile" data-kind="fade" aria-current="page"><svg class="tabbar-glyph" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 19.5a7 7 0 0 1 14 0"/></svg><span class="tabbar-label">Profile</span></button></li>
+        </ul>
+      </nav>
+    </section>
+
+    <section id="s-card" class="route-screen shell" data-bleed="false" data-tabs="none" hidden>
+      <main id="main-card" class="shell-main route-focus" tabindex="-1">
+        <div class="modal">
+          <header class="modal-head"><p class="eyebrow">Membership card</p><button class="close-button" type="button" aria-label="Close" data-route="profile" data-kind="modal" data-replace="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button></header>
+          <div id="modal-card" style="width:100%"></div>
+          <div id="modal-code" class="code-block"></div>
+          <p class="modal-caption">Show this code at any outlet, or hand over your card — the code on the back is the same one.</p>
+          <p id="modal-validity" class="modal-validity" hidden></p>
+          <button class="btn btn-primary" type="button" disabled>Add to Wallet</button>
+          <p class="modal-note">Wallet passes are not set up yet.</p>
+        </div>
+      </main>
+    </section>
+  </div>
+<script>
+"use strict";
+/*
+ * qrcode-generator 2.0.4
+ * Copyright (c) 2009 Kazuhiko Arase
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],f={},c=function(t,r){o=function(t){for(var r=new Array(t),e=0;e<t;e+=1){r[e]=new Array(t);for(var n=0;n<t;n+=1)r[e][n]=null}return r}(i=4*e+17),l(0,0),l(i-7,0),l(0,i-7),s(),h(),d(t,r),e>=7&&v(t),null==a&&(a=p(e,n,u)),w(a,r)},l=function(t,r){for(var e=-1;e<=7;e+=1)if(!(t+e<=-1||i<=t+e))for(var n=-1;n<=7;n+=1)r+n<=-1||i<=r+n||(o[t+e][r+n]=0<=e&&e<=6&&(0==n||6==n)||0<=n&&n<=6&&(0==e||6==e)||2<=e&&e<=4&&2<=n&&n<=4)},h=function(){for(var t=8;t<i-8;t+=1)null==o[t][6]&&(o[t][6]=t%2==0);for(var r=8;r<i-8;r+=1)null==o[6][r]&&(o[6][r]=r%2==0)},s=function(){for(var t=B.getPatternPosition(e),r=0;r<t.length;r+=1)for(var n=0;n<t.length;n+=1){var i=t[r],a=t[n];if(null==o[i][a])for(var u=-2;u<=2;u+=1)for(var f=-2;f<=2;f+=1)o[i+u][a+f]=-2==u||2==u||-2==f||2==f||0==u&&0==f}},v=function(t){for(var r=B.getBCHTypeNumber(e),n=0;n<18;n+=1){var a=!t&&1==(r>>n&1);o[Math.floor(n/3)][n%3+i-8-3]=a}for(n=0;n<18;n+=1){a=!t&&1==(r>>n&1);o[n%3+i-8-3][Math.floor(n/3)]=a}},d=function(t,r){for(var e=n<<3|r,a=B.getBCHTypeInfo(e),u=0;u<15;u+=1){var f=!t&&1==(a>>u&1);u<6?o[u][8]=f:u<8?o[u+1][8]=f:o[i-15+u][8]=f}for(u=0;u<15;u+=1){f=!t&&1==(a>>u&1);u<8?o[8][i-u-1]=f:u<9?o[8][15-u-1+1]=f:o[8][15-u-1]=f}o[i-8][8]=!t},w=function(t,r){for(var e=-1,n=i-1,a=7,u=0,f=B.getMaskFunction(r),c=i-1;c>0;c-=2)for(6==c&&(c-=1);;){for(var g=0;g<2;g+=1)if(null==o[n][c-g]){var l=!1;u<t.length&&(l=1==(t[u]>>>a&1)),f(n,c-g)&&(l=!l),o[n][c-g]=l,-1==(a-=1)&&(u+=1,a=7)}if((n+=e)<0||i<=n){n-=e,e=-e;break}}},p=function(t,r,e){for(var n=A.getRSBlocks(t,r),o=b(),i=0;i<e.length;i+=1){var a=e[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var u=0;for(i=0;i<n.length;i+=1)u+=n[i].dataCount;if(o.getLengthInBits()>8*u)throw"code length overflow. ("+o.getLengthInBits()+">"+8*u+")";for(o.getLengthInBits()+4<=8*u&&o.put(0,4);o.getLengthInBits()%8!=0;)o.putBit(!1);for(;!(o.getLengthInBits()>=8*u||(o.put(236,8),o.getLengthInBits()>=8*u));)o.put(17,8);return function(t,r){for(var e=0,n=0,o=0,i=new Array(r.length),a=new Array(r.length),u=0;u<r.length;u+=1){var f=r[u].dataCount,c=r[u].totalCount-f;n=Math.max(n,f),o=Math.max(o,c),i[u]=new Array(f);for(var g=0;g<i[u].length;g+=1)i[u][g]=255&t.getBuffer()[g+e];e+=f;var l=B.getErrorCorrectPolynomial(c),h=k(i[u],l.getLength()-1).mod(l);for(a[u]=new Array(l.getLength()-1),g=0;g<a[u].length;g+=1){var s=g+h.getLength()-a[u].length;a[u][g]=s>=0?h.getAt(s):0}}var v=0;for(g=0;g<r.length;g+=1)v+=r[g].totalCount;var d=new Array(v),w=0;for(g=0;g<n;g+=1)for(u=0;u<r.length;u+=1)g<i[u].length&&(d[w]=i[u][g],w+=1);for(g=0;g<o;g+=1)for(u=0;u<r.length;u+=1)g<a[u].length&&(d[w]=a[u][g],w+=1);return d}(o,n)};f.addData=function(t,r){var e=null;switch(r=r||"Byte"){case"Numeric":e=M(t);break;case"Alphanumeric":e=x(t);break;case"Byte":e=m(t);break;case"Kanji":e=L(t);break;default:throw"mode:"+r}u.push(e),a=null},f.isDark=function(t,r){if(t<0||i<=t||r<0||i<=r)throw t+","+r;return o[t][r]},f.getModuleCount=function(){return i},f.make=function(){if(e<1){for(var t=1;t<40;t++){for(var r=A.getRSBlocks(t,n),o=b(),i=0;i<u.length;i++){var a=u[i];o.put(a.getMode(),4),o.put(a.getLength(),B.getLengthInBits(a.getMode(),t)),a.write(o)}var g=0;for(i=0;i<r.length;i++)g+=r[i].dataCount;if(o.getLengthInBits()<=8*g)break}e=t}c(!1,function(){for(var t=0,r=0,e=0;e<8;e+=1){c(!0,e);var n=B.getLostPoint(f);(0==e||t>n)&&(t=n,r=e)}return r}())},f.createTableTag=function(t,r){t=t||2;var e="";e+='<table style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: "+(r=void 0===r?4*t:r)+"px;",e+='">',e+="<tbody>";for(var n=0;n<f.getModuleCount();n+=1){e+="<tr>";for(var o=0;o<f.getModuleCount();o+=1)e+='<td style="',e+=" border-width: 0px; border-style: none;",e+=" border-collapse: collapse;",e+=" padding: 0px; margin: 0px;",e+=" width: "+t+"px;",e+=" height: "+t+"px;",e+=" background-color: ",e+=f.isDark(n,o)?"#000000":"#ffffff",e+=";",e+='"/>';e+="</tr>"}return e+="</tbody>",e+="</table>"},f.createSvgTag=function(t,r,e,n){var o={};"object"==typeof arguments[0]&&(t=(o=arguments[0]).cellSize,r=o.margin,e=o.alt,n=o.title),t=t||2,r=void 0===r?4*t:r,(e="string"==typeof e?{text:e}:e||{}).text=e.text||null,e.id=e.text?e.id||"qrcode-description":null,(n="string"==typeof n?{text:n}:n||{}).text=n.text||null,n.id=n.text?n.id||"qrcode-title":null;var i,a,u,c,g=f.getModuleCount()*t+2*r,l="";for(c="l"+t+",0 0,"+t+" -"+t+",0 0,-"+t+"z ",l+='<svg version="1.1" xmlns="http://www.w3.org/2000/svg"',l+=o.scalable?"":' width="'+g+'px" height="'+g+'px"',l+=' viewBox="0 0 '+g+" "+g+'" ',l+=' preserveAspectRatio="xMinYMin meet"',l+=n.text||e.text?' role="img" aria-labelledby="'+y([n.id,e.id].join(" ").trim())+'"':"",l+=">",l+=n.text?'<title id="'+y(n.id)+'">'+y(n.text)+"</title>":"",l+=e.text?'<description id="'+y(e.id)+'">'+y(e.text)+"</description>":"",l+='<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>',l+='<path d="',a=0;a<f.getModuleCount();a+=1)for(u=a*t+r,i=0;i<f.getModuleCount();i+=1)f.isDark(a,i)&&(l+="M"+(i*t+r)+","+u+c);return l+='" stroke="transparent" fill="black"/>',l+="</svg>"},f.createDataURL=function(t,r){t=t||2,r=void 0===r?4*t:r;var e=f.getModuleCount()*t+2*r,n=r,o=e-r;return I(e,e,function(r,e){if(n<=r&&r<o&&n<=e&&e<o){var i=Math.floor((r-n)/t),a=Math.floor((e-n)/t);return f.isDark(a,i)?0:1}return 1})},f.createImgTag=function(t,r,e){t=t||2,r=void 0===r?4*t:r;var n=f.getModuleCount()*t+2*r,o="";return o+="<img",o+=' src="',o+=f.createDataURL(t,r),o+='"',o+=' width="',o+=n,o+='"',o+=' height="',o+=n,o+='"',e&&(o+=' alt="',o+=y(e),o+='"'),o+="/>"};var y=function(t){for(var r="",e=0;e<t.length;e+=1){var n=t.charAt(e);switch(n){case"<":r+="&lt;";break;case">":r+="&gt;";break;case"&":r+="&amp;";break;case'"':r+="&quot;";break;default:r+=n}}return r};return f.createASCII=function(t,r){if((t=t||1)<2)return function(t){t=void 0===t?2:t;var r,e,n,o,i,a=1*f.getModuleCount()+2*t,u=t,c=a-t,g={"██":"█","█ ":"▀"," █":"▄","  ":" "},l={"██":"▀","█ ":"▀"," █":" ","  ":" "},h="";for(r=0;r<a;r+=2){for(n=Math.floor((r-u)/1),o=Math.floor((r+1-u)/1),e=0;e<a;e+=1)i="█",u<=e&&e<c&&u<=r&&r<c&&f.isDark(n,Math.floor((e-u)/1))&&(i=" "),u<=e&&e<c&&u<=r+1&&r+1<c&&f.isDark(o,Math.floor((e-u)/1))?i+=" ":i+="█",h+=t<1&&r+1>=c?l[i]:g[i];h+="\n"}return a%2&&t>0?h.substring(0,h.length-a-1)+Array(a+1).join("▀"):h.substring(0,h.length-1)}(r);t-=1,r=void 0===r?2*t:r;var e,n,o,i,a=f.getModuleCount()*t+2*r,u=r,c=a-r,g=Array(t+1).join("██"),l=Array(t+1).join("  "),h="",s="";for(e=0;e<a;e+=1){for(o=Math.floor((e-u)/t),s="",n=0;n<a;n+=1)i=1,u<=n&&n<c&&u<=e&&e<c&&f.isDark(o,Math.floor((n-u)/t))&&(i=0),s+=i?g:l;for(o=0;o<t;o+=1)h+=s+"\n"}return h.substring(0,h.length-1)},f.renderTo2dContext=function(t,r){r=r||2;for(var e=f.getModuleCount(),n=0;n<e;n++)for(var o=0;o<e;o++)t.fillStyle=f.isDark(n,o)?"black":"white",t.fillRect(o*r,n*r,r,r)},f};t.stringToBytes=(t.stringToBytesFuncs={default:function(t){for(var r=[],e=0;e<t.length;e+=1){var n=t.charCodeAt(e);r.push(255&n)}return r}}).default,t.createStringToBytes=function(t,r){var e=function(){for(var e=S(t),n=function(){var t=e.read();if(-1==t)throw"eof";return t},o=0,i={};;){var a=e.read();if(-1==a)break;var u=n(),f=n()<<8|n();i[String.fromCharCode(a<<8|u)]=f,o+=1}if(o!=r)throw o+" != "+r;return i}(),n="?".charCodeAt(0);return function(t){for(var r=[],o=0;o<t.length;o+=1){var i=t.charCodeAt(o);if(i<128)r.push(i);else{var a=e[t.charAt(o)];"number"==typeof a?(255&a)==a?r.push(a):(r.push(a>>>8),r.push(255&a)):r.push(n)}}return r}};var r,e,n,o,i,a=1,u=2,f=4,c=8,g={L:1,M:0,Q:3,H:2},l=0,h=1,s=2,v=3,d=4,w=5,p=6,y=7,B=(r=[[],[6,18],[6,22],[6,26],[6,30],[6,34],[6,22,38],[6,24,42],[6,26,46],[6,28,50],[6,30,54],[6,32,58],[6,34,62],[6,26,46,66],[6,26,48,70],[6,26,50,74],[6,30,54,78],[6,30,56,82],[6,30,58,86],[6,34,62,90],[6,28,50,72,94],[6,26,50,74,98],[6,30,54,78,102],[6,28,54,80,106],[6,32,58,84,110],[6,30,58,86,114],[6,34,62,90,118],[6,26,50,74,98,122],[6,30,54,78,102,126],[6,26,52,78,104,130],[6,30,56,82,108,134],[6,34,60,86,112,138],[6,30,58,86,114,142],[6,34,62,90,118,146],[6,30,54,78,102,126,150],[6,24,50,76,102,128,154],[6,28,54,80,106,132,158],[6,32,58,84,110,136,162],[6,26,54,82,110,138,166],[6,30,58,86,114,142,170]],e=1335,n=7973,i=function(t){for(var r=0;0!=t;)r+=1,t>>>=1;return r},(o={}).getBCHTypeInfo=function(t){for(var r=t<<10;i(r)-i(e)>=0;)r^=e<<i(r)-i(e);return 21522^(t<<10|r)},o.getBCHTypeNumber=function(t){for(var r=t<<12;i(r)-i(n)>=0;)r^=n<<i(r)-i(n);return t<<12|r},o.getPatternPosition=function(t){return r[t-1]},o.getMaskFunction=function(t){switch(t){case l:return function(t,r){return(t+r)%2==0};case h:return function(t,r){return t%2==0};case s:return function(t,r){return r%3==0};case v:return function(t,r){return(t+r)%3==0};case d:return function(t,r){return(Math.floor(t/2)+Math.floor(r/3))%2==0};case w:return function(t,r){return t*r%2+t*r%3==0};case p:return function(t,r){return(t*r%2+t*r%3)%2==0};case y:return function(t,r){return(t*r%3+(t+r)%2)%2==0};default:throw"bad maskPattern:"+t}},o.getErrorCorrectPolynomial=function(t){for(var r=k([1],0),e=0;e<t;e+=1)r=r.multiply(k([1,C.gexp(e)],0));return r},o.getLengthInBits=function(t,r){if(1<=r&&r<10)switch(t){case a:return 10;case u:return 9;case f:case c:return 8;default:throw"mode:"+t}else if(r<27)switch(t){case a:return 12;case u:return 11;case f:return 16;case c:return 10;default:throw"mode:"+t}else{if(!(r<41))throw"type:"+r;switch(t){case a:return 14;case u:return 13;case f:return 16;case c:return 12;default:throw"mode:"+t}}},o.getLostPoint=function(t){for(var r=t.getModuleCount(),e=0,n=0;n<r;n+=1)for(var o=0;o<r;o+=1){for(var i=0,a=t.isDark(n,o),u=-1;u<=1;u+=1)if(!(n+u<0||r<=n+u))for(var f=-1;f<=1;f+=1)o+f<0||r<=o+f||0==u&&0==f||a==t.isDark(n+u,o+f)&&(i+=1);i>5&&(e+=3+i-5)}for(n=0;n<r-1;n+=1)for(o=0;o<r-1;o+=1){var c=0;t.isDark(n,o)&&(c+=1),t.isDark(n+1,o)&&(c+=1),t.isDark(n,o+1)&&(c+=1),t.isDark(n+1,o+1)&&(c+=1),0!=c&&4!=c||(e+=3)}for(n=0;n<r;n+=1)for(o=0;o<r-6;o+=1)t.isDark(n,o)&&!t.isDark(n,o+1)&&t.isDark(n,o+2)&&t.isDark(n,o+3)&&t.isDark(n,o+4)&&!t.isDark(n,o+5)&&t.isDark(n,o+6)&&(e+=40);for(o=0;o<r;o+=1)for(n=0;n<r-6;n+=1)t.isDark(n,o)&&!t.isDark(n+1,o)&&t.isDark(n+2,o)&&t.isDark(n+3,o)&&t.isDark(n+4,o)&&!t.isDark(n+5,o)&&t.isDark(n+6,o)&&(e+=40);var g=0;for(o=0;o<r;o+=1)for(n=0;n<r;n+=1)t.isDark(n,o)&&(g+=1);return e+=Math.abs(100*g/r/r-50)/5*10},o),C=function(){for(var t=new Array(256),r=new Array(256),e=0;e<8;e+=1)t[e]=1<<e;for(e=8;e<256;e+=1)t[e]=t[e-4]^t[e-5]^t[e-6]^t[e-8];for(e=0;e<255;e+=1)r[t[e]]=e;var n={glog:function(t){if(t<1)throw"glog("+t+")";return r[t]},gexp:function(r){for(;r<0;)r+=255;for(;r>=256;)r-=255;return t[r]}};return n}();function k(t,r){if(void 0===t.length)throw t.length+"/"+r;var e=function(){for(var e=0;e<t.length&&0==t[e];)e+=1;for(var n=new Array(t.length-e+r),o=0;o<t.length-e;o+=1)n[o]=t[o+e];return n}(),n={getAt:function(t){return e[t]},getLength:function(){return e.length},multiply:function(t){for(var r=new Array(n.getLength()+t.getLength()-1),e=0;e<n.getLength();e+=1)for(var o=0;o<t.getLength();o+=1)r[e+o]^=C.gexp(C.glog(n.getAt(e))+C.glog(t.getAt(o)));return k(r,0)},mod:function(t){if(n.getLength()-t.getLength()<0)return n;for(var r=C.glog(n.getAt(0))-C.glog(t.getAt(0)),e=new Array(n.getLength()),o=0;o<n.getLength();o+=1)e[o]=n.getAt(o);for(o=0;o<t.getLength();o+=1)e[o]^=C.gexp(C.glog(t.getAt(o))+r);return k(e,0).mod(t)}};return n}var A=function(){var t=[[1,26,19],[1,26,16],[1,26,13],[1,26,9],[1,44,34],[1,44,28],[1,44,22],[1,44,16],[1,70,55],[1,70,44],[2,35,17],[2,35,13],[1,100,80],[2,50,32],[2,50,24],[4,25,9],[1,134,108],[2,67,43],[2,33,15,2,34,16],[2,33,11,2,34,12],[2,86,68],[4,43,27],[4,43,19],[4,43,15],[2,98,78],[4,49,31],[2,32,14,4,33,15],[4,39,13,1,40,14],[2,121,97],[2,60,38,2,61,39],[4,40,18,2,41,19],[4,40,14,2,41,15],[2,146,116],[3,58,36,2,59,37],[4,36,16,4,37,17],[4,36,12,4,37,13],[2,86,68,2,87,69],[4,69,43,1,70,44],[6,43,19,2,44,20],[6,43,15,2,44,16],[4,101,81],[1,80,50,4,81,51],[4,50,22,4,51,23],[3,36,12,8,37,13],[2,116,92,2,117,93],[6,58,36,2,59,37],[4,46,20,6,47,21],[7,42,14,4,43,15],[4,133,107],[8,59,37,1,60,38],[8,44,20,4,45,21],[12,33,11,4,34,12],[3,145,115,1,146,116],[4,64,40,5,65,41],[11,36,16,5,37,17],[11,36,12,5,37,13],[5,109,87,1,110,88],[5,65,41,5,66,42],[5,54,24,7,55,25],[11,36,12,7,37,13],[5,122,98,1,123,99],[7,73,45,3,74,46],[15,43,19,2,44,20],[3,45,15,13,46,16],[1,135,107,5,136,108],[10,74,46,1,75,47],[1,50,22,15,51,23],[2,42,14,17,43,15],[5,150,120,1,151,121],[9,69,43,4,70,44],[17,50,22,1,51,23],[2,42,14,19,43,15],[3,141,113,4,142,114],[3,70,44,11,71,45],[17,47,21,4,48,22],[9,39,13,16,40,14],[3,135,107,5,136,108],[3,67,41,13,68,42],[15,54,24,5,55,25],[15,43,15,10,44,16],[4,144,116,4,145,117],[17,68,42],[17,50,22,6,51,23],[19,46,16,6,47,17],[2,139,111,7,140,112],[17,74,46],[7,54,24,16,55,25],[34,37,13],[4,151,121,5,152,122],[4,75,47,14,76,48],[11,54,24,14,55,25],[16,45,15,14,46,16],[6,147,117,4,148,118],[6,73,45,14,74,46],[11,54,24,16,55,25],[30,46,16,2,47,17],[8,132,106,4,133,107],[8,75,47,13,76,48],[7,54,24,22,55,25],[22,45,15,13,46,16],[10,142,114,2,143,115],[19,74,46,4,75,47],[28,50,22,6,51,23],[33,46,16,4,47,17],[8,152,122,4,153,123],[22,73,45,3,74,46],[8,53,23,26,54,24],[12,45,15,28,46,16],[3,147,117,10,148,118],[3,73,45,23,74,46],[4,54,24,31,55,25],[11,45,15,31,46,16],[7,146,116,7,147,117],[21,73,45,7,74,46],[1,53,23,37,54,24],[19,45,15,26,46,16],[5,145,115,10,146,116],[19,75,47,10,76,48],[15,54,24,25,55,25],[23,45,15,25,46,16],[13,145,115,3,146,116],[2,74,46,29,75,47],[42,54,24,1,55,25],[23,45,15,28,46,16],[17,145,115],[10,74,46,23,75,47],[10,54,24,35,55,25],[19,45,15,35,46,16],[17,145,115,1,146,116],[14,74,46,21,75,47],[29,54,24,19,55,25],[11,45,15,46,46,16],[13,145,115,6,146,116],[14,74,46,23,75,47],[44,54,24,7,55,25],[59,46,16,1,47,17],[12,151,121,7,152,122],[12,75,47,26,76,48],[39,54,24,14,55,25],[22,45,15,41,46,16],[6,151,121,14,152,122],[6,75,47,34,76,48],[46,54,24,10,55,25],[2,45,15,64,46,16],[17,152,122,4,153,123],[29,74,46,14,75,47],[49,54,24,10,55,25],[24,45,15,46,46,16],[4,152,122,18,153,123],[13,74,46,32,75,47],[48,54,24,14,55,25],[42,45,15,32,46,16],[20,147,117,4,148,118],[40,75,47,7,76,48],[43,54,24,22,55,25],[10,45,15,67,46,16],[19,148,118,6,149,119],[18,75,47,31,76,48],[34,54,24,34,55,25],[20,45,15,61,46,16]],r=function(t,r){var e={};return e.totalCount=t,e.dataCount=r,e},e={};return e.getRSBlocks=function(e,n){var o=function(r,e){switch(e){case g.L:return t[4*(r-1)+0];case g.M:return t[4*(r-1)+1];case g.Q:return t[4*(r-1)+2];case g.H:return t[4*(r-1)+3];default:return}}(e,n);if(void 0===o)throw"bad rs block @ typeNumber:"+e+"/errorCorrectionLevel:"+n;for(var i=o.length/3,a=[],u=0;u<i;u+=1)for(var f=o[3*u+0],c=o[3*u+1],l=o[3*u+2],h=0;h<f;h+=1)a.push(r(c,l));return a},e}(),b=function(){var t=[],r=0,e={getBuffer:function(){return t},getAt:function(r){var e=Math.floor(r/8);return 1==(t[e]>>>7-r%8&1)},put:function(t,r){for(var n=0;n<r;n+=1)e.putBit(1==(t>>>r-n-1&1))},getLengthInBits:function(){return r},putBit:function(e){var n=Math.floor(r/8);t.length<=n&&t.push(0),e&&(t[n]|=128>>>r%8),r+=1}};return e},M=function(t){var r=a,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+2<r.length;)t.put(o(r.substring(n,n+3)),10),n+=3;n<r.length&&(r.length-n==1?t.put(o(r.substring(n,n+1)),4):r.length-n==2&&t.put(o(r.substring(n,n+2)),7))}},o=function(t){for(var r=0,e=0;e<t.length;e+=1)r=10*r+i(t.charAt(e));return r},i=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);throw"illegal char :"+t};return n},x=function(t){var r=u,e=t,n={getMode:function(){return r},getLength:function(t){return e.length},write:function(t){for(var r=e,n=0;n+1<r.length;)t.put(45*o(r.charAt(n))+o(r.charAt(n+1)),11),n+=2;n<r.length&&t.put(o(r.charAt(n)),6)}},o=function(t){if("0"<=t&&t<="9")return t.charCodeAt(0)-"0".charCodeAt(0);if("A"<=t&&t<="Z")return t.charCodeAt(0)-"A".charCodeAt(0)+10;switch(t){case" ":return 36;case"$":return 37;case"%":return 38;case"*":return 39;case"+":return 40;case"-":return 41;case".":return 42;case"/":return 43;case":":return 44;default:throw"illegal char :"+t}};return n},m=function(r){var e=f,n=t.stringToBytes(r),o={getMode:function(){return e},getLength:function(t){return n.length},write:function(t){for(var r=0;r<n.length;r+=1)t.put(n[r],8)}};return o},L=function(r){var e=c,n=t.stringToBytesFuncs.SJIS;if(!n)throw"sjis not supported.";!function(){var t=n("友");if(2!=t.length||38726!=(t[0]<<8|t[1]))throw"sjis not supported."}();var o=n(r),i={getMode:function(){return e},getLength:function(t){return~~(o.length/2)},write:function(t){for(var r=o,e=0;e+1<r.length;){var n=(255&r[e])<<8|255&r[e+1];if(33088<=n&&n<=40956)n-=33088;else{if(!(57408<=n&&n<=60351))throw"illegal char at "+(e+1)+"/"+n;n-=49472}n=192*(n>>>8&255)+(255&n),t.put(n,13),e+=2}if(e<r.length)throw"illegal char at "+(e+1)}};return i},D=function(){var t=[],r={writeByte:function(r){t.push(255&r)},writeShort:function(t){r.writeByte(t),r.writeByte(t>>>8)},writeBytes:function(t,e,n){e=e||0,n=n||t.length;for(var o=0;o<n;o+=1)r.writeByte(t[o+e])},writeString:function(t){for(var e=0;e<t.length;e+=1)r.writeByte(t.charCodeAt(e))},toByteArray:function(){return t},toString:function(){var r="";r+="[";for(var e=0;e<t.length;e+=1)e>0&&(r+=","),r+=t[e];return r+="]"}};return r},S=function(t){var r=t,e=0,n=0,o=0,i={read:function(){for(;o<8;){if(e>=r.length){if(0==o)return-1;throw"unexpected end of file./"+o}var t=r.charAt(e);if(e+=1,"="==t)return o=0,-1;t.match(/^\s$/)||(n=n<<6|a(t.charCodeAt(0)),o+=6)}var i=n>>>o-8&255;return o-=8,i}},a=function(t){if(65<=t&&t<=90)return t-65;if(97<=t&&t<=122)return t-97+26;if(48<=t&&t<=57)return t-48+52;if(43==t)return 62;if(47==t)return 63;throw"c:"+t};return i},I=function(t,r,e){for(var n=function(t,r){var e=t,n=r,o=new Array(t*r),i={setPixel:function(t,r,n){o[r*e+t]=n},write:function(t){t.writeString("GIF87a"),t.writeShort(e),t.writeShort(n),t.writeByte(128),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(0),t.writeByte(255),t.writeByte(255),t.writeByte(255),t.writeString(","),t.writeShort(0),t.writeShort(0),t.writeShort(e),t.writeShort(n),t.writeByte(0);var r=a(2);t.writeByte(2);for(var o=0;r.length-o>255;)t.writeByte(255),t.writeBytes(r,o,255),o+=255;t.writeByte(r.length-o),t.writeBytes(r,o,r.length-o),t.writeByte(0),t.writeString(";")}},a=function(t){for(var r=1<<t,e=1+(1<<t),n=t+1,i=u(),a=0;a<r;a+=1)i.add(String.fromCharCode(a));i.add(String.fromCharCode(r)),i.add(String.fromCharCode(e));var f,c,g,l=D(),h=(f=l,c=0,g=0,{write:function(t,r){if(t>>>r!=0)throw"length over";for(;c+r>=8;)f.writeByte(255&(t<<c|g)),r-=8-c,t>>>=8-c,g=0,c=0;g|=t<<c,c+=r},flush:function(){c>0&&f.writeByte(g)}});h.write(r,n);var s=0,v=String.fromCharCode(o[s]);for(s+=1;s<o.length;){var d=String.fromCharCode(o[s]);s+=1,i.contains(v+d)?v+=d:(h.write(i.indexOf(v),n),i.size()<4095&&(i.size()==1<<n&&(n+=1),i.add(v+d)),v=d)}return h.write(i.indexOf(v),n),h.write(e,n),h.flush(),l.toByteArray()},u=function(){var t={},r=0,e={add:function(n){if(e.contains(n))throw"dup key:"+n;t[n]=r,r+=1},size:function(){return r},indexOf:function(r){return t[r]},contains:function(r){return void 0!==t[r]}};return e};return i}(t,r),o=0;o<r;o+=1)for(var i=0;i<t;i+=1)n.setPixel(i,o,e(i,o));var a=D();n.write(a);for(var u=function(){var t=0,r=0,e=0,n="",o={},i=function(t){n+=String.fromCharCode(a(63&t))},a=function(t){if(t<0);else{if(t<26)return 65+t;if(t<52)return t-26+97;if(t<62)return t-52+48;if(62==t)return 43;if(63==t)return 47}throw"n:"+t};return o.writeByte=function(n){for(t=t<<8|255&n,r+=8,e+=1;r>=6;)i(t>>>r-6),r-=6},o.flush=function(){if(r>0&&(i(t<<6-r),t=0,r=0),e%3!=0)for(var o=3-e%3,a=0;a<o;a+=1)n+="="},o.toString=function(){return n},o}(),f=a.toByteArray(),c=0;c<f.length;c+=1)u.writeByte(f[c]);return u.flush(),"data:image/gif;base64,"+u};return t}();qrcode.stringToBytesFuncs["UTF-8"]=function(t){return function(t){for(var r=[],e=0;e<t.length;e++){var n=t.charCodeAt(e);n<128?r.push(n):n<2048?r.push(192|n>>6,128|63&n):n<55296||n>=57344?r.push(224|n>>12,128|n>>6&63,128|63&n):(e++,n=65536+((1023&n)<<10|1023&t.charCodeAt(e)),r.push(240|n>>18,128|n>>12&63,128|n>>6&63,128|63&n))}return r}(t)},function(t){"function"==typeof define&&define.amd?define([],t):"object"==typeof exports&&(module.exports=t())}(function(){return qrcode});
+var DIAL_CODE = "+974";
+var RESEND_SECONDS = 42;
+var VISIBLE_ACTIVITY = 2;
+var SAFE_ASSET_BASE = (function () {
+  var value = String(document.getElementById("asset-config").dataset.base || "").replace(/\/+$/, "");
+  return /^https:\/\//i.test(value) ? value : "";
+})();
+
+var TOKEN = null;
+var PROFILE = null;
+var STATS = null;
+var BENEFITS = null;
+var ACTIVITY = null;
+var REQUESTS = null;
+var PENDING_PHONE = "";
+var PENDING_NATIONAL = "";
+var SESSION_STATUS = "resuming";
+var CURRENT_ROUTE = { name: "boot", key: "" };
+var INITIAL_ROUTE = { name: "signin", key: "" };
+var CURRENT_BENEFIT = null;
+var CURRENT_REQUEST = null;
+var OUTLETS = [];
+var REQUEST_POLL = null;
+var RESEND_TIMER = null;
+var RESEND_REMAINING = RESEND_SECONDS;
+var ACTIVITY_EXPANDED = false;
+var IN_FLIGHT = Object.create(null);
+var AUTH_ATTEMPT = 0;
+var NAVIGATION_SEQUENCE = 0;
+var PROFILE_FAILED = false;
+var BENEFITS_FAILED = false;
+var ACTIVITY_FAILED = false;
+
+function byId(id) { return document.getElementById(id); }
+function text(value) { return value === null || value === undefined ? "" : String(value); }
+function setText(id, value) { var node = byId(id); if (node) node.textContent = text(value); }
+function safeStored(storage, key, value) {
+  try {
+    if (arguments.length === 2) return storage.getItem(key);
+    if (value === null) storage.removeItem(key); else storage.setItem(key, value);
+  } catch (_error) { return null; }
+  return value;
+}
+function assetUrl(path) {
+  if (!/^\/[A-Za-z0-9._\/-]+$/.test(path) || path.indexOf("..") !== -1) return "";
+  if (SAFE_ASSET_BASE) return SAFE_ASSET_BASE + path;
+  return Object.prototype.hasOwnProperty.call(BUNDLED_ASSETS, path) ? BUNDLED_ASSETS[path] : "";
+}
+function cleanFilename(value) {
+  var name = text(value).trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(name) && name.indexOf("..") === -1 ? name : "";
+}
+function setImage(img, src, placeholder) {
+  if (!img) return;
+  img.hidden = true;
+  if (placeholder) placeholder.hidden = false;
+  img.onload = function () { img.hidden = false; if (placeholder) placeholder.hidden = true; };
+  img.onerror = function () { img.hidden = true; if (placeholder) placeholder.hidden = false; };
+  if (src) img.src = src; else img.removeAttribute("src");
+}
+function configureAssets() {
+  var auth = assetUrl("/images/auth.webp");
+  ["signin", "verify", "activate"].forEach(function (name) {
+    var img = byId(name + "-hero");
+    setImage(img, auth, img && img.previousElementSibling);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".brand-lockup"), function (img) {
+    setImage(img, assetUrl("/assets/lockup.svg"), img.nextElementSibling);
+  });
+}
+function friendlyFailure(error, fallback) {
+  if (error && error.userMessage) return error.userMessage;
+  if (error && error.message && !/^(ScriptError|Exception:|Error:)/i.test(error.message)) return error.message;
+  return fallback;
+}
+function ApiError(payload) {
+  this.name = "ApiError";
+  this.message = text(payload && payload.error) || "Something went wrong.";
+  this.userMessage = this.message;
+  this.code = text(payload && payload.code);
+  this.details = payload && payload.details && typeof payload.details === "object" ? payload.details : {};
+  if (payload && Array.isArray(payload.outlets)) this.details.outlets = payload.outlets;
+}
+ApiError.prototype = Object.create(Error.prototype);
+
+/* All requests stay inside the Apps Script iframe bridge. The token is captured
+   before the asynchronous handlers run so sign-out cannot mutate an in-flight call. */
+function api(action, data) {
+  var callToken = TOKEN;
+  return new Promise(function (resolve, reject) {
+    if (!window.google || !google.script || !google.script.run) {
+      reject(new Error("The Apps Script connection is unavailable."));
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(function (result) {
+        /* Ignore protected responses that finish after sign-out or after a new
+           session replaces the token that initiated this call. */
+        if (callToken && callToken !== TOKEN) { reject(new Error("The request was cancelled.")); return; }
+        try { if (typeof result === "string") result = JSON.parse(result); }
+        catch (_parseError) { reject(new Error("The server returned an unreadable response.")); return; }
+        if (!result || result.success !== true) {
+          var error = new ApiError(result || {});
+          if (error.code.toUpperCase() === "UNAUTHENTICATED") expireSession();
+          reject(error);
+          return;
+        }
+        resolve(result);
+      })
+      .withFailureHandler(function () { reject(new Error("The connection was interrupted. Try again.")); })
+      .apiCall(action, data || {}, callToken);
+  });
+}
+function deduped(key, loader) {
+  if (IN_FLIGHT[key]) return IN_FLIGHT[key];
+  IN_FLIGHT[key] = loader().then(function (value) { delete IN_FLIGHT[key]; return value; }, function (error) { delete IN_FLIGHT[key]; throw error; });
+  return IN_FLIGHT[key];
+}
+function expireSession() {
+  clearSessionData();
+  if (CURRENT_ROUTE.name !== "boot" && !isAuthRoute(CURRENT_ROUTE.name)) navigate({ name: "signin", key: "" }, { kind: "pop", replace: true });
+}
+function setError(id, message) {
+  var node = byId(id);
+  if (!node) return;
+  node.textContent = text(message);
+  node.hidden = !message;
+}
+function setFieldInvalid(wellId, invalid) { var node = byId(wellId); if (node) node.dataset.invalid = invalid ? "true" : "false"; }
+function setBusy(button, busy, busyLabel, idleLabel) {
+  if (!button) return;
+  button.dataset.busy = busy ? "true" : "false";
+  var label = button.querySelector(".btn-label");
+  if (label) label.textContent = busy ? busyLabel : idleLabel;
+  var oldSpinner = button.querySelector(".spinner");
+  if (oldSpinner) oldSpinner.remove();
+  if (busy) {
+    var spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    button.insertBefore(spinner, label || null);
+  }
+  button.setAttribute("aria-busy", busy ? "true" : "false");
+}
+function toNationalDigits(input) { return text(input).replace(/\D/g, "").replace(/^974/, "").slice(0, 8); }
+function formatNational(value) { var digits = toNationalDigits(value); return digits.length <= 4 ? digits : digits.slice(0, 4) + " " + digits.slice(4); }
+function toE164(value) { return DIAL_CODE + toNationalDigits(value); }
+function looksLikeMobile(value) { return /^\d{8}$/.test(toNationalDigits(value)); }
+function percentage(value) { var shown = text(value).trim(); return !shown ? "" : (/%$/.test(shown) ? shown : shown + "%"); }
+function formatDate(value) {
+  if (!value) return "—";
+  var date = new Date(value);
+  if (isNaN(date.getTime())) return text(value);
+  try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date); }
+  catch (_error) { return date.toLocaleDateString(); }
+}
+function formatTimestamp(value) {
+  if (!value) return "";
+  var date = new Date(value);
+  if (isNaN(date.getTime())) return text(value);
+  try { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date); }
+  catch (_error) { return date.toLocaleString(); }
+}
+function formatMoney(minor) {
+  if (minor === null || minor === undefined || !isFinite(Number(minor))) return "—";
+  try { return new Intl.NumberFormat(undefined, { style: "currency", currency: "QAR", maximumFractionDigits: 0 }).format(Number(minor) / 100); }
+  catch (_error) { return "QAR " + Math.round(Number(minor) / 100).toLocaleString(); }
+}
+
+function normalizeBenefit(raw) {
+  raw = raw || {};
+  var childRules = raw.childRules;
+  if (typeof childRules === "string") { try { childRules = JSON.parse(childRules); } catch (_error) { childRules = null; } }
+  if (!childRules || typeof childRules !== "object" || Array.isArray(childRules)) childRules = null;
+  return {
+    id: text(raw.id),
+    key: text(raw.key || raw.slug || raw.id),
+    slug: text(raw.slug || raw.key || raw.id),
+    title: text(raw.title),
+    category: text(raw.category),
+    discountPct: text(raw.discountPct !== undefined ? raw.discountPct : raw.discount).replace(/%\s*$/, ""),
+    secondaryLabel: raw.secondaryLabel === null || raw.secondaryLabel === undefined || raw.secondaryLabel === "" ? null : text(raw.secondaryLabel),
+    secondaryPct: raw.secondaryPct === null || raw.secondaryPct === undefined || raw.secondaryPct === "" ? null : text(raw.secondaryPct).replace(/%\s*$/, ""),
+    childRules: childRules,
+    maxGuests: raw.maxGuests === null || raw.maxGuests === undefined || raw.maxGuests === "" ? (raw.maxParty === null || raw.maxParty === undefined || raw.maxParty === "" ? null : Number(raw.maxParty)) : Number(raw.maxGuests),
+    minGuests: raw.minGuests === null || raw.minGuests === undefined || raw.minGuests === "" ? null : Number(raw.minGuests),
+    reservationPhone: raw.reservationPhone ? text(raw.reservationPhone) : null,
+    terms: text(raw.terms),
+    sortOrder: Number(raw.sortOrder || 0),
+    heroImage: cleanFilename(raw.heroImage)
+  };
+}
+function heroForBenefit(benefit) {
+  var known = { fnb: "benefit-fnb.jpg", rooms: "benefit-rooms.avif", spa: "benefit-spa.jpg", events: "benefit-events.jpg" };
+  var filename = benefit.heroImage || known[benefit.key] || cleanFilename("benefit-" + benefit.key + ".jpg");
+  return filename ? assetUrl("/images/" + filename) : "";
+}
+function findBenefit(key) {
+  if (!BENEFITS) return null;
+  for (var i = 0; i < BENEFITS.length; i += 1) if (BENEFITS[i].key === key || BENEFITS[i].slug === key || BENEFITS[i].id === key) return BENEFITS[i];
+  return null;
+}
+function makeSkeleton(className) {
+  var node = document.createElement("span");
+  node.className = "skeleton " + className;
+  node.setAttribute("aria-hidden", "true");
+  return node;
+}
+function renderBenefitSkeletons() {
+  var list = byId("benefit-list");
+  list.replaceChildren();
+  list.setAttribute("aria-busy", "true");
+  list.setAttribute("aria-label", "Loading your benefits");
+  for (var i = 0; i < 5; i += 1) {
+    var item = document.createElement("li");
+    item.className = "benefit-card benefit-card-skeleton";
+    item.append(makeSkeleton("skeleton-line skeleton-title"), makeSkeleton("skeleton-line skeleton-sub"), makeSkeleton("skeleton-line skeleton-action"));
+    list.appendChild(item);
+  }
+}
+function renderBenefits() {
+  var list = byId("benefit-list");
+  list.replaceChildren();
+  list.removeAttribute("aria-busy");
+  list.removeAttribute("aria-label");
+  if (!BENEFITS) {
+    if (BENEFITS_FAILED) {
+      var failed = document.createElement("li"); failed.className = "empty"; failed.setAttribute("role", "status"); failed.textContent = "Benefits could not be loaded. We will try again when you reconnect."; list.appendChild(failed);
+    } else renderBenefitSkeletons();
+    return;
+  }
+  if (!BENEFITS.length) {
+    var empty = document.createElement("li"); empty.className = "empty"; empty.textContent = "No benefits are available right now."; list.appendChild(empty); return;
+  }
+  BENEFITS.forEach(function (benefit, index) {
+    var item = document.createElement("li");
+    item.className = "benefit-card enter-stagger";
+    item.style.setProperty("--enter-index", String(Math.min(index, 6)));
+    var heading = document.createElement("h2"); heading.className = "benefit-title";
+    var titleNode = document.createElement("span"); titleNode.textContent = benefit.title;
+    var rate = document.createElement("span"); rate.className = "benefit-rate"; rate.textContent = percentage(benefit.discountPct);
+    heading.append(titleNode, rate); item.appendChild(heading);
+    if (benefit.secondaryLabel !== null && benefit.secondaryPct !== null) {
+      var secondary = document.createElement("p"); secondary.className = "benefit-sub"; secondary.append(document.createTextNode(benefit.secondaryLabel + ": "));
+      var secondaryRate = document.createElement("span"); secondaryRate.className = "benefit-sub-rate"; secondaryRate.textContent = percentage(benefit.secondaryPct); secondary.appendChild(secondaryRate); item.appendChild(secondary);
+    }
+    var bands = benefit.childRules ? Object.keys(benefit.childRules) : [];
+    if (bands.length) {
+      var childLine = document.createElement("p"); childLine.className = "benefit-sub";
+      bands.forEach(function (band, position) {
+        if (position) { var separator = document.createElement("span"); separator.className = "benefit-sub-sep"; separator.textContent = " · "; childLine.appendChild(separator); }
+        childLine.append(document.createTextNode("Children " + band + ": "));
+        var bandRate = document.createElement("span"); bandRate.className = "benefit-sub-rate"; bandRate.textContent = percentage(benefit.childRules[band]); childLine.appendChild(bandRate);
+      });
+      item.appendChild(childLine);
+    }
+    var actions = document.createElement("div"); actions.className = "benefit-actions";
+    if (benefit.maxGuests !== null && isFinite(benefit.maxGuests)) { var max = document.createElement("span"); max.className = "chip"; max.textContent = "Maximum " + benefit.maxGuests + " guests"; actions.appendChild(max); }
+    if (benefit.minGuests !== null && isFinite(benefit.minGuests)) { var min = document.createElement("span"); min.className = "chip"; min.textContent = "Minimum " + benefit.minGuests + " guests"; actions.appendChild(min); }
+    var details = document.createElement("button"); details.type = "button"; details.className = "benefit-details"; details.textContent = "Details";
+    details.addEventListener("click", function () { navigate({ name: "offer", key: benefit.key }, { kind: "push" }); });
+    actions.appendChild(details); item.appendChild(actions); list.appendChild(item);
+  });
+}
+function loadBenefits(force) {
+  if (BENEFITS && !force) return Promise.resolve(BENEFITS);
+  if (!BENEFITS) { BENEFITS_FAILED = false; renderBenefitSkeletons(); }
+  return deduped("benefits", function () { return api("getBenefits", {}); }).then(function (result) {
+    BENEFITS = (Array.isArray(result.benefits) ? result.benefits : []).map(normalizeBenefit).sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+    BENEFITS_FAILED = false;
+    setError("offers-alert", ""); renderBenefits(); if (CURRENT_ROUTE.name === "offer") renderOffer(CURRENT_ROUTE.key); return BENEFITS;
+  }).catch(function (error) {
+    if (!BENEFITS) BENEFITS_FAILED = true;
+    var message = friendlyFailure(error, "Could not load your benefits. Try again.");
+    setError("offers-alert", message);
+    if (CURRENT_ROUTE.name === "offers") renderBenefits();
+    else if (CURRENT_ROUTE.name === "offer" && !BENEFITS) renderOfferFailure(message);
+    throw error;
+  });
+}
+function appendDetailRow(list, label, value, sand) {
+  var row = document.createElement("div"); row.className = "detail-row";
+  var term = document.createElement("dt"); term.className = "detail-label"; term.textContent = label;
+  var detail = document.createElement("dd"); detail.className = "detail-value" + (sand ? " detail-value-sand" : ""); detail.textContent = text(value);
+  row.append(term, detail); list.appendChild(row);
+}
+function renderOffer(key) {
+  CURRENT_BENEFIT = findBenefit(key);
+  var title = byId("offer-title"); var rate = byId("offer-rate"); var rows = byId("offer-rows");
+  rows.replaceChildren();
+  if (BENEFITS && !CURRENT_BENEFIT) {
+    CURRENT_REQUEST = null;
+    OUTLETS = [];
+    stopRequestPoll();
+    title.textContent = "Not available";
+    rate.textContent = "";
+    setText("offer-terms", "");
+    byId("offer-info").hidden = true;
+    byId("request-state").replaceChildren();
+    byId("request-action").hidden = true;
+    byId("request-note").value = "";
+    var missingSelect = byId("request-outlet");
+    while (missingSelect.options.length > 1) missingSelect.remove(1);
+    missingSelect.value = "";
+    byId("outlet-field").hidden = true;
+    var missingCall = byId("reservation-call");
+    missingCall.hidden = true;
+    missingCall.textContent = "";
+    missingCall.removeAttribute("href");
+    setError("request-error", "That benefit is not part of your membership.");
+    setImage(byId("offer-hero"), "", byId("offer-hero-placeholder"));
+    return;
+  }
+  if (!CURRENT_BENEFIT) { title.replaceChildren(makeSkeleton("skeleton-line skeleton-title")); rate.replaceChildren(makeSkeleton("skeleton-figure")); return; }
+  title.textContent = CURRENT_BENEFIT.title; rate.textContent = percentage(CURRENT_BENEFIT.discountPct);
+  if (CURRENT_BENEFIT.secondaryLabel !== null && CURRENT_BENEFIT.secondaryPct !== null) appendDetailRow(rows, CURRENT_BENEFIT.secondaryLabel, percentage(CURRENT_BENEFIT.secondaryPct), false);
+  if (CURRENT_BENEFIT.maxGuests !== null && isFinite(CURRENT_BENEFIT.maxGuests)) appendDetailRow(rows, "Maximum guests", String(CURRENT_BENEFIT.maxGuests), false);
+  if (CURRENT_BENEFIT.minGuests !== null && isFinite(CURRENT_BENEFIT.minGuests)) appendDetailRow(rows, "Minimum guests", String(CURRENT_BENEFIT.minGuests), false);
+  if (CURRENT_BENEFIT.reservationPhone) appendDetailRow(rows, "Reservations", CURRENT_BENEFIT.reservationPhone, true);
+  setText("offer-terms", CURRENT_BENEFIT.terms); byId("offer-info").hidden = false;
+  setImage(byId("offer-hero"), heroForBenefit(CURRENT_BENEFIT), byId("offer-hero-placeholder"));
+  var call = byId("reservation-call");
+  if (CURRENT_BENEFIT.reservationPhone) {
+    call.hidden = false; call.textContent = "Call " + CURRENT_BENEFIT.reservationPhone; call.href = "tel:" + CURRENT_BENEFIT.reservationPhone.replace(/[^\d+]/g, "");
+    byId("request-note").placeholder = "Preferred date, time, and number of guests";
+  } else { call.hidden = true; call.removeAttribute("href"); byId("request-note").placeholder = "Anything the outlet should know"; }
+  loadRequestContext(CURRENT_BENEFIT);
+}
+function renderOfferFailure(message) {
+  CURRENT_BENEFIT = null; CURRENT_REQUEST = null; OUTLETS = []; stopRequestPoll();
+  setText("offer-title", "Benefit unavailable"); setText("offer-rate", "");
+  byId("offer-rows").replaceChildren(); setText("offer-terms", ""); byId("offer-info").hidden = true;
+  setImage(byId("offer-hero"), "", byId("offer-hero-placeholder"));
+  byId("request-state").replaceChildren(); byId("request-action").hidden = true;
+  var call = byId("reservation-call"); call.hidden = true; call.textContent = ""; call.removeAttribute("href");
+  setError("request-error", message);
+}
+
+function normalizeRequest(raw) {
+  raw = raw || {};
+  var benefit = raw.benefit && typeof raw.benefit === "object" ? raw.benefit : {};
+  var outlet = raw.outlet && typeof raw.outlet === "object" ? raw.outlet : null;
+  return {
+    id: text(raw.id || raw.requestId),
+    status: text(raw.status || "SENT").toUpperCase(),
+    requestedAt: text(raw.requestedAt || raw.createdAt),
+    note: raw.note === null || raw.note === undefined ? null : text(raw.note),
+    closedReason: raw.closedReason ? text(raw.closedReason) : null,
+    benefitId: text(raw.benefitId || benefit.id),
+    benefitKey: text(raw.benefitKey || raw.slug || benefit.key || benefit.slug),
+    outlet: outlet ? { id: text(outlet.id), name: text(outlet.name) } : (raw.outletId || raw.outletName ? { id: text(raw.outletId), name: text(raw.outletName) } : null)
+  };
+}
+function requestMatches(request, benefit) {
+  return request.benefitKey === benefit.key || request.benefitKey === benefit.slug || request.benefitId === benefit.id;
+}
+function currentRequestFor(benefit) {
+  if (!REQUESTS) return null;
+  for (var i = 0; i < REQUESTS.length; i += 1) if (requestMatches(REQUESTS[i], benefit)) return REQUESTS[i];
+  return null;
+}
+function loadRequests(force) {
+  if (REQUESTS && !force) return Promise.resolve(REQUESTS);
+  return deduped("requests", function () { return api("getMyRequests", {}); }).then(function (result) {
+    REQUESTS = (Array.isArray(result.requests) ? result.requests : []).map(normalizeRequest);
+    return REQUESTS;
+  });
+}
+function loadOutlets(benefit) {
+  var payload = { benefitId: benefit.id, benefitKey: benefit.key, slug: benefit.slug };
+  return deduped("outlets:" + benefit.key, function () { return api("getBenefitOutlets", payload); }).then(function (result) {
+    return (Array.isArray(result.outlets) ? result.outlets : []).map(function (outlet) {
+      return { id: text(outlet.id), name: text(outlet.name), kind: text(outlet.kind || outlet.category) };
+    });
+  });
+}
+function loadRequestContext(benefit) {
+  CURRENT_REQUEST = null;
+  OUTLETS = [];
+  setError("request-error", "");
+  byId("request-action").hidden = true;
+  byId("request-state").replaceChildren();
+  loadRequests(true).then(function () {
+    if (CURRENT_ROUTE.name !== "offer" || !CURRENT_BENEFIT || CURRENT_BENEFIT.key !== benefit.key) return;
+    CURRENT_REQUEST = currentRequestFor(benefit);
+    renderRequestContext();
+  }).catch(function (error) {
+    if (CURRENT_ROUTE.name !== "offer" || !CURRENT_BENEFIT || CURRENT_BENEFIT.key !== benefit.key) return;
+    setError("request-error", friendlyFailure(error, "Could not load your request status."));
+    renderRequestContext();
+  });
+}
+function requestStatusCard(tone, heading, body) {
+  var card = document.createElement("div");
+  card.className = "request-status";
+  card.dataset.status = tone;
+  card.setAttribute("role", "status");
+  var strong = document.createElement("strong"); strong.textContent = heading;
+  var copy = document.createElement("span"); copy.textContent = body;
+  card.append(strong, copy);
+  return card;
+}
+function renderRequestContext() {
+  var holder = byId("request-state"); holder.replaceChildren();
+  var status = CURRENT_REQUEST ? CURRENT_REQUEST.status : "";
+  if (status === "SENT" || status === "SUBMITTED") {
+    holder.appendChild(requestStatusCard("sent", (CURRENT_REQUEST.outlet && CURRENT_REQUEST.outlet.name ? CURRENT_REQUEST.outlet.name : "The outlet") + " knows you are coming", "Nothing to wait for — just turn up and show your card. The discount is applied at the outlet and recorded afterwards."));
+  } else if (status === "NOT_USED") {
+    holder.appendChild(requestStatusCard("declined", "Not used", (CURRENT_REQUEST.closedReason || "That visit did not happen, so nothing was recorded.") + " Your benefit is untouched — use it whenever you like."));
+  } else if (status === "FULFILLED") {
+    holder.appendChild(requestStatusCard("fulfilled", "Previous use recorded", "Let an outlet know again whenever you would like to use this benefit."));
+  } else if (status === "APPROVED" || status === "PENDING") {
+    holder.appendChild(requestStatusCard("pending", "Earlier request", "Go ahead and show your card at the outlet — nothing else is needed."));
+  } else if (status === "DECLINED") {
+    holder.appendChild(requestStatusCard("declined", "Earlier request was not approved", CURRENT_REQUEST.closedReason || "You can use this benefit now regardless."));
+  }
+  var action = byId("request-action");
+  var open = status === "SENT" || status === "SUBMITTED";
+  action.hidden = open;
+  if (!open) {
+    var outletField = byId("outlet-field"); var select = byId("request-outlet");
+    while (select.options.length > 1) select.remove(1);
+    OUTLETS.forEach(function (outlet) {
+      var option = document.createElement("option"); option.value = outlet.id; option.textContent = outlet.name; select.appendChild(option);
+    });
+    outletField.hidden = OUTLETS.length <= 1;
+    select.value = OUTLETS.length === 1 ? OUTLETS[0].id : "";
+    var requestLabel = CURRENT_REQUEST ? "Let the outlet know again" : "Let the outlet know";
+    var requestButton = byId("request-submit");
+    requestButton.querySelector(".btn-label").textContent = requestLabel;
+    requestButton.disabled = OUTLETS.length > 1 && !select.value;
+  }
+  if (open) startRequestPoll(); else stopRequestPoll();
+}
+function startRequestPoll() {
+  stopRequestPoll();
+  REQUEST_POLL = window.setInterval(function () {
+    if (CURRENT_ROUTE.name !== "offer" || !CURRENT_BENEFIT) return;
+    loadRequests(true).then(function () { CURRENT_REQUEST = currentRequestFor(CURRENT_BENEFIT); renderRequestContext(); }).catch(function () {});
+  }, 15000);
+}
+function stopRequestPoll() {
+  if (REQUEST_POLL !== null) window.clearInterval(REQUEST_POLL);
+  REQUEST_POLL = null;
+}
+
+function createCardFront(profile, clickable) {
+  var card = document.createElement(clickable ? "button" : "div");
+  if (clickable) card.type = "button";
+  card.className = "membership-card" + (clickable ? " membership-card-link" : "");
+  if (clickable) {
+    card.setAttribute("aria-label", "Show membership card");
+    card.addEventListener("click", function () { navigate({ name: "card", key: "" }, { kind: "modal" }); });
+  }
+  var face = document.createElement("img");
+  face.className = "card-face";
+  face.alt = "Steigenberger Hotel & Residence Doha — Privilege Guest";
+  var faceSrc = assetUrl("/assets/card-face.svg");
+  if (faceSrc) face.src = faceSrc; else face.hidden = true;
+  face.addEventListener("error", function () { face.hidden = true; });
+  var foot = document.createElement("span"); foot.className = "card-foot";
+  var name = document.createElement("span"); name.className = "card-name";
+  var number = document.createElement("span"); number.className = "card-number";
+  if (profile) { name.textContent = text(profile.fullName); number.textContent = text(profile.memberNumber); }
+  else { name.appendChild(makeSkeleton("card-name-skeleton")); number.appendChild(makeSkeleton("card-number-skeleton")); }
+  foot.append(name, number); card.append(face, foot);
+  return card;
+}
+function createQrSvg(value, titleText) {
+  if (!value || typeof qrcode !== "function") return null;
+  try {
+    var qr = qrcode(0, "M");
+    qr.addData(text(value));
+    qr.make();
+    var count = qr.getModuleCount(); var commands = [];
+    for (var row = 0; row < count; row += 1) {
+      for (var col = 0; col < count; col += 1) if (qr.isDark(row, col)) commands.push("M" + col + " " + row + "h1v1h-1z");
+    }
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    /* ISO/IEC 18004 requires four clear modules on every side. Keep that quiet
+       zone inside the SVG so the code remains valid in both card placements. */
+    svg.setAttribute("viewBox", "-4 -4 " + (count + 8) + " " + (count + 8));
+    svg.setAttribute("role", "img");
+    svg.setAttribute("shape-rendering", "crispEdges");
+    var title = document.createElementNS("http://www.w3.org/2000/svg", "title"); title.textContent = titleText; svg.appendChild(title);
+    var background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    background.setAttribute("x", "-4"); background.setAttribute("y", "-4");
+    background.setAttribute("width", String(count + 8)); background.setAttribute("height", String(count + 8));
+    background.setAttribute("fill", "#fff"); svg.appendChild(background);
+    var path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", commands.join("")); path.setAttribute("fill", "#000"); svg.appendChild(path);
+    return svg;
+  } catch (_error) { return null; }
+}
+function createCardBack(profile) {
+  var card = document.createElement("div"); card.className = "membership-card membership-card-back";
+  var face = document.createElement("img"); face.className = "card-face"; face.alt = "Back of the Privilege Guest membership card";
+  var faceSrc = assetUrl("/assets/card-back.svg"); if (faceSrc) face.src = faceSrc; else face.hidden = true;
+  face.addEventListener("error", function () { face.hidden = true; });
+  var zone = document.createElement("div"); zone.className = "card-back-qr-quiet-zone";
+  if (profile && profile.cardCode) {
+    var qr = createQrSvg(profile.cardCode, "Membership code for " + text(profile.memberNumber));
+    if (qr) zone.appendChild(qr); else zone.appendChild(makeSkeleton("card-back-qr-placeholder"));
+  } else zone.appendChild(makeSkeleton("card-back-qr-placeholder"));
+  card.append(face, zone);
+  return card;
+}
+function consentGranted(consent, channel) {
+  if (!consent) return false;
+  var value = consent[channel.toUpperCase()];
+  if (value === undefined) value = consent[channel.toLowerCase()];
+  return typeof value === "boolean" ? value : !!(value && value.granted);
+}
+function renderProfile() {
+  var cards = byId("profile-cards"); cards.replaceChildren();
+  if (!PROFILE && PROFILE_FAILED) {
+    var unavailable = document.createElement("div"); unavailable.className = "empty"; unavailable.setAttribute("role", "status"); unavailable.textContent = "Membership details could not be loaded. We will try again when you reconnect."; cards.appendChild(unavailable);
+  } else cards.append(createCardFront(PROFILE, true), createCardBack(PROFILE));
+  if (STATS) {
+    setText("stat-saved", formatMoney(STATS.savedMinor));
+    setText("stat-visits", STATS.visits !== undefined ? STATS.visits : "—");
+    setText("stat-used", STATS.benefitsUsed !== undefined ? STATS.benefitsUsed : "—");
+  } else if (PROFILE_FAILED) {
+    setText("stat-saved", "—"); setText("stat-visits", "—"); setText("stat-used", "—");
+  } else {
+    byId("stat-saved").replaceChildren(makeSkeleton("statbar-skeleton"));
+    byId("stat-visits").replaceChildren(makeSkeleton("statbar-skeleton"));
+    byId("stat-used").replaceChildren(makeSkeleton("statbar-skeleton"));
+  }
+  ["email", "sms"].forEach(function (channel) {
+    var toggle = byId("profile-" + channel);
+    toggle.setAttribute("aria-checked", consentGranted(PROFILE && PROFILE.consent, channel) ? "true" : "false");
+    toggle.disabled = !PROFILE;
+  });
+  renderActivity();
+}
+function activityBenefit(row) { return row && row.benefit && typeof row.benefit === "object" ? row.benefit : {}; }
+function activityTitle(row) { var nested = activityBenefit(row); return text(nested.title || row.benefitTitle || row.benefit || "Benefit"); }
+function activityKey(row) { var nested = activityBenefit(row); return text(nested.key || nested.slug || row.benefitKey || row.benefitId); }
+function activityOutlet(row) { return text(row && row.outlet && typeof row.outlet === "object" ? row.outlet.name : row.outlet); }
+function activityDate(row) { return text(row.occurredAt || row.recordedAt); }
+function netActivity() {
+  if (!ACTIVITY) return [];
+  var reversed = Object.create(null);
+  ACTIVITY.forEach(function (row) { if (row.reversesId) reversed[text(row.reversesId)] = true; });
+  return ACTIVITY.filter(function (row) { return !row.reversal && !row.reversesId && !reversed[text(row.id)]; });
+}
+function initialsFor(value) {
+  var words = text(value).replace(/[^A-Za-z0-9\s&]/g, "").split(/[\s&]+/).filter(Boolean).slice(0, 2);
+  return words.map(function (word) { return word.charAt(0).toUpperCase(); }).join("") || "PG";
+}
+function categoryFor(row) {
+  var nested = activityBenefit(row);
+  if (nested.category) return text(nested.category).toLowerCase();
+  var found = findBenefit(activityKey(row));
+  return found ? found.category.toLowerCase() : "other";
+}
+function renderActivitySkeletons() {
+  var list = byId("activity-list");
+  list.replaceChildren(); list.setAttribute("aria-busy", "true"); list.setAttribute("aria-label", "Loading your visits");
+  for (var i = 0; i < 2; i += 1) {
+    var item = document.createElement("li"); item.className = "activity-row"; item.append(makeSkeleton("activity-tile"), makeSkeleton("skeleton-line")); list.appendChild(item);
+  }
+}
+function renderActivity() {
+  var list = byId("activity-list"); var more = byId("activity-more");
+  list.replaceChildren(); list.removeAttribute("aria-busy"); list.removeAttribute("aria-label");
+  if (!ACTIVITY) {
+    if (ACTIVITY_FAILED) { var failed = document.createElement("li"); failed.className = "empty"; failed.setAttribute("role", "status"); failed.textContent = "Your visits could not be loaded."; list.appendChild(failed); }
+    else renderActivitySkeletons();
+    more.hidden = true; return;
+  }
+  var visits = netActivity();
+  if (!visits.length) { var empty = document.createElement("li"); empty.className = "empty"; empty.textContent = "You have not used a benefit yet."; list.appendChild(empty); more.hidden = true; return; }
+  var shown = ACTIVITY_EXPANDED ? visits : visits.slice(0, VISIBLE_ACTIVITY);
+  shown.forEach(function (row) {
+    var item = document.createElement("li"); item.className = "activity-row";
+    var tile = document.createElement("span"); tile.className = "activity-tile"; tile.dataset.category = categoryFor(row); tile.textContent = initialsFor(activityTitle(row));
+    var content = document.createElement("span"); content.className = "activity-text";
+    var title = document.createElement("span"); title.className = "activity-title"; title.textContent = activityTitle(row);
+    var meta = document.createElement("span"); meta.className = "activity-meta";
+    var pieces = [activityOutlet(row)];
+    if (row.discountPctApplied !== undefined && row.discountPctApplied !== null && row.discountPctApplied !== "") pieces.push(percentage(row.discountPctApplied));
+    if (row.partySize !== null && row.partySize !== undefined && Number(row.partySize) > 0) pieces.push(String(row.partySize) + " guests");
+    meta.textContent = pieces.filter(Boolean).join(" · "); content.append(title, meta);
+    var figures = document.createElement("span"); figures.className = "activity-figures";
+    var date = document.createElement("time"); date.className = "activity-date"; date.dateTime = activityDate(row); date.title = formatTimestamp(activityDate(row)); date.textContent = formatDate(activityDate(row));
+    var saved = document.createElement("span"); saved.className = "activity-saved"; saved.textContent = formatMoney(row.savedMinor);
+    figures.append(date, saved); item.append(tile, content, figures); list.appendChild(item);
+  });
+  more.hidden = visits.length <= VISIBLE_ACTIVITY;
+  more.setAttribute("aria-expanded", ACTIVITY_EXPANDED ? "true" : "false");
+  more.textContent = ACTIVITY_EXPANDED ? "Show fewer" : "View all " + visits.length + " visits";
+}
+function renderModal() {
+  var modalCard = byId("modal-card"); modalCard.replaceChildren();
+  if (!PROFILE && PROFILE_FAILED) {
+    var unavailable = document.createElement("div"); unavailable.className = "empty"; unavailable.setAttribute("role", "alert"); unavailable.textContent = "Membership card unavailable."; modalCard.appendChild(unavailable);
+  } else modalCard.appendChild(createCardFront(PROFILE, false));
+  var code = byId("modal-code"); code.replaceChildren();
+  if (!PROFILE && PROFILE_FAILED) { byId("modal-validity").hidden = true; return; }
+  if (!PROFILE || !PROFILE.cardCode) {
+    code.appendChild(makeSkeleton("qr-quiet-zone"));
+    byId("modal-validity").hidden = true;
+    return;
+  }
+  var quiet = document.createElement("div"); quiet.className = "qr-quiet-zone";
+  var qr = createQrSvg(PROFILE.cardCode, "Membership code for " + text(PROFILE.memberNumber));
+  if (qr) quiet.appendChild(qr); else { var fallbackBox = document.createElement("span"); fallbackBox.className = "empty"; fallbackBox.textContent = "Code unavailable"; quiet.appendChild(fallbackBox); }
+  var output = document.createElement("output"); output.className = "code-fallback"; output.textContent = PROFILE.cardCode;
+  code.append(quiet, output);
+  setText("modal-validity", "Valid while your membership is active · Member since " + formatDate(PROFILE.joinedAt));
+  byId("modal-validity").hidden = false;
+}
+function loadProfile(force) {
+  if (PROFILE && !force) return Promise.resolve(PROFILE);
+  if (!PROFILE) PROFILE_FAILED = false;
+  return deduped("profile", function () { return api("getMe", {}); }).then(function (result) {
+    PROFILE = result.member || result.profile || null; STATS = result.stats || (PROFILE && PROFILE.stats) || null;
+    PROFILE_FAILED = false;
+    setError("profile-alert", ""); renderProfile(); renderModal(); return PROFILE;
+  }).catch(function (error) { if (!PROFILE) PROFILE_FAILED = true; setError("profile-alert", friendlyFailure(error, "Could not load your membership.")); renderProfile(); renderModal(); throw error; });
+}
+function loadActivity(force) {
+  if (ACTIVITY && !force) return Promise.resolve(ACTIVITY);
+  if (!ACTIVITY) { ACTIVITY_FAILED = false; renderActivitySkeletons(); }
+  return deduped("activity", function () { return api("getMyActivity", {}); }).then(function (result) {
+    ACTIVITY = Array.isArray(result.activity) ? result.activity : (Array.isArray(result.redemptions) ? result.redemptions : []);
+    ACTIVITY_FAILED = false;
+    setError("profile-alert", ""); renderActivity(); return ACTIVITY;
+  }).catch(function (error) { if (!ACTIVITY) ACTIVITY_FAILED = true; setError("profile-alert", friendlyFailure(error, "Could not refresh your visits.")); renderActivity(); throw error; });
+}
+
+function isAuthRoute(name) { return name === "signin" || name === "verify" || name === "activate"; }
+function isProtectedRoute(name) { return name === "offers" || name === "offer" || name === "profile" || name === "card"; }
+function routeHash(route) { return route.name === "offer" && route.key ? "offer/" + encodeURIComponent(route.key) : route.name; }
+function parseRoute(value, state) {
+  var source = text(value).replace(/^#/, "").replace(/^\//, "");
+  if (!source && state && state.route) source = state.route + (state.key ? "/" + encodeURIComponent(state.key) : "");
+  var parts = source.split("/");
+  var name = parts[0];
+  if (["signin", "verify", "activate", "offers", "offer", "profile", "card"].indexOf(name) === -1) name = SESSION_STATUS === "signed-in" ? "offers" : "signin";
+  var key = "";
+  if (name === "offer") {
+    try { key = decodeURIComponent(parts.slice(1).join("/") || text(state && state.key)); }
+    catch (_error) { key = ""; }
+  }
+  return { name: name, key: key };
+}
+function historyApi() { return window.google && google.script && google.script.history ? google.script.history : null; }
+function writeHistory(route, replace) {
+  var state = { route: route.name, key: route.key || "" };
+  var hash = routeHash(route);
+  var history = historyApi();
+  try {
+    if (history) {
+      if (replace) history.replace(state, {}, hash); else history.push(state, {}, hash);
+    } else if (window.history && window.history.pushState) {
+      window.history[replace ? "replaceState" : "pushState"](state, "", "#" + hash);
+    } else window.location.hash = hash;
+  } catch (_error) { window.location.hash = hash; }
+}
+function renderRoute(route, focus) {
+  if (SESSION_STATUS === "signed-in" && isAuthRoute(route.name)) route = { name: "offers", key: "" };
+  if (SESSION_STATUS !== "signed-in" && isProtectedRoute(route.name)) route = { name: "signin", key: "" };
+  if (route.name === "verify" && !PENDING_PHONE) route = { name: "signin", key: "" };
+  CURRENT_ROUTE = route;
+  var active = byId("s-" + route.name);
+  Array.prototype.forEach.call(document.querySelectorAll(".route-screen"), function (screen) {
+    screen.hidden = screen !== active;
+    var screenMain = screen.querySelector("main");
+    if (screenMain) screenMain.removeAttribute("id");
+  });
+  var activeMain = active && active.querySelector("main");
+  if (activeMain) activeMain.id = "main";
+  document.title = ({ signin: "Sign in", verify: "Passcode", activate: "Activate membership", offers: "Your benefits", offer: "Benefit details", profile: "Profile", card: "Membership card" }[route.name] || "Privilege Guest") + " · Privilege Guest";
+  if (route.name !== "offer") stopRequestPoll();
+  if (route.name === "offers") { renderBenefits(); loadBenefits(true).catch(function () {}); }
+  if (route.name === "offer") { renderOffer(route.key); if (!BENEFITS) loadBenefits(false).catch(function () {}); }
+  if (route.name === "profile") { renderProfile(); loadProfile(true).catch(function () {}); loadActivity(true).catch(function () {}); }
+  if (route.name === "card") { renderModal(); if (!PROFILE) loadProfile(false).catch(function () {}); }
+  if (route.name === "verify") updateVerifyLede();
+  window.scrollTo(0, 0);
+  if (focus && activeMain) window.requestAnimationFrame(function () { activeMain.focus({ preventScroll: true }); });
+  return route;
+}
+function swapRoute(apply) {
+  if (document.startViewTransition && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    var transition = document.startViewTransition(apply);
+    /* A second fast navigation legitimately skips the first transition. Chrome
+       rejects `ready` (and may reject `finished`) in that case, so consume the
+       expected cancellation while leaving the synchronous route swap intact. */
+    ["ready", "finished"].forEach(function (phase) {
+      if (transition && transition[phase] && typeof transition[phase].catch === "function") transition[phase].catch(function () {});
+    });
+  } else apply();
+}
+function navigate(route, options) {
+  options = options || {};
+  NAVIGATION_SEQUENCE += 1;
+  if (route.name !== CURRENT_ROUTE.name && isAuthRoute(CURRENT_ROUTE.name)) AUTH_ATTEMPT += 1;
+  document.documentElement.dataset.nav = options.kind || "push";
+  var apply = function () { route = renderRoute(route, true); };
+  swapRoute(apply);
+  writeHistory(route, !!options.replace);
+}
+function handleHistory(event) {
+  var location = event && event.location ? event.location : {};
+  var route = parseRoute(location.hash || window.location.hash, event && event.state);
+  NAVIGATION_SEQUENCE += 1;
+  if (route.name !== CURRENT_ROUTE.name && isAuthRoute(CURRENT_ROUTE.name)) AUTH_ATTEMPT += 1;
+  document.documentElement.dataset.nav = "pop";
+  var apply = function () { renderRoute(route, true); };
+  swapRoute(apply);
+}
+function installHistory() {
+  var history = historyApi();
+  if (history && typeof history.setChangeHandler === "function") history.setChangeHandler(handleHistory);
+  else if (window.history && typeof window.history.pushState === "function") window.addEventListener("popstate", handleHistory);
+  else window.addEventListener("hashchange", handleHistory);
+}
+function readInitialRoute(done) {
+  if (window.google && google.script && google.script.url && typeof google.script.url.getLocation === "function") {
+    google.script.url.getLocation(function (location) { done(parseRoute(location && location.hash, null)); });
+  } else done(parseRoute(window.location.hash, window.history && window.history.state));
+}
+
+function updatePhoneInput(input, button) {
+  var digits = toNationalDigits(input.value);
+  input.value = formatNational(digits);
+  button.disabled = !looksLikeMobile(digits) || button.dataset.busy === "true";
+  return digits;
+}
+function updateActivationReady() {
+  var button = byId("activation-submit");
+  button.disabled = !looksLikeMobile(byId("activation-phone").value) || !byId("activation-code").value.trim() || button.dataset.busy === "true";
+}
+function updateVerifyLede() {
+  setText("verify-lede", PENDING_NATIONAL ? "We emailed a passcode to the address registered for " + DIAL_CODE + " " + formatNational(PENDING_NATIONAL) + "." : "We emailed a passcode to your registered address.");
+}
+function otpBoxes() { return Array.prototype.slice.call(document.querySelectorAll(".otp-box")); }
+function otpValue() { return otpBoxes().map(function (box) { return box.value.replace(/\D/g, "").slice(0, 1); }).join(""); }
+function refreshOtpState() {
+  otpBoxes().forEach(function (box) { box.dataset.filled = box.value ? "true" : "false"; });
+  byId("verify-submit").disabled = otpValue().length !== 6 || byId("verify-submit").dataset.busy === "true";
+}
+function clearOtp() { otpBoxes().forEach(function (box) { box.value = ""; box.dataset.filled = "false"; }); refreshOtpState(); }
+function writeOtp(index, incoming) {
+  var clean = text(incoming).replace(/\D/g, "");
+  if (!clean) return;
+  var boxes = otpBoxes();
+  for (var offset = 0; offset < clean.length && index + offset < boxes.length; offset += 1) boxes[index + offset].value = clean.charAt(offset);
+  refreshOtpState();
+  boxes[Math.min(boxes.length - 1, index + clean.length)].focus();
+}
+function shakeOtp() {
+  var group = byId("otp-group");
+  group.dataset.error = "false";
+  void group.offsetWidth;
+  group.dataset.error = "true";
+}
+function startResendCountdown() {
+  if (RESEND_TIMER !== null) window.clearInterval(RESEND_TIMER);
+  RESEND_REMAINING = RESEND_SECONDS;
+  updateResend();
+  RESEND_TIMER = window.setInterval(function () {
+    RESEND_REMAINING = Math.max(0, RESEND_REMAINING - 1);
+    updateResend();
+    if (!RESEND_REMAINING) { window.clearInterval(RESEND_TIMER); RESEND_TIMER = null; }
+  }, 1000);
+}
+function updateResend() {
+  var count = byId("resend-count"); var button = byId("resend-button");
+  if (RESEND_REMAINING > 0) {
+    count.hidden = false; button.hidden = true;
+    count.textContent = "Resend code in " + Math.floor(RESEND_REMAINING / 60) + ":" + String(RESEND_REMAINING % 60).padStart(2, "0");
+  } else { count.hidden = true; button.hidden = false; }
+}
+
+function bindEvents() {
+  document.addEventListener("click", function (event) {
+    var control = event.target.closest("[data-route]");
+    if (!control) return;
+    event.preventDefault();
+    navigate({ name: control.dataset.route, key: control.dataset.key || "" }, { kind: control.dataset.kind || "push", replace: control.dataset.replace === "true" });
+  });
+  byId("signin-phone").addEventListener("input", function () { updatePhoneInput(this, byId("signin-submit")); setError("signin-error", ""); setFieldInvalid("signin-phone-well", false); });
+  byId("activation-phone").addEventListener("input", function () { updatePhoneInput(this, byId("activation-submit")); setError("activation-error", ""); setFieldInvalid("activation-phone-well", false); updateActivationReady(); });
+  byId("activation-code").addEventListener("input", function () { this.value = this.value.toUpperCase(); setError("activation-error", ""); setFieldInvalid("activation-code-well", false); updateActivationReady(); });
+  ["activation-email", "activation-sms"].forEach(function (id) {
+    byId(id).addEventListener("click", function () { this.setAttribute("aria-checked", this.getAttribute("aria-checked") === "true" ? "false" : "true"); });
+  });
+
+  byId("signin-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var button = byId("signin-submit"); var national = toNationalDigits(byId("signin-phone").value); var attempt = AUTH_ATTEMPT;
+    if (!looksLikeMobile(national) || button.dataset.busy === "true") { setError("signin-error", "Enter an eight-digit mobile number."); setFieldInvalid("signin-phone-well", true); return; }
+    setBusy(button, true, "Sending…", "Send passcode"); button.disabled = true; setError("signin-error", "");
+    api("requestPasscode", { phone: toE164(national) }).then(function () {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "signin") return;
+      PENDING_NATIONAL = national; PENDING_PHONE = toE164(national);
+      safeStored(sessionStorage, "pgp_pending_phone", PENDING_PHONE); safeStored(sessionStorage, "pgp_pending_national", PENDING_NATIONAL);
+      clearOtp(); startResendCountdown(); navigate({ name: "verify", key: "" }, { kind: "push" });
+    }).catch(function (error) {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "signin") return;
+      setError("signin-error", friendlyFailure(error, "Could not send a passcode. Try again.")); setFieldInvalid("signin-phone-well", true);
+    }).finally(function () { setBusy(button, false, "Sending…", "Send passcode"); updatePhoneInput(byId("signin-phone"), button); });
+  });
+
+  otpBoxes().forEach(function (box, index) {
+    box.addEventListener("input", function () { writeOtp(index, this.value); setError("verify-error", ""); byId("otp-group").dataset.error = "false"; });
+    box.addEventListener("paste", function (event) { event.preventDefault(); writeOtp(index, event.clipboardData.getData("text")); });
+    box.addEventListener("keydown", function (event) {
+      var boxes = otpBoxes();
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        if (box.value) box.value = "";
+        else if (index > 0) { boxes[index - 1].value = ""; boxes[index - 1].focus(); }
+        refreshOtpState();
+      } else if (event.key === "ArrowLeft") { event.preventDefault(); boxes[Math.max(0, index - 1)].focus(); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); boxes[Math.min(boxes.length - 1, index + 1)].focus(); }
+    });
+    box.addEventListener("focus", function () { box.select(); });
+  });
+  byId("verify-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var button = byId("verify-submit"); var code = otpValue(); var attempt = AUTH_ATTEMPT;
+    if (code.length !== 6 || !PENDING_PHONE || button.dataset.busy === "true") return;
+    setBusy(button, true, "Verifying…", "Verify"); button.disabled = true; setError("verify-error", "");
+    api("verifyPasscode", { phone: PENDING_PHONE, code: code }).then(function (result) {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "verify") return;
+      establishSession(result); navigate({ name: "offers", key: "" }, { kind: "push", replace: true }); loadSignedInData(true);
+    }).catch(function (error) {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "verify") return;
+      clearOtp(); shakeOtp(); setError("verify-error", friendlyFailure(error, "That code was not accepted.")); otpBoxes()[0].focus();
+    }).finally(function () { setBusy(button, false, "Verifying…", "Verify"); refreshOtpState(); });
+  });
+  byId("resend-button").addEventListener("click", function () {
+    if (!PENDING_PHONE) return;
+    var button = this; var attempt = AUTH_ATTEMPT; button.disabled = true; setError("verify-error", "");
+    api("requestPasscode", { phone: PENDING_PHONE }).then(function () { if (attempt === AUTH_ATTEMPT && CURRENT_ROUTE.name === "verify") { clearOtp(); startResendCountdown(); } })
+      .catch(function (error) { if (attempt === AUTH_ATTEMPT && CURRENT_ROUTE.name === "verify") setError("verify-error", friendlyFailure(error, "Could not send another code.")); })
+      .finally(function () { button.disabled = false; });
+  });
+  byId("change-number").addEventListener("click", function () {
+    PENDING_PHONE = ""; PENDING_NATIONAL = "";
+    safeStored(sessionStorage, "pgp_pending_phone", null); safeStored(sessionStorage, "pgp_pending_national", null);
+    if (RESEND_TIMER !== null) window.clearInterval(RESEND_TIMER);
+    RESEND_TIMER = null; RESEND_REMAINING = 0; updateResend();
+    clearOtp(); navigate({ name: "signin", key: "" }, { kind: "pop", replace: true });
+  });
+
+  byId("activate-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var button = byId("activation-submit"); var national = toNationalDigits(byId("activation-phone").value); var code = byId("activation-code").value.trim(); var attempt = AUTH_ATTEMPT;
+    if (!looksLikeMobile(national) || !code || button.dataset.busy === "true") {
+      setError("activation-error", "Enter your invitation code and an eight-digit mobile number.");
+      setFieldInvalid("activation-code-well", !code); setFieldInvalid("activation-phone-well", !looksLikeMobile(national)); return;
+    }
+    setBusy(button, true, "Activating…", "Activate membership"); button.disabled = true; setError("activation-error", "");
+    api("claimMembership", {
+      phone: toE164(national),
+      code: code,
+      consent: { email: byId("activation-email").getAttribute("aria-checked") === "true", sms: byId("activation-sms").getAttribute("aria-checked") === "true" }
+    }).then(function (result) {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "activate") return;
+      establishSession(result); navigate({ name: "offers", key: "" }, { kind: "push", replace: true }); loadSignedInData(true);
+    }).catch(function (error) {
+      if (attempt !== AUTH_ATTEMPT || CURRENT_ROUTE.name !== "activate") return;
+      setError("activation-error", friendlyFailure(error, "That invitation code was not accepted.")); setFieldInvalid("activation-code-well", true);
+    }).finally(function () { setBusy(button, false, "Activating…", "Activate membership"); updateActivationReady(); });
+  });
+
+  byId("request-outlet").addEventListener("change", function () { byId("request-submit").disabled = OUTLETS.length > 1 && !this.value; setError("request-error", ""); });
+  byId("request-note").addEventListener("input", function () { setError("request-error", ""); });
+  byId("request-submit").addEventListener("click", function () {
+    if (!CURRENT_BENEFIT || this.dataset.busy === "true") return;
+    var benefit = CURRENT_BENEFIT; var benefitKey = benefit.key; var routeSequence = NAVIGATION_SEQUENCE;
+    var chosen = byId("request-outlet").value;
+    if (OUTLETS.length > 1 && !chosen) return;
+    var payload = { benefitId: benefit.id, benefitKey: benefitKey, slug: benefit.slug };
+    if (chosen) payload.outletId = chosen; else if (OUTLETS.length === 1) payload.outletId = OUTLETS[0].id;
+    var note = byId("request-note").value.trim(); if (note) payload.note = note;
+    var button = this; var idle = CURRENT_REQUEST ? "Let the outlet know again" : "Let the outlet know";
+    var stillViewingBenefit = function () { return routeSequence === NAVIGATION_SEQUENCE && CURRENT_ROUTE.name === "offer" && CURRENT_BENEFIT && CURRENT_BENEFIT.key === benefitKey; };
+    setBusy(button, true, "Telling the outlet…", idle); button.disabled = true; setError("request-error", "");
+    api("createRequest", payload).then(function (result) {
+      var submittedRequest = normalizeRequest(result.request || result);
+      if (!submittedRequest.id && result.requestId) submittedRequest.id = text(result.requestId);
+      if (!submittedRequest.benefitKey) submittedRequest.benefitKey = benefitKey;
+      if (!submittedRequest.status) submittedRequest.status = "SENT";
+      REQUESTS = [submittedRequest].concat((REQUESTS || []).filter(function (request) { return request.id !== submittedRequest.id; }));
+      if (!stillViewingBenefit()) return;
+      CURRENT_REQUEST = submittedRequest;
+      byId("request-note").value = ""; renderRequestContext();
+    }).catch(function (error) {
+      if (!stillViewingBenefit()) return;
+      var choices = error.details && error.details.outlets;
+      if (Array.isArray(choices)) {
+        OUTLETS = choices.map(function (outlet) { return { id: text(outlet.id), name: text(outlet.name), kind: text(outlet.kind) }; });
+        renderRequestContext();
+      } else if (error.code === "OUTLET_REQUIRED" || error.code === "OUTLET_NOT_VALID") {
+        loadOutlets(benefit).then(function (outlets) { if (stillViewingBenefit()) { OUTLETS = outlets; renderRequestContext(); } }).catch(function () {});
+      }
+      setError("request-error", friendlyFailure(error, "Could not tell the outlet. Try again."));
+    }).finally(function () {
+      var currentIdle = CURRENT_REQUEST ? "Let the outlet know again" : "Let the outlet know";
+      setBusy(button, false, "Telling the outlet…", stillViewingBenefit() ? idle : currentIdle);
+      if (stillViewingBenefit() && !byId("request-action").hidden) button.disabled = OUTLETS.length > 1 && !byId("request-outlet").value;
+      else if (!stillViewingBenefit()) button.disabled = byId("request-action").hidden ? false : (OUTLETS.length > 1 && !byId("request-outlet").value);
+    });
+  });
+
+  byId("activity-more").addEventListener("click", function () { ACTIVITY_EXPANDED = !ACTIVITY_EXPANDED; renderActivity(); });
+  ["email", "sms"].forEach(function (channel) {
+    byId("profile-" + channel).addEventListener("click", function () {
+      if (!PROFILE || this.disabled) return;
+      var toggle = this; var next = toggle.getAttribute("aria-checked") !== "true"; var payload = {}; payload[channel] = next;
+      toggle.disabled = true; setError("profile-alert", "");
+      api("updateConsent", payload).then(function (result) {
+        if (result.consent) PROFILE.consent = result.consent;
+        else { PROFILE.consent = PROFILE.consent || {}; PROFILE.consent[channel.toUpperCase()] = { channel: channel.toUpperCase(), granted: next }; }
+        renderProfile();
+      }).catch(function (error) { setError("profile-alert", friendlyFailure(error, "Could not save that notification setting.")); })
+        .finally(function () { toggle.disabled = !PROFILE; });
+    });
+  });
+  byId("signout-button").addEventListener("click", signOut);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && SESSION_STATUS === "signed-in") loadSignedInData(true);
+  });
+  window.addEventListener("online", function () { if (SESSION_STATUS === "signed-in") loadSignedInData(true); });
+}
+
+function discardMemberCaches() {
+  PROFILE = null; STATS = null; BENEFITS = null; ACTIVITY = null; REQUESTS = null;
+  CURRENT_BENEFIT = null; CURRENT_REQUEST = null; OUTLETS = [];
+  PROFILE_FAILED = false; BENEFITS_FAILED = false; ACTIVITY_FAILED = false;
+  ACTIVITY_EXPANDED = false; IN_FLIGHT = Object.create(null); stopRequestPoll();
+}
+function clearAuthInputs() {
+  byId("signin-phone").value = "";
+  byId("activation-phone").value = "";
+  byId("activation-code").value = "";
+  byId("activation-email").setAttribute("aria-checked", "true");
+  byId("activation-sms").setAttribute("aria-checked", "false");
+  clearOtp();
+  if (RESEND_TIMER !== null) window.clearInterval(RESEND_TIMER);
+  RESEND_TIMER = null; RESEND_REMAINING = 0; updateResend();
+  ["signin-error", "verify-error", "activation-error"].forEach(function (id) { setError(id, ""); });
+  ["signin-phone-well", "activation-phone-well", "activation-code-well"].forEach(function (id) { setFieldInvalid(id, false); });
+  updatePhoneInput(byId("signin-phone"), byId("signin-submit"));
+  updateActivationReady();
+}
+function resetMemberViews() {
+  renderBenefitSkeletons(); renderProfile(); renderModal();
+  byId("offer-title").replaceChildren(makeSkeleton("skeleton-line skeleton-title"));
+  byId("offer-rate").replaceChildren(makeSkeleton("skeleton-figure"));
+  byId("offer-rows").replaceChildren(); setText("offer-terms", ""); byId("offer-info").hidden = true;
+  setImage(byId("offer-hero"), "", byId("offer-hero-placeholder"));
+  var reservationCall = byId("reservation-call"); reservationCall.hidden = true; reservationCall.textContent = ""; reservationCall.removeAttribute("href");
+  byId("request-state").replaceChildren(); byId("request-action").hidden = true;
+  byId("request-note").value = ""; byId("outlet-field").hidden = true;
+  var requestSelect = byId("request-outlet"); while (requestSelect.options.length > 1) requestSelect.remove(1); requestSelect.value = "";
+  setError("request-error", ""); setError("offers-alert", ""); setError("profile-alert", "");
+}
+function establishSession(result) {
+  var nextToken = text(result.token || result.accessToken);
+  if (!nextToken) throw new Error("The server did not return a session.");
+  discardMemberCaches();
+  TOKEN = nextToken;
+  PROFILE = result.member || result.profile || null;
+  STATS = result.stats || null;
+  SESSION_STATUS = "signed-in";
+  safeStored(localStorage, "pgp_token", TOKEN);
+  safeStored(sessionStorage, "pgp_pending_phone", null); safeStored(sessionStorage, "pgp_pending_national", null);
+  PENDING_PHONE = ""; PENDING_NATIONAL = "";
+  clearAuthInputs();
+  resetMemberViews();
+}
+function loadSignedInData(force) {
+  if (SESSION_STATUS !== "signed-in") return;
+  force = !!force;
+  loadProfile(force).catch(function () {});
+  loadBenefits(force).catch(function () {});
+  loadActivity(force).catch(function () {});
+  loadRequests(force).catch(function () {});
+}
+function clearSessionData() {
+  TOKEN = null; SESSION_STATUS = "signed-out"; safeStored(localStorage, "pgp_token", null);
+  discardMemberCaches();
+  resetMemberViews();
+}
+function signOut() {
+  var button = byId("signout-button");
+  button.disabled = true;
+  api("signOut", {}).catch(function () {}).finally(function () {
+    clearSessionData();
+    button.disabled = false;
+    navigate({ name: "signin", key: "" }, { kind: "pop", replace: true });
+  });
+}
+function resumeSession() {
+  TOKEN = text(safeStored(localStorage, "pgp_token") || "") || null;
+  PENDING_PHONE = text(safeStored(sessionStorage, "pgp_pending_phone") || "");
+  PENDING_NATIONAL = text(safeStored(sessionStorage, "pgp_pending_national") || "");
+  if (!TOKEN) {
+    SESSION_STATUS = "signed-out";
+    var signedOutRoute = isAuthRoute(INITIAL_ROUTE.name) ? INITIAL_ROUTE : { name: "signin", key: "" };
+    signedOutRoute = renderRoute(signedOutRoute, false); writeHistory(signedOutRoute, true);
+    if (signedOutRoute.name === "verify" && PENDING_PHONE && RESEND_TIMER === null) startResendCountdown();
+    return;
+  }
+  SESSION_STATUS = "resuming";
+  api("getMe", {}).then(function (result) {
+    PROFILE = result.member || result.profile || null; STATS = result.stats || (PROFILE && PROFILE.stats) || null; SESSION_STATUS = "signed-in";
+    var signedInRoute = isProtectedRoute(INITIAL_ROUTE.name) ? INITIAL_ROUTE : { name: "offers", key: "" };
+    signedInRoute = renderRoute(signedInRoute, false); writeHistory(signedInRoute, true); renderProfile(); renderModal(); loadSignedInData();
+  }).catch(function () {
+    clearSessionData();
+    var signedOutRoute = isAuthRoute(INITIAL_ROUTE.name) ? INITIAL_ROUTE : { name: "signin", key: "" };
+    signedOutRoute = renderRoute(signedOutRoute, false); writeHistory(signedOutRoute, true);
+    if (signedOutRoute.name === "verify" && PENDING_PHONE && RESEND_TIMER === null) startResendCountdown();
+  });
+}
+
+(function boot() {
+  configureAssets();
+  renderBenefitSkeletons();
+  renderActivitySkeletons();
+  renderProfile();
+  renderModal();
+  bindEvents();
+  installHistory();
+  readInitialRoute(function (route) { INITIAL_ROUTE = route; resumeSession(); });
+})();
+</script>
+</body>
+</html>
