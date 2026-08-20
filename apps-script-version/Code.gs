@@ -47,6 +47,8 @@ var REQUEST_EXPIRY_HOURS  = 24;    // unanswered visit notices close as NOT_USED
 var REQUEST_THROTTLE_SECONDS = 60; // stops rapid notices across several outlets
 var VERIFICATION_SESSION_TTL_SECONDS = 600; // counter lookup proof, 10 minutes
 var CONSENT_WORDING_VERSION = 'v1-2026-07'; // bump whenever displayed consent copy changes
+var SMS_TITLE_CHARS  = 40; // truncates a benefit title in an SMS — see truncateSms_
+var SMS_OUTLET_CHARS = 30; // truncates an outlet name in an SMS — see truncateSms_
 
 // ─── Sheet definitions ──────────────────────────────────────────────────────
 
@@ -66,7 +68,15 @@ var SHEETS = {
   ConsentRecords: ['id','memberId','channel','granted','wordingVersion','recordedAt'],
   Outlets: ['id','name','category','notifyEmail','active'],
   OutletTokens: ['id','outletId','label','tokenHash','status','issuedBy','issuedAt','revokedAt'],
-  Staff: ['id','email','fullName','role','status','passHash','salt','createdAt'],
+  // mfaEnrolledAt marks enrollment *completion*, distinct from "a secret
+  // exists" — an abandoned setup leaves a secret in Script Properties and this
+  // blank, and must not count as enrolled. mfaLastUsedEpoch is the TOTP period
+  // of the last accepted code, which is what makes a code single-use.
+  Staff: ['id','email','fullName','role','status','passHash','salt','createdAt',
+          'mfaEnrolledAt','mfaLastUsedEpoch'],
+  // Marked used rather than deleted, for the same reason redemptions are never
+  // erased: nothing in the application has cause to destroy this trail.
+  MfaRecoveryCodes: ['id','staffId','codeHash','usedAt','createdAt'],
   Sessions: ['tokenHash','subjectType','subjectId','tokenVersion','expiresAt','createdAt'],
   OtpCache: ['phone','codeHash','expiresAt','attempts','createdAt'],
   Audit: ['id','actorType','actorId','action','targetType','targetId','detail','at']
@@ -77,8 +87,16 @@ var SHEETS = {
 var SHEET_SCHEMA_READY = {};
 
 // Actions reachable without a session. Everything else is gated.
+//
+// The three staff MFA actions are here because they run *before* a session
+// exists — between a correct password and a second factor. They are not
+// ungated: each one requires an unexpired MFA challenge issued by staffLogin(),
+// which is a different credential in a different namespace from a session token
+// and authorises nothing except the attempt to present a second factor.
 var PUBLIC_ACTIONS = ['requestPasscode', 'verifyPasscode', 'claimMembership',
-                      'staffLogin', 'outletLogin'];
+                      'staffLogin', 'outletLogin',
+                      'staffBeginMfaEnrollment', 'staffConfirmMfaEnrollment',
+                      'staffVerifyMfa'];
 
 // ─── Entry points ───────────────────────────────────────────────────────────
 
@@ -154,41 +172,61 @@ function apiCall(action, data, token) {
 }
 
 function dispatch(action, data) {
-  switch (action) {
-    // public
-    case 'requestPasscode':   return requestPasscode(data);
-    case 'verifyPasscode':    return verifyPasscode(data);
-    case 'claimMembership':   return claimMembership(data);
-    case 'staffLogin':        return staffLogin(data);
-    case 'outletLogin':       return outletLogin(data);
-    // member, session required
-    case 'getMe':             return getMe(data);
-    case 'getBenefits':       return getBenefits(data);
-    case 'getBenefit':        return getBenefit(data);
-    case 'createRequest':     return createRequest(data);
-    case 'getMyRequests':     return getMyRequests(data);
-    case 'getBenefitOutlets': return getBenefitOutlets(data);
-    case 'getMyActivity':     return getMyActivity(data);
-    case 'updateConsent':     return updateConsent(data);
-    case 'signOut':           return signOut(data);
-    // staff, session required
-    case 'listMembers':       return listMembers(data);
-    case 'createMember':      return createMember(data);
-    case 'setMemberStatus':   return setMemberStatus(data);
-    case 'listRequests':      return listRequests(data);
-    case 'recordRedemption':  return recordRedemption(data);
-    case 'reverseRedemption': return reverseRedemption(data);
-    case 'listRedemptions':   return listRedemptions(data);
-    case 'getReports':        return getReports(data);
-    case 'upsertBenefit':     return upsertBenefit(data);
-    case 'resolveMember':     return resolveMember(data);
-    case 'listOutlets':       return listOutlets(data);
-    case 'upsertOutlet':      return upsertOutlet(data);
-    case 'issueOutletToken':  return issueOutletToken(data);
-    case 'revokeOutletToken': return revokeOutletToken(data);
-    case 'getOutletQueue':    return getOutletQueue(data);
-    case 'whoAmI':            return whoAmI(data);
-    default: return { success: false, error: 'Unknown action: ' + action };
+  try {
+    switch (action) {
+      // public
+      case 'requestPasscode':   return requestPasscode(data);
+      case 'verifyPasscode':    return verifyPasscode(data);
+      case 'claimMembership':   return claimMembership(data);
+      case 'staffLogin':        return staffLogin(data);
+      case 'outletLogin':       return outletLogin(data);
+      case 'staffBeginMfaEnrollment':   return staffBeginMfaEnrollment(data);
+      case 'staffConfirmMfaEnrollment': return staffConfirmMfaEnrollment(data);
+      case 'staffVerifyMfa':            return staffVerifyMfa(data);
+      // member, session required
+      case 'getMe':             return getMe(data);
+      case 'getBenefits':       return getBenefits(data);
+      case 'getBenefit':        return getBenefit(data);
+      case 'createRequest':     return createRequest(data);
+      case 'getMyRequests':     return getMyRequests(data);
+      case 'getBenefitOutlets': return getBenefitOutlets(data);
+      case 'getMyActivity':     return getMyActivity(data);
+      case 'updateConsent':     return updateConsent(data);
+      case 'signOut':           return signOut(data);
+      // staff, session required
+      case 'listMembers':       return listMembers(data);
+      case 'createMember':      return createMember(data);
+      case 'updateMember':      return updateMember(data);
+      case 'resendClaimCode':   return resendClaimCode(data);
+      case 'setMemberStatus':   return setMemberStatus(data);
+      case 'listRequests':      return listRequests(data);
+      case 'markRequestNotUsed': return markRequestNotUsed(data);
+      case 'recordRedemption':  return recordRedemption(data);
+      case 'reverseRedemption': return reverseRedemption(data);
+      case 'listRedemptions':   return listRedemptions(data);
+      case 'getOverview':       return getOverview(data);
+      case 'getReports':        return getReports(data);
+      case 'upsertBenefit':     return upsertBenefit(data);
+      case 'resolveMember':     return resolveMember(data);
+      case 'listOutlets':       return listOutlets(data);
+      case 'upsertOutlet':      return upsertOutlet(data);
+      case 'issueOutletToken':  return issueOutletToken(data);
+      case 'revokeOutletToken': return revokeOutletToken(data);
+      case 'getOutletQueue':    return getOutletQueue(data);
+      case 'whoAmI':            return whoAmI(data);
+      default: return { success: false, error: 'Unknown action: ' + action };
+    }
+  } catch (err) {
+    // §9 parity with the Postgres build: a session that reached the gate but
+    // lacked the right role (a member session hitting a staff-only action, an
+    // outlet device reaching past its own counter) leaves a trace, same as any
+    // other authorization failure. requireStaff/requireMember/requireCounter
+    // mark their throws so this is the one place that needs to know about it.
+    if (err && err.pgpAuthDenied) {
+      var actor = data.__session || {};
+      audit(actor.type || 'unknown', actor.id || '', 'authorization.denied', 'action', action, String(err.message || ''));
+    }
+    throw err;
   }
 }
 
@@ -251,7 +289,18 @@ function ensureSheetSchema(sh, name) {
   // columns to stay text in both new and already-created workbooks.
   var phoneCol = headers.indexOf('phone');
   if (phoneCol !== -1) sh.getRange(1, phoneCol + 1, sh.getMaxRows(), 1).setNumberFormat('@');
-  if (name === 'Benefits') upgradeBenefitSheet(sh, headers, addedFields);
+  if (name === 'Benefits') {
+    // Same problem, same fix: "25%" is exactly as numeric-looking to Sheets
+    // as a phone number is, and it gets silently reinterpreted as the
+    // fraction 0.25 (percentage formatting) instead of staying literal text.
+    // Every save through upsertBenefit() writes a "NN%" string here, so
+    // without this, each edit round-trip re-corrupts the value further.
+    ['discount', 'secondaryPct'].forEach(function (field) {
+      var col = headers.indexOf(field);
+      if (col !== -1) sh.getRange(1, col + 1, sh.getMaxRows(), 1).setNumberFormat('@');
+    });
+    upgradeBenefitSheet(sh, headers, addedFields);
+  }
   SHEET_SCHEMA_READY[name] = true;
 }
 
@@ -507,15 +556,22 @@ function requireSession(token) {
   return { ok: true, value: { type: s.subjectType, id: s.subjectId, tokenHash: h } };
 }
 
+/** A role mismatch, not a missing session — dispatch() audits these as `authorization.denied`. */
+function authDenied_(message) {
+  var e = new Error(message);
+  e.pgpAuthDenied = true;
+  return e;
+}
+
 function requireStaff(data) {
   var s = data.__session;
-  if (!s || s.type !== 'staff') throw new Error('Administrator access required.');
+  if (!s || s.type !== 'staff') throw authDenied_('Administrator access required.');
   return s;
 }
 
 function requireMember(data) {
   var s = data.__session;
-  if (!s || s.type !== 'member') throw new Error('Member access required.');
+  if (!s || s.type !== 'member') throw authDenied_('Member access required.');
   return s;
 }
 
@@ -523,7 +579,7 @@ function requireMember(data) {
 function requireCounter(data) {
   var s = data.__session;
   if (!s || (s.type !== 'staff' && s.type !== 'outlet'))
-    throw new Error('Administrator or outlet access required.');
+    throw authDenied_('Administrator or outlet access required.');
   return s;
 }
 
@@ -649,6 +705,7 @@ function requestPasscode(data) {
   });
 
   sendPasscodeEmail(m.email, m.fullName, code);
+  sendPasscodeSms_(m.phone, code);
   audit('member', m.id, 'passcode.requested', 'member', m.id, '');
   return uniform;
 }
@@ -891,7 +948,16 @@ function getMyActivity(data) {
 // ─── Benefits ───────────────────────────────────────────────────────────────
 
 function percentString(value) {
-  var text = String(value === null || value === undefined ? '' : value).trim();
+  if (value === null || value === undefined || value === '') return '';
+  // A raw JS number here means the cell was written before the discount
+  // column was forced to text (see ensureSheetSchema) and Sheets silently
+  // stored it as a percentage fraction — "25%" became 0.25. This code only
+  // ever writes "NN%"-shaped text, so a bare number can only have arrived
+  // this way; recovering it by multiplying back up is safe and lets an
+  // already-corrupted row self-heal the next time it's read, without a
+  // separate one-time repair pass.
+  if (typeof value === 'number') return String(Math.round(value * 10000) / 100);
+  var text = String(value).trim();
   return text.replace(/\s*%\s*$/, '');
 }
 
@@ -988,6 +1054,11 @@ function upsertBenefit(data) {
     return { success: false, error: 'Benefit title must be between 1 and 200 characters.' };
   if (!effectiveCategory || effectiveCategory.length > 100)
     return { success: false, error: 'Benefit category must be between 1 and 100 characters.' };
+  if (!recognisedCategory(effectiveCategory))
+    return {
+      success: false,
+      error: 'Category "' + effectiveCategory + '" is not recognised. Use Dining, Rooms, Spa, Events, or Other.'
+    };
   if (!/^(?:\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)$/.test(effectiveDiscount) ||
       !isFinite(discountNumber) || discountNumber < 0 || discountNumber > 100)
     return { success: false, error: 'Discount must be a number from 0 to 100.' };
@@ -1062,6 +1133,19 @@ function canonicalOutletKind(value) {
   if (/ROOM|SUITE|RESIDENCE/.test(text)) return 'ROOMS';
   if (/EVENT|MEETING|CATERING/.test(text)) return 'EVENTS';
   return 'OTHER';
+}
+
+/**
+ * The Postgres build rejects an unrecognised outlet kind at the schema level
+ * (a strict enum). A spreadsheet has no enum, so the equivalent guarantee has
+ * to be enforced here, once, at the point an administrator types a category —
+ * otherwise a typo silently falls through canonicalOutletKind() to 'OTHER' at
+ * every future lookup with no error anywhere.
+ */
+function recognisedCategory(category) {
+  var text = String(category || '').trim();
+  if (!text) return true;
+  return canonicalOutletKind(text) !== 'OTHER' || /^other$/i.test(text);
 }
 
 function outletChoice(o) {
@@ -1254,6 +1338,7 @@ function createRequest(data) {
         b.title + ' · ' + selected.name);
   var m = findOne('Members', function (r) { return r.id === s.id; });
   if (m && m.email) sendRequestSubmittedEmail(m.email, m.fullName, b, selected, note);
+  if (m && m.phone) sendRequestSubmittedSms_(m.phone, b, selected);
   var delivered = notifyOutlet(b, m, selected, note);
   requestRow.notifiedAt = nowIso();
   requestRow.notifyStatus = delivered ? 'delivered' : 'not_delivered';
@@ -1308,6 +1393,52 @@ function listRequests(data) {
       };
     });
   return { success: true, requests: list };
+}
+
+/**
+ * They never came. Not a refusal — the entitlement is untouched and the guest
+ * can send another notice whenever they like. Mirrors the Postgres build's
+ * POST /outlet/requests/:id/not-used: closes a no-show immediately instead of
+ * leaving it to the passive 24h sweep in expireStaleRequests().
+ */
+function markRequestNotUsed(data) {
+  var s = requireCounter(data);
+  expireStaleRequests();
+  var id = String(data.requestId || '').trim();
+  if (!id) return { success: false, error: 'Request not found.' };
+  var reason = String(data.reason || '').trim();
+  if (reason.length > 500) return { success: false, error: 'Reason must be 500 characters or fewer.' };
+
+  var r = findOne('Requests', function (row) { return row.id === id; });
+  if (!r) return { success: false, error: 'Request not found.' };
+  if (memberRequestStatus(r.status) !== 'SENT')
+    return { success: false, error: 'This has already been dealt with.' };
+
+  var b = findOne('Benefits', function (row) { return row.id === r.benefitId; });
+  if (s.type === 'outlet') {
+    var o = findOne('Outlets', function (row) { return row.id === s.outletId; });
+    var belongsHere = r.outletId ? r.outletId === s.outletId :
+      (o && b && canonicalOutletKind(b.outletKind || b.category) === canonicalOutletKind(o.category));
+    if (!belongsHere) return { success: false, error: 'Request not found.' };
+  }
+
+  var writeResult = withLock(function () {
+    var current = findOne('Requests', function (row) { return row.id === id; });
+    if (!current || memberRequestStatus(current.status) !== 'SENT')
+      return { success: false, error: 'This has already been dealt with.' };
+    updateWhere('Requests', function (row) { return row.id === id; }, {
+      status: 'not_used', resolvedAt: nowIso(), resolvedBy: s.id,
+      closedReason: reason || 'Marked not used by the outlet.'
+    });
+    return { success: true };
+  });
+  if (!writeResult.success) return writeResult;
+
+  audit(s.type, s.id, 'request.not_used', 'request', id, reason || '');
+  var m = findOne('Members', function (row) { return row.id === r.memberId; });
+  if (m && m.email && b) sendRequestNotUsedEmail(m.email, m.fullName, b, reason);
+  if (m && m.phone && b) sendRequestNotUsedSms_(m.phone, b);
+  return { success: true };
 }
 
 // ─── Redemptions ────────────────────────────────────────────────────────────
@@ -1479,9 +1610,17 @@ function recordRedemption(data) {
   });
   if (!writeResult.success) return writeResult;
   if (writeResult.duplicate) return writeResult;
-  audit(s.type, s.id, 'redemption.recorded', 'redemption', writeResult.redemptionId,
+  // Mirrors the Postgres build's split between fulfilling an announced visit
+  // notice (.outlet) and a walk-up counter scan with no notice (.scan) — so an
+  // investigator can tell which happened without opening the row itself.
+  // Admin-recorded entries with neither keep the generic event; the Postgres
+  // build has no equivalent path since admins never call the outlet routes.
+  var recordedAction = writeResult.fulfilledRequestId ? 'redemption.recorded.outlet' :
+    (s.type === 'outlet' ? 'redemption.recorded.scan' : 'redemption.recorded');
+  audit(s.type, s.id, recordedAction, 'redemption', writeResult.redemptionId,
         b.title + ' · party ' + partySize);
   if (m.email) sendRedemptionRecordedEmail(m.email, m.fullName, b, savedMinor);
+  if (m.phone) sendRedemptionRecordedSms_(m.phone, b, savedMinor);
   return writeResult;
 }
 
@@ -1552,6 +1691,10 @@ function listRedemptions(data) {
         reversal: !!r.reversesId
       };
     });
+  // Staff only — an outlet device checking its own recent counter history is
+  // routine shift use, not the bulk-record access §9 asks to be traced.
+  if (session.type === 'staff')
+    audit('staff', session.id, 'report.viewed', 'report', '', 'redemptions · ' + list.length);
   return { success: true, redemptions: list };
 }
 
@@ -1626,12 +1769,17 @@ function nextMemberNumber() {
 }
 
 function listMembers(data) {
-  requireStaff(data);
-  return { success: true, members: rows('Members').map(function (m) {
+  var s = requireStaff(data);
+  var list = rows('Members').map(function (m) {
     var st = memberStats(m.id);
     var o = publicMember(m); o.visits = st.visits; o.savedMinor = st.savedMinor;
     return o;
-  }) };
+  });
+  // §9 parity with the Postgres build's per-record member.viewed: the Sheet
+  // architecture reads the whole roster on every call, so the honest
+  // equivalent is one event per list, not one per row.
+  audit('staff', s.id, 'member.listed', 'member', '', 'count:' + list.length);
+  return { success: true, members: list };
 }
 
 function createMember(data) {
@@ -1668,12 +1816,15 @@ function createMember(data) {
   });
   if (!created.success) return created;
 
-  var delivered = sendInvitationEmail(email, name, created.memberNumber, created.claimCode);
+  var emailDelivered = sendInvitationEmail(email, name, created.memberNumber, created.claimCode);
+  var smsDelivered = sendInvitationSms_(phone, created.claimCode);
+  var delivered = emailDelivered || smsDelivered;
   audit('staff', s.id, 'member.created', 'member', created.id, created.memberNumber);
 
-  // If delivery failed the administrator must be able to pass the code on by
-  // hand, so it is returned. When delivery succeeded it is not — it is already
-  // in the member's inbox and there is no reason to put it on a second screen.
+  // If delivery failed on every channel the administrator must be able to
+  // pass the code on by hand, so it is returned. When at least one channel
+  // succeeded it is not — the member already has it and there is no reason
+  // to put it on a second screen.
   return {
     success: true, memberNumber: created.memberNumber, delivered: delivered,
     claimCode: delivered ? null : created.claimCode
@@ -1695,6 +1846,80 @@ function setMemberStatus(data) {
   return { success: true };
 }
 
+/**
+ * Corrects a member's own details after creation — a typo'd email or a phone
+ * number that changed. Mirrors the Postgres build's PATCH /admin/members/:id;
+ * without it a mistake made at createMember() could only be fixed by editing
+ * the Sheet by hand.
+ */
+function updateMember(data) {
+  var s = requireStaff(data);
+  var m = findOne('Members', function (r) { return r.id === String(data.memberId || ''); });
+  if (!m) return { success: false, error: 'Member not found.' };
+
+  var patch = {};
+  var changed = [];
+
+  if (data.fullName !== undefined) {
+    var name = String(data.fullName || '').trim();
+    if (!name) return { success: false, error: 'Name is required.' };
+    patch.fullName = name; changed.push('fullName');
+  }
+  if (data.phone !== undefined) {
+    var phone = normalisePhone(data.phone);
+    if (!validMemberPhone(phone))
+      return { success: false, error: 'Enter an eight-digit Qatar mobile number.' };
+    if (findOne('Members', function (r) { return r.id !== m.id && normalisePhone(r.phone) === phone; }))
+      return { success: false, error: 'That mobile number is already registered.' };
+    patch.phone = phone; changed.push('phone');
+  }
+  if (data.email !== undefined) {
+    var email = String(data.email || '').trim();
+    if (!validEmail(email))
+      return { success: false, error: 'Enter a valid email address — passcodes are delivered by email.' };
+    patch.email = email; changed.push('email');
+  }
+  if (!changed.length) return { success: false, error: 'Nothing to update.' };
+
+  updateWhere('Members', function (r) { return r.id === m.id; }, patch);
+  audit('staff', s.id, 'member.updated', 'member', m.id, changed.join(','));
+  return { success: true };
+}
+
+/**
+ * Recovery path for an invitation that never arrived, bounced, or expired
+ * unclaimed. Mirrors the Postgres build's POST /admin/members/:id/resend-claim:
+ * any outstanding code is superseded so only the newest one is usable, and the
+ * plaintext is always returned to the administrator — unlike createMember(),
+ * which withholds it on a successful send — because this route exists
+ * precisely for when the normal delivery did not reach the member.
+ */
+function resendClaimCode(data) {
+  var s = requireStaff(data);
+  var m = findOne('Members', function (r) { return r.id === String(data.memberId || ''); });
+  if (!m) return { success: false, error: 'Member not found.' };
+  if (m.claimedAt) return { success: false, error: 'This membership has already been activated.' };
+
+  return withLock(function () {
+    var supersededAt = nowIso();
+    rows('ClaimCodes').forEach(function (r) {
+      if (r.memberId === m.id && !r.usedAt) {
+        updateWhere('ClaimCodes', function (row) { return row.id === r.id; }, { usedAt: supersededAt });
+      }
+    });
+    var code = randomClaimCode();
+    append('ClaimCodes', {
+      id: Utilities.getUuid(), memberId: m.id, codeHash: hmac(code.replace(/-/g, '')),
+      expiresAt: plusDays(CLAIM_CODE_TTL_DAYS), usedAt: '', createdAt: nowIso()
+    });
+    var emailDelivered = sendInvitationEmail(m.email, m.fullName, m.memberNumber, code);
+    var smsDelivered = sendInvitationSms_(m.phone, code);
+    var delivered = emailDelivered || smsDelivered;
+    audit('staff', s.id, 'member.claim_code_issued', 'member', m.id, m.memberNumber);
+    return { success: true, delivered: delivered, claimCode: code };
+  });
+}
+
 // ─── Outlets and their devices ──────────────────────────────────────────────
 
 /**
@@ -1712,10 +1937,17 @@ function outletLogin(data) {
   var tok = findOne('OutletTokens', function (r) {
     return r.status === 'active' && safeEqual(String(r.tokenHash), h);
   });
-  if (!tok) return fail;
+  if (!tok) {
+    // Never the token or its hash — same §9 parity as staffLogin's failure trace.
+    audit('outlet', '', 'auth.outlet.login.failure', 'outlet', '', '');
+    return fail;
+  }
 
   var o = findOne('Outlets', function (r) { return r.id === tok.outletId; });
-  if (!o || String(o.active).toLowerCase() === 'false') return fail;
+  if (!o || String(o.active).toLowerCase() === 'false') {
+    audit('outlet', tok.id, 'auth.outlet.login.failure', 'outlet', tok.outletId, '');
+    return fail;
+  }
 
   var session = issueSession('outlet', tok.id, 1, 30);
   audit('outlet', tok.id, 'outlet.signed.in', 'outlet', o.id, tok.label);
@@ -1742,6 +1974,11 @@ function upsertOutlet(data) {
   var s = requireStaff(data);
   var o = data.outlet || {};
   if (!String(o.name || '').trim()) return { success: false, error: 'Name is required.' };
+  if (!recognisedCategory(o.category))
+    return {
+      success: false,
+      error: 'Category "' + String(o.category || '').trim() + '" is not recognised. Use Dining, Rooms, Spa, Events, or Other.'
+    };
   if (o.id && findOne('Outlets', function (r) { return r.id === o.id; })) {
     updateWhere('Outlets', function (r) { return r.id === o.id; }, {
       name: o.name, category: o.category || '', notifyEmail: o.notifyEmail || '',
@@ -1774,7 +2011,8 @@ function issueOutletToken(data) {
     tokenHash: hmac(raw), status: 'active', issuedBy: s.id, issuedAt: nowIso(), revokedAt: ''
   });
   audit('staff', s.id, 'outlet.token.issued', 'outlet', o.id, data.label || '');
-  return { success: true, deviceToken: raw, outlet: o.name };
+  var delivered = o.notifyEmail ? sendOutletTokenEmail(o.notifyEmail, o.name, raw) : false;
+  return { success: true, deviceToken: raw, outlet: o.name, delivered: delivered };
 }
 
 function revokeOutletToken(data) {
@@ -1785,6 +2023,14 @@ function revokeOutletToken(data) {
   audit('staff', s.id, 'outlet.token.revoked', 'outletToken', data.tokenId, '');
   return { success: true };
 }
+
+// requestOutletToken() was removed deliberately. It let anyone who knew an
+// outlet's registered address self-provision an *active* counter device token,
+// emailed to that address, with no administrator involved — so possession of
+// (or access to) an outlet mailbox was enough to enroll a tablet. Device
+// enrollment is now issueOutletToken() only, which is behind requireStaff().
+// Do not reintroduce a public path here without replacing the admin approval
+// step it removes.
 
 /** What this outlet is expecting. Scoped to the signed-in device's outlet. */
 function getOutletQueue(data) {
@@ -1821,6 +2067,386 @@ function getOutletQueue(data) {
 
 // ─── Staff ──────────────────────────────────────────────────────────────────
 
+// ─── Staff MFA (TOTP) ───────────────────────────────────────────────────────
+//
+// Closes the "no administrator second factor" gap this port previously carried
+// as a documented limitation. It is a hand-rolled RFC 6238 implementation
+// because Apps Script has no otplib and no crypto library to lean on; that is
+// exactly why it is one contiguous, commented block rather than helpers
+// scattered through the file.
+//
+// WHERE THIS DIFFERS FROM THE POSTGRES BUILD, AND WHY
+// ---------------------------------------------------------------------------
+// 1. `security/mfa.ts` encrypts the TOTP secret with AES-256-GCM before it
+//    reaches the database, so a stolen dump yields no working second factors.
+//    Apps Script exposes no symmetric cipher, so that is not reproducible here.
+//    Instead the secret never goes in the Sheet at all — it lives in Script
+//    Properties, which a Sheet editor cannot read and which only someone who
+//    can open the script project can reach. That is a *relocation* of the
+//    secret out of the exportable surface, not encryption of it. It is a
+//    weaker guarantee than the Postgres build's and is recorded as such.
+// 2. Recovery codes are HMAC-SHA256 hashed rather than Argon2id, for the same
+//    reason passcodes are (see the file header): there is no argon2 here. They
+//    carry ~49 bits from a CSPRNG, so they are not password-shaped guessable
+//    secrets, and the key is a Script Property rather than a value in the row.
+//
+// Everything else matches: mandatory for every active administrator, ±1 period
+// of skew tolerance, single-use codes enforced by recording the accepted
+// period, and ten single-use recovery codes.
+
+var TOTP_PERIOD_SECONDS = 30;
+var TOTP_DIGITS         = 6;
+/**
+ * One period either side of the current one. RFC 6238 §5.2 anticipates this
+ * much skew; wider meaningfully extends how long an intercepted code stays
+ * usable, so it is a constant and not configuration.
+ */
+var TOTP_DRIFT_STEPS = 1;
+
+var MFA_CHALLENGE_TTL_SECONDS = 300;
+/** No 0/O or 1/I/L — these get read aloud and typed from a printout. */
+var RECOVERY_ALPHABET    = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+var RECOVERY_CODE_LENGTH = 10;
+var RECOVERY_CODE_COUNT  = 10;
+
+var BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** Apps Script byte arrays are signed (-128..127); ours are built unsigned. */
+function toSignedBytes_(values) {
+  return values.map(function (b) {
+    b = b & 0xff;
+    return b > 127 ? b - 256 : b;
+  });
+}
+
+function base32Encode_(bytes) {
+  var bits = 0, value = 0, out = '';
+  for (var i = 0; i < bytes.length; i++) {
+    value = (value << 8) | (bytes[i] & 0xff);
+    bits += 8;
+    while (bits >= 5) { out += BASE32_ALPHABET.charAt((value >>> (bits - 5)) & 31); bits -= 5; }
+  }
+  if (bits > 0) out += BASE32_ALPHABET.charAt((value << (5 - bits)) & 31);
+  return out;
+}
+
+/** Returns null on any character outside the alphabet, rather than guessing. */
+function base32Decode_(text) {
+  text = String(text || '').toUpperCase().replace(/=+$/, '').replace(/\s/g, '');
+  if (!text) return null;
+  var bits = 0, value = 0, out = [];
+  for (var i = 0; i < text.length; i++) {
+    var index = BASE32_ALPHABET.indexOf(text.charAt(i));
+    if (index === -1) return null;
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  return out;
+}
+
+/** 20 bytes / 160 bits — the RFC 4226 recommendation. */
+function generateMfaSecret_() {
+  var bytes = [];
+  while (bytes.length < 20) {
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+      Utilities.getUuid() + Utilities.getUuid() + String(Date.now()), Utilities.Charset.UTF_8);
+    for (var i = 0; i < digest.length && bytes.length < 20; i++) bytes.push(digest[i] & 0xff);
+  }
+  return base32Encode_(bytes);
+}
+
+/** RFC 4226 HOTP: HMAC-SHA1 over the 8-byte counter, dynamically truncated. */
+function hotpAt_(secretBase32, counter) {
+  var key = base32Decode_(secretBase32);
+  if (!key || !key.length) return null;
+
+  var message = [];
+  var remaining = counter;
+  for (var i = 7; i >= 0; i--) { message[i] = remaining & 0xff; remaining = Math.floor(remaining / 256); }
+
+  var signature = Utilities.computeHmacSignature(
+    Utilities.MacAlgorithm.HMAC_SHA_1, toSignedBytes_(message), toSignedBytes_(key));
+
+  var offset = signature[signature.length - 1] & 0x0f;
+  var binary = ((signature[offset] & 0x7f) << 24) |
+               ((signature[offset + 1] & 0xff) << 16) |
+               ((signature[offset + 2] & 0xff) << 8) |
+                (signature[offset + 3] & 0xff);
+  var code = String(binary % Math.pow(10, TOTP_DIGITS));
+  while (code.length < TOTP_DIGITS) code = '0' + code;
+  return code;
+}
+
+/**
+ * A correct code from a period already spent is refused even though it is
+ * cryptographically valid. §3 requires the member OTP to be single use, and
+ * there is no principled reason a staff second factor should be weaker: a code
+ * is valid for ~90 seconds here, which is ample to reuse one read over a
+ * shoulder or lifted from a keylogger.
+ */
+function verifyTotp_(secret, token, afterEpoch) {
+  token = String(token || '').replace(/\s/g, '');
+  if (!new RegExp('^\\d{' + TOTP_DIGITS + '}$').test(token)) return { valid: false };
+
+  var current = Math.floor(Date.now() / 1000 / TOTP_PERIOD_SECONDS);
+  for (var drift = -TOTP_DRIFT_STEPS; drift <= TOTP_DRIFT_STEPS; drift++) {
+    var counter = current + drift;
+    var expected = hotpAt_(secret, counter);
+    if (expected && safeEqual(expected, token)) {
+      // `<=` not `<`: the same period must not be reusable, which is the point.
+      if (afterEpoch !== null && afterEpoch !== undefined && counter <= Number(afterEpoch))
+        return { valid: false };
+      return { valid: true, epoch: counter };
+    }
+  }
+  return { valid: false };
+}
+
+// ── Secret storage ──────────────────────────────────────────────────────────
+// Script Properties, never the Sheet. See the note at the top of this section.
+
+function mfaSecretKey_(staffId) { return 'MFA_SECRET_' + String(staffId); }
+
+function storedMfaSecret_(staffId) {
+  return PropertiesService.getScriptProperties().getProperty(mfaSecretKey_(staffId)) || '';
+}
+
+function storeMfaSecret_(staffId, secret) {
+  PropertiesService.getScriptProperties().setProperty(mfaSecretKey_(staffId), secret);
+}
+
+function clearMfaSecret_(staffId) {
+  PropertiesService.getScriptProperties().deleteProperty(mfaSecretKey_(staffId));
+}
+
+function mfaEnrollmentUri_(email, secret) {
+  return 'otpauth://totp/' + encodeURIComponent(SENDER_NAME + ':' + email) +
+    '?secret=' + secret +
+    '&issuer=' + encodeURIComponent(SENDER_NAME) +
+    '&algorithm=SHA1&digits=' + TOTP_DIGITS + '&period=' + TOTP_PERIOD_SECONDS;
+}
+
+// ── The challenge between password and second factor ────────────────────────
+
+/**
+ * The credential issued after a correct password and before a second factor.
+ *
+ * The one thing that must not happen is a challenge being accepted where a
+ * session token is. In the Postgres build that separation is a distinct JWT
+ * audience; here it is stronger by construction — a challenge lives only in
+ * CacheService under its own key prefix and is never written to `Sessions`, so
+ * `requireSession()` cannot resolve one no matter what is passed to it.
+ *
+ * It carries no role and authorises nothing except the attempt to present a
+ * second factor.
+ */
+function mfaChallengeKey_(token) {
+  return 'staff_mfa_' + hmac(String(token || '')).slice(0, 40);
+}
+
+function issueMfaChallenge_(staffId, stage) {
+  var token = randomToken();
+  CacheService.getScriptCache().put(mfaChallengeKey_(token), JSON.stringify({
+    staffId: staffId, stage: stage, expiresAt: Date.now() + MFA_CHALLENGE_TTL_SECONDS * 1000
+  }), MFA_CHALLENGE_TTL_SECONDS);
+  return token;
+}
+
+/** Re-checks the account on every read: a suspension mid-challenge must bite. */
+function readMfaChallenge_(token, stage) {
+  token = String(token || '').trim();
+  if (!token || token.length > 200) return null;
+  var raw = CacheService.getScriptCache().get(mfaChallengeKey_(token));
+  if (!raw) return null;
+  try {
+    var challenge = JSON.parse(raw);
+    if (Number(challenge.expiresAt) < Date.now()) return null;
+    if (challenge.stage !== stage) return null;
+    var staff = findOne('Staff', function (r) { return r.id === challenge.staffId; });
+    if (!staff || staff.status !== 'active' ||
+        String(staff.role).toLowerCase() !== 'administrator') return null;
+    return { staffId: challenge.staffId, stage: challenge.stage, staff: staff, token: token };
+  } catch (err) {
+    return null;
+  }
+}
+
+function consumeMfaChallenge_(token) {
+  CacheService.getScriptCache().remove(mfaChallengeKey_(token));
+}
+
+// ── Recovery codes ──────────────────────────────────────────────────────────
+
+/**
+ * An administrator locked out at 2am needs a route in that is not "telephone
+ * the developer" — especially here, where the programme may have exactly one.
+ */
+function generateRecoveryCode_() {
+  var out = '';
+  while (out.length < RECOVERY_CODE_LENGTH) {
+    var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+      Utilities.getUuid() + Utilities.getUuid() + out, Utilities.Charset.UTF_8);
+    for (var i = 0; i < digest.length && out.length < RECOVERY_CODE_LENGTH; i++) {
+      var b = digest[i] & 0xff;
+      // 248 = 31 * 8, the largest multiple of the alphabet below 256. Rejecting
+      // above it keeps every character equally likely rather than biasing the
+      // first seven, which plain modulo would.
+      if (b < 248) out += RECOVERY_ALPHABET.charAt(b % RECOVERY_ALPHABET.length);
+    }
+  }
+  return out;
+}
+
+/** Typed from a printout, so case and separators are forgiven. */
+function normaliseRecoveryCode_(code) {
+  return String(code || '').trim().toUpperCase().replace(/[\s-]/g, '');
+}
+
+function issueRecoveryCodes_(staffId) {
+  var sh = sheet('MfaRecoveryCodes');
+  // Replace any codes left by an earlier, abandoned enrollment — the secret
+  // they were issued alongside is no longer the one in force.
+  var existing = rows('MfaRecoveryCodes');
+  for (var i = existing.length - 1; i >= 0; i--) {
+    if (existing[i].staffId === staffId) sh.deleteRow(existing[i].__row);
+  }
+  var codes = [];
+  for (var n = 0; n < RECOVERY_CODE_COUNT; n++) {
+    var code = generateRecoveryCode_();
+    codes.push(code);
+    append('MfaRecoveryCodes', {
+      id: Utilities.getUuid(), staffId: staffId, codeHash: hmac(code),
+      usedAt: '', createdAt: nowIso()
+    });
+  }
+  return codes;
+}
+
+function redeemRecoveryCode_(staffId, supplied) {
+  var normalised = normaliseRecoveryCode_(supplied);
+  if (normalised.length !== RECOVERY_CODE_LENGTH) return false;
+  var wanted = hmac(normalised);
+  var hit = null;
+  rows('MfaRecoveryCodes').forEach(function (r) {
+    if (hit || r.staffId !== staffId || r.usedAt) return;
+    if (safeEqual(String(r.codeHash), wanted)) hit = r;
+  });
+  if (!hit) return false;
+  updateWhere('MfaRecoveryCodes', function (r) { return r.id === hit.id; }, { usedAt: nowIso() });
+  audit('staff', staffId, 'auth.mfa.recovery_code_used', 'staff', staffId, '');
+  return true;
+}
+
+function remainingRecoveryCodes_(staffId) {
+  return rows('MfaRecoveryCodes').filter(function (r) {
+    return r.staffId === staffId && !r.usedAt;
+  }).length;
+}
+
+// ── The three pre-session MFA actions ───────────────────────────────────────
+
+function staffBeginMfaEnrollment(data) {
+  var challenge = readMfaChallenge_(data.challenge, 'enroll');
+  if (!challenge) return { success: false, error: 'That sign-in attempt expired. Start again.' };
+  if (!rateLimit('mfa_enroll_' + challenge.staffId, 15, 900))
+    return { success: false, error: 'Too many attempts. Try again later.' };
+
+  // Reuse a secret already generated for this account's unfinished enrollment,
+  // so reloading the page does not invalidate a QR that was already scanned.
+  var secret = storedMfaSecret_(challenge.staffId);
+  if (!secret) {
+    secret = generateMfaSecret_();
+    storeMfaSecret_(challenge.staffId, secret);
+  }
+  return {
+    success: true,
+    secret: secret,
+    uri: mfaEnrollmentUri_(challenge.staff.email, secret)
+  };
+}
+
+function staffConfirmMfaEnrollment(data) {
+  var challenge = readMfaChallenge_(data.challenge, 'enroll');
+  if (!challenge) return { success: false, error: 'That sign-in attempt expired. Start again.' };
+  if (!rateLimit('mfa_confirm_' + challenge.staffId, 15, 900))
+    return { success: false, error: 'Too many attempts. Try again later.' };
+
+  var secret = storedMfaSecret_(challenge.staffId);
+  if (!secret) return { success: false, error: 'Start the setup again.' };
+
+  var result = verifyTotp_(secret, data.code, null);
+  if (!result.valid) {
+    audit('staff', challenge.staffId, 'auth.mfa.failure', 'staff', challenge.staffId, 'enroll');
+    return { success: false, error: 'That code is not valid. Check the app and try again.' };
+  }
+
+  return withLock(function () {
+    var codes = issueRecoveryCodes_(challenge.staffId);
+    updateWhere('Staff', function (r) { return r.id === challenge.staffId; },
+                { mfaEnrolledAt: nowIso(), mfaLastUsedEpoch: result.epoch });
+    consumeMfaChallenge_(challenge.token);
+    audit('staff', challenge.staffId, 'auth.mfa.enrolled', 'staff', challenge.staffId, '');
+    audit('staff', challenge.staffId, 'staff.signed.in', 'staff', challenge.staffId, 'enrollment');
+    return {
+      success: true,
+      token: issueSession('staff', challenge.staffId, 1, STAFF_SESSION_TTL_HRS / 24),
+      recoveryCodes: codes,
+      staff: { id: challenge.staff.id, fullName: challenge.staff.fullName, role: challenge.staff.role }
+    };
+  });
+}
+
+function staffVerifyMfa(data) {
+  var challenge = readMfaChallenge_(data.challenge, 'verify');
+  if (!challenge) return { success: false, error: 'That sign-in attempt expired. Start again.' };
+  var fail = { success: false, error: 'That code is not valid.' };
+  // Tighter than the password limit above: a six-digit code has a search space
+  // a password does not, so the rate limit is the substantive defence here.
+  if (!rateLimit('mfa_verify_' + challenge.staffId, 10, 900)) return fail;
+
+  var supplied = String(data.code || '').trim();
+  if (!supplied) return fail;
+
+  return withLock(function () {
+    // Re-read inside the lock: two codes presented at once must not both pass
+    // the replay check against the same stale mfaLastUsedEpoch.
+    var staff = findOne('Staff', function (r) { return r.id === challenge.staffId; });
+    if (!staff) return fail;
+    var secret = storedMfaSecret_(challenge.staffId);
+    if (!secret) return fail;
+
+    var raw = staff.mfaLastUsedEpoch;
+    var last = (raw === '' || raw === null || raw === undefined) ? null : Number(raw);
+    var result = verifyTotp_(secret, supplied, last);
+    var usedRecovery = false;
+
+    if (result.valid) {
+      updateWhere('Staff', function (r) { return r.id === challenge.staffId; },
+                  { mfaLastUsedEpoch: result.epoch });
+    } else {
+      if (!redeemRecoveryCode_(challenge.staffId, supplied)) {
+        audit('staff', challenge.staffId, 'auth.mfa.failure', 'staff', challenge.staffId, 'verify');
+        return fail;
+      }
+      usedRecovery = true;
+    }
+
+    consumeMfaChallenge_(challenge.token);
+    audit('staff', challenge.staffId, 'staff.signed.in', 'staff', challenge.staffId,
+          usedRecovery ? 'recovery-code' : 'totp');
+    return {
+      success: true,
+      token: issueSession('staff', challenge.staffId, 1, STAFF_SESSION_TTL_HRS / 24),
+      usedRecoveryCode: usedRecovery,
+      recoveryCodesRemaining: usedRecovery ? remainingRecoveryCodes_(challenge.staffId) : null,
+      staff: { id: staff.id, fullName: staff.fullName, role: staff.role }
+    };
+  });
+}
+
+// ─── Staff authentication ───────────────────────────────────────────────────
+
 function staffLogin(data) {
   var email = String(data.email || '').trim().toLowerCase();
   var pass  = String(data.password || '');
@@ -1829,22 +2455,143 @@ function staffLogin(data) {
   if (!rateLimit('staff_' + email, 10, 900)) return fail;
 
   var u = findOne('Staff', function (r) { return String(r.email).toLowerCase() === email; });
-  if (!u || u.status !== 'active' || String(u.role).toLowerCase() !== 'administrator') return fail;
-  if (!safeEqual(String(u.passHash), hmac(pass + ':' + u.salt))) return fail;
+  var validAccount = u && u.status === 'active' && String(u.role).toLowerCase() === 'administrator';
+  if (!validAccount || !safeEqual(String(u.passHash), hmac(pass + ':' + u.salt))) {
+    // §9 parity with the Postgres build: every failed sign-in leaves a trace.
+    // Never the email or password attempted — only the account id, and only
+    // when the email actually matched one, so a guess against a non-existent
+    // address does not itself get written into the audit trail.
+    audit('staff', u ? u.id : '', 'auth.login.failure', 'staff', u ? u.id : '', '');
+    return fail;
+  }
 
-  var token = issueSession('staff', u.id, 1, STAFF_SESSION_TTL_HRS / 24);
-  audit('staff', u.id, 'staff.signed.in', 'staff', u.id, '');
-  return { success: true, token: token, staff: { id: u.id, fullName: u.fullName, role: u.role } };
+  // A correct password is now half a sign-in. No session token is issued on
+  // this path under any circumstance — the only thing returned is a challenge.
+  //
+  // An account marked enrolled whose secret has gone missing (Script Properties
+  // cleared, say) falls back to enrollment rather than to no second factor at
+  // all. That self-heals without opening a bypass: it still costs the password,
+  // and it still ends in a working authenticator.
+  var enrolled = !!u.mfaEnrolledAt && !!storedMfaSecret_(u.id);
+  var stage = enrolled ? 'verify' : 'enroll';
+  audit('staff', u.id, 'auth.password.accepted', 'staff', u.id, stage);
+  return { success: true, mfa: stage, challenge: issueMfaChallenge_(u.id, stage) };
 }
 
 // ─── Reporting ──────────────────────────────────────────────────────────────
+
+/**
+ * The admin landing screen. Distinct from getReports() below: this answers
+ * "what needs attention, and is the programme working" at a glance, not the
+ * full breakdown tables. Three things product-definition.md §7/§11 calls out
+ * specifically motivate the shape here — none of them existed before:
+ *   - estimated discount value given, "the only way to answer whether the
+ *     programme is worth its cost"
+ *   - a three-way membership funnel (unclaimed / claimed-but-dormant /
+ *     active) instead of one dormant bucket, since each gap is a different
+ *     problem to fix
+ *   - invitations approaching their expiry, so staff can resend before the
+ *     code lapses rather than after
+ */
+function getOverview(data) {
+  var s = requireStaff(data);
+  expireStaleRequests();
+
+  var benefits = {}, members = {}, outlets = {};
+  rows('Benefits').forEach(function (b) { benefits[b.id] = b; });
+  rows('Members').forEach(function (m) { members[m.id] = m; });
+  rows('Outlets').forEach(function (o) { outlets[o.id] = o; });
+
+  // String arithmetic on the same UTC ISO shape nowIso() already writes to
+  // recordedAt, so "this month" here means exactly what byMonth grouping
+  // elsewhere in the file means — no local-timezone Date reconstruction to
+  // get subtly wrong at a month boundary.
+  var nowKey = nowIso();
+  var thisMonthKey = nowKey.slice(0, 7);
+  var y = Number(nowKey.slice(0, 4)), mo = Number(nowKey.slice(5, 7));
+  var lastMonthKey = (mo === 1 ? (y - 1) : y) + '-' + String(mo === 1 ? 12 : mo - 1).padStart(2, '0');
+
+  var byBenefitThisMonth = {}, memberSeen = {};
+  var redemptionsThisMonth = 0, redemptionsLastMonth = 0, savedMinorThisMonth = 0;
+  rows('Redemptions').filter(function (r) { return !r.reversesId; }).forEach(function (r) {
+    if (r.memberId) memberSeen[r.memberId] = true;
+    var month = String(r.recordedAt).slice(0, 7);
+    if (month === thisMonthKey) {
+      redemptionsThisMonth += 1;
+      var minor = finiteNumberOrNull(r.savedMinor);
+      if (minor !== null) savedMinorThisMonth += minor;
+      var title = benefits[r.benefitId] ? benefits[r.benefitId].title : 'Unknown';
+      if (!byBenefitThisMonth[title]) byBenefitThisMonth[title] = { count: 0, members: {} };
+      byBenefitThisMonth[title].count += 1;
+      if (r.memberId) byBenefitThisMonth[title].members[r.memberId] = true;
+    } else if (month === lastMonthKey) {
+      redemptionsLastMonth += 1;
+    }
+  });
+
+  // R13 — ranked only among benefits with at least five distinct members this
+  // month, so "least redeemed" can never point at a cohort of one.
+  var ranked = Object.keys(byBenefitThisMonth)
+    .map(function (title) {
+      return { title: title, count: byBenefitThisMonth[title].count, distinct: Object.keys(byBenefitThisMonth[title].members).length };
+    })
+    .filter(function (row) { return row.distinct >= MIN_COHORT_SIZE; })
+    .sort(function (a, b) { return b.count - a.count; });
+
+  var totalMembers = 0, unclaimedMembers = 0, claimedDormantMembers = 0, activeMembers = 0;
+  rows('Members').forEach(function (m) {
+    totalMembers += 1;
+    if (!m.claimedAt) { unclaimedMembers += 1; return; }
+    if (memberSeen[m.id]) activeMembers += 1; else claimedDormantMembers += 1;
+  });
+
+  var expiringInvitations = rows('ClaimCodes')
+    .filter(function (c) { return !c.usedAt && !expired(c.expiresAt); })
+    .map(function (c) {
+      var m = members[c.memberId];
+      return m ? { memberId: m.id, fullName: m.fullName, memberNumber: m.memberNumber, expiresAt: isoString(c.expiresAt) } : null;
+    })
+    .filter(function (row) { return row; })
+    .sort(function (a, b) { return String(a.expiresAt).localeCompare(String(b.expiresAt)); })
+    .slice(0, 8);
+
+  var recentActivity = rows('Redemptions')
+    .filter(function (r) { return !r.reversesId; })
+    .sort(function (a, b) { return String(b.recordedAt).localeCompare(String(a.recordedAt)); })
+    .slice(0, 6)
+    .map(function (r) {
+      var m = members[r.memberId], b = benefits[r.benefitId], o = outlets[r.outletId];
+      return {
+        recordedAt: isoString(r.recordedAt),
+        member: m ? m.fullName : '', memberNumber: m ? m.memberNumber : '',
+        benefit: b ? b.title : '', outlet: o ? o.name : ''
+      };
+    });
+
+  audit('staff', s.id, 'report.viewed', 'report', '', 'overview');
+  return {
+    success: true,
+    totalMembers: totalMembers,
+    unclaimedMembers: unclaimedMembers,
+    claimedDormantMembers: claimedDormantMembers,
+    activeMembers: activeMembers,
+    redemptionsThisMonth: redemptionsThisMonth,
+    redemptionsLastMonth: redemptionsLastMonth,
+    savedMinorThisMonth: savedMinorThisMonth,
+    mostRedeemedBenefit: ranked.length ? ranked[0].title : null,
+    leastRedeemedBenefit: ranked.length ? ranked[ranked.length - 1].title : null,
+    expiringInvitations: expiringInvitations,
+    recentActivity: recentActivity,
+    minCohort: MIN_COHORT_SIZE
+  };
+}
 
 /**
  * R13 — a cohort smaller than five is suppressed rather than reported, so a
  * figure cannot be traced back to one identifiable member.
  */
 function getReports(data) {
-  requireStaff(data);
+  var s = requireStaff(data);
   var benefits = {};
   rows('Benefits').forEach(function (b) { benefits[b.id] = b; });
 
@@ -1876,6 +2623,7 @@ function getReports(data) {
     return out;
   };
 
+  audit('staff', s.id, 'report.viewed', 'report', '', 'analytics');
   return {
     success: true,
     totalMembers: totalMembers,
@@ -1941,6 +2689,18 @@ function sendInvitationEmail(to, name, memberNumber, code) {
       CLAIM_CODE_TTL_DAYS + ' days.</p>'));
 }
 
+function sendOutletTokenEmail(to, outletName, token) {
+  return send(to, HOTEL_NAME + ' — outlet sign-in token',
+    'Your sign-in token for ' + outletName + ' is: ' + token,
+    shell('Outlet sign-in token',
+      '<p>A sign-in token for <strong>' + htmlEscape(outletName) + '</strong> was issued for this address.</p>' +
+      '<p>Enter this on the counter device:</p>' +
+      '<div style="font-size:18px;letter-spacing:2px;text-align:center;background:#f6f3ee;' +
+      'padding:14px;color:#221c1b;font-weight:700;margin:16px 0;word-break:break-all">' + htmlEscape(token) + '</div>' +
+      '<p style="color:#8a827a;font-size:12px">This grants access to this outlet’s counter screen — do not forward it. ' +
+      'If you did not request this, an administrator can revoke it from the Outlets panel.</p>'));
+}
+
 function sendRequestSubmittedEmail(to, name, benefit, outlet, note) {
   var destination = outlet ? ' at ' + outlet.name : '';
   var notePlain = note ? '\nYour note: ' + note : '';
@@ -1952,6 +2712,17 @@ function sendRequestSubmittedEmail(to, name, benefit, outlet, note) {
       '<p>Dear ' + htmlEscape(name) + ',</p><p>We have let the team know you are coming for <strong>' +
       htmlEscape(benefit.title) + '</strong>' + (outlet ? ' at <strong>' + htmlEscape(outlet.name) + '</strong>' : '') + '.</p>' +
       noteHtml + (benefit.reservationPhone ? '<p>To reserve a time, call ' + htmlEscape(benefit.reservationPhone) + '.</p>' : '')));
+}
+
+function sendRequestNotUsedEmail(to, name, benefit, reason) {
+  var reasonPlain = reason ? '\nNote from the outlet: ' + reason : '';
+  var reasonHtml = reason ? '<p><strong>Note from the outlet:</strong> ' + htmlEscape(reason) + '</p>' : '';
+  return send(to, HOTEL_NAME + ' — your visit notice was closed',
+    'Your ' + benefit.title + ' visit notice was closed as not used.' + reasonPlain,
+    shell('Your notice was closed',
+      '<p>Dear ' + htmlEscape(name) + ',</p><p>Your visit notice for <strong>' + htmlEscape(benefit.title) +
+      '</strong> was closed because the outlet did not record a visit. Your benefit is unaffected — send another ' +
+      'notice whenever you are on your way.</p>' + reasonHtml));
 }
 
 function sendRedemptionRecordedEmail(to, name, benefit, savedMinor) {
@@ -1981,6 +2752,118 @@ function notifyOutlet(benefit, member, selectedOutlet, note) {
       (member ? ' · ' + htmlEscape(member.memberNumber) : '') + '</p>' +
       '<p>Benefit: ' + htmlEscape(benefit.title) + '</p>' + noteHtml +
       '<p style="color:#8a827a;font-size:12px">Apply the discount as usual, then record it in the panel.</p>'));
+}
+
+// ─── SMS (optional) ─────────────────────────────────────────────────────────
+//
+// Apps Script has no built-in SMS API, so this posts to a configurable HTTP
+// gateway — the shape most GCC bulk providers expose, and the same design as
+// `sms-transport.ts` in the Postgres build. Nothing here is wired to a
+// specific provider: `buildSmsPayload_` is the one place to reconcile field
+// names against whichever account's own API document once one exists.
+//
+// Set these once, from the editor (never hard-code a credential into this
+// file): PropertiesService.getScriptProperties().setProperty('SMS_GATEWAY_URL', ...)
+// and the same for SMS_API_USER, SMS_API_PASSWORD, SMS_SENDER_ID.
+//
+// Unconfigured is a supported, silent state, exactly like a `send()` mail
+// failure: every call site below sends SMS *in addition to* the email it
+// already sends, so a deployment that has not set these up keeps working on
+// email alone rather than throwing on every passcode request or visit notice.
+// Every member has a phone number (`validMemberPhone` requires one at
+// creation), so unlike email there is no "no address" case to branch on.
+
+function smsConfigured_() {
+  var props = PropertiesService.getScriptProperties();
+  return !!(props.getProperty('SMS_GATEWAY_URL') && props.getProperty('SMS_API_USER') &&
+            props.getProperty('SMS_API_PASSWORD') && props.getProperty('SMS_SENDER_ID'));
+}
+
+function buildSmsPayload_(to, body) {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    username: props.getProperty('SMS_API_USER'),
+    password: props.getProperty('SMS_API_PASSWORD'),
+    sender: props.getProperty('SMS_SENDER_ID'),
+    // E.164 with the leading '+' stripped — most gateways in the region
+    // reject the plus sign rather than normalising it.
+    to: String(to || '').replace(/^\+/, ''),
+    text: body
+  };
+}
+
+/**
+ * Best-effort by construction: a failure here must never break the write it
+ * is reporting on (a passcode was issued, a visit was recorded either way),
+ * so every path returns `false` rather than throwing. Callers do not branch
+ * on the result — the email already sent (or attempted) is the record of
+ * delivery this version relies on; this is a bonus channel on top of it.
+ */
+function sendSms_(to, body) {
+  if (!smsConfigured_()) return false;
+  try {
+    var response = UrlFetchApp.fetch(PropertiesService.getScriptProperties().getProperty('SMS_GATEWAY_URL'), {
+      method: 'post',
+      contentType: 'application/x-www-form-urlencoded',
+      payload: buildSmsPayload_(to, body),
+      muteHttpExceptions: true
+    });
+    var code = response.getResponseCode();
+    if (code < 200 || code >= 300) {
+      console.warn('SMS gateway returned ' + code);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('SMS send failed: ' + err.message);
+    return false;
+  }
+}
+
+/**
+ * Cuts administrator-authored text down before it reaches a template.
+ *
+ * A benefit title or outlet name has no length bound that keeps a message
+ * inside a single 160-character GSM-7 segment the way the fixed passcode and
+ * invitation bodies do below — `Benefits.title` is free text. Rather than let
+ * one long title silently double the bill, every rendering is bounded here.
+ * The ellipsis is three ASCII periods, not the Unicode "…" character: that
+ * single character falls outside the GSM-7 alphabet and would force the
+ * *whole message* to UCS-2 encoding, cutting the segment budget from 160
+ * characters to 70 — the same invisible-cost failure this function exists to
+ * avoid.
+ */
+function truncateSms_(text, max) {
+  text = String(text === null || text === undefined ? '' : text);
+  return text.length > max ? text.slice(0, max - 3) + '...' : text;
+}
+
+function sendPasscodeSms_(phone, code) {
+  return sendSms_(phone, 'Privilege Guest: use code ' + code + ' to sign in. Expires in ' +
+    Math.max(1, Math.round(OTP_TTL_SECONDS / 60)) + ' min. Never share it.');
+}
+
+function sendInvitationSms_(phone, code) {
+  return sendSms_(phone, 'Privilege Guest: activation code ' + code + '. Valid ' +
+    CLAIM_CODE_TTL_DAYS + ' days. Open the app to begin.');
+}
+
+function sendRequestSubmittedSms_(phone, benefit, outlet) {
+  var outletName = outlet && outlet.name ? truncateSms_(outlet.name, SMS_OUTLET_CHARS) : 'The outlet';
+  return sendSms_(phone, 'Privilege Guest: ' + outletName + ' has been told you are coming for ' +
+    truncateSms_(benefit.title, SMS_TITLE_CHARS) + '. Just show your card.');
+}
+
+function sendRequestNotUsedSms_(phone, benefit) {
+  return sendSms_(phone, 'Privilege Guest: ' + truncateSms_(benefit.title, SMS_TITLE_CHARS) +
+    ' was not used, nothing recorded. Your benefit is still available.');
+}
+
+function sendRedemptionRecordedSms_(phone, benefit, savedMinor) {
+  var saved = (savedMinor === null || savedMinor === undefined || savedMinor === '') ? '' :
+    ', saved QAR ' + (Number(savedMinor) / 100).toFixed(2);
+  return sendSms_(phone, 'Privilege Guest: ' + truncateSms_(benefit.title, SMS_TITLE_CHARS) +
+    ' recorded' + saved + '.');
 }
 
 // ─── First-run setup ────────────────────────────────────────────────────────
@@ -2133,12 +3016,68 @@ function setup() {
   console.log('Setup complete. Deploy → New deployment → Web app, Execute as Me, Access Anyone.');
 }
 
+/**
+ * Recovery path when nobody has the administrator password anymore. It is
+ * printed once at creation time (see setup(), above) and never stored in the
+ * clear, so there is no in-app "forgot password" flow — this is the
+ * owner-only equivalent, run from the script editor's function dropdown.
+ * Every staff row gets a freshly generated password; none of the old ones
+ * work again afterwards.
+ */
+function resetStaffPasswords() {
+  var count = 0;
+  rows('Staff').forEach(function (r) {
+    var pass = randomToken().slice(0, 14);
+    var salt = randomToken().slice(0, 16);
+    updateWhere('Staff', function (row) { return row.id === r.id; },
+                { passHash: hmac(pass + ':' + salt), salt: salt });
+    console.log(r.email + ' : ' + pass);
+    count += 1;
+  });
+  console.log(count + ' password(s) reset. Not stored anywhere else — copy them now.');
+  return count;
+}
+
+/**
+ * The last resort when an administrator has lost both their authenticator and
+ * their ten recovery codes. Clearing enrollment sends the account back through
+ * setup on its next sign-in; it does not weaken the second factor, because
+ * running this requires access to the script project itself, which is a
+ * strictly higher bar than either factor it resets.
+ *
+ * Pass an email to reset one account, or omit it to reset every administrator
+ * — the dropdown in the editor cannot pass arguments, so the no-argument form
+ * is the one that works there.
+ */
+function resetStaffMfa(email) {
+  var wanted = String(email || '').trim().toLowerCase();
+  var count = 0;
+  rows('Staff').forEach(function (r) {
+    if (wanted && String(r.email).toLowerCase() !== wanted) return;
+    clearMfaSecret_(r.id);
+    updateWhere('Staff', function (row) { return row.id === r.id; },
+                { mfaEnrolledAt: '', mfaLastUsedEpoch: '' });
+    var sh = sheet('MfaRecoveryCodes');
+    var existing = rows('MfaRecoveryCodes');
+    for (var i = existing.length - 1; i >= 0; i--) {
+      if (existing[i].staffId === r.id) sh.deleteRow(existing[i].__row);
+    }
+    audit('staff', r.id, 'auth.mfa.reset', 'staff', r.id, 'script-owner');
+    console.log('MFA reset for ' + r.email + ' — they will set it up again at next sign-in.');
+    count += 1;
+  });
+  if (!count) console.log('No matching administrator found.');
+  return count;
+}
+
 return {
   doGet: doGet,
   doPost: doPost,
   apiCall: apiCall,
   setup: setup,
-  repairPhoneNumbers: repairPhoneNumbers
+  repairPhoneNumbers: repairPhoneNumbers,
+  resetStaffPasswords: resetStaffPasswords,
+  resetStaffMfa: resetStaffMfa
 };
 })();
 
@@ -2165,3 +3104,24 @@ function setup_() {
 function repairPhoneNumbers_() {
   return Server_.repairPhoneNumbers();
 }
+
+function resetStaffPasswords_() {
+  return Server_.resetStaffPasswords();
+}
+
+/**
+ * Clears staff MFA enrollment. No argument resets every administrator; pass an
+ * email to reset one. Run from the editor after a lost phone *and* lost
+ * recovery codes — see resetStaffMfa() for why that is safe.
+ */
+function resetStaffMfa_(email) {
+  return Server_.resetStaffMfa(email);
+}
+
+// NOTE: a `TEMP_resetStaffPasswords` wrapper used to sit here so the editor's
+// Run dropdown could reach the password reset. It was removed: a top-level
+// function without a trailing underscore is callable by anyone who has the web
+// app URL, so it let a stranger scramble the administrator password at will.
+// If the dropdown will not run an underscored function, run it from the editor
+// with `Server_.resetStaffPasswords()` in a scratch function you delete after,
+// rather than leaving a permanently reachable one in the deployed source.

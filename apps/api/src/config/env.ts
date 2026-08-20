@@ -110,7 +110,10 @@ const envSchema = z.object({
   // mailing members because it was upgraded. 'smtp' delivers by email -- see
   // src/notifications/code-sender.ts for why email and not SMS, and why that
   // is an interim arrangement rather than the destination.
-  // 'sms' delivers passcodes over a carrier and everything else over SMTP --
+  // 'sms' delivers passcodes and a member's own lifecycle notices ("the
+  // outlet has been told", "your benefit was recorded") over a carrier, with
+  // SMTP as the fallback for outlet notices (no phone number) and for a
+  // member notice that has no phone on record or that the carrier rejects --
   // see src/notifications/sms-sender.ts for why it is not all-or-nothing. It
   // therefore requires the SMTP block to be present as well; superRefine below
   // enforces that rather than letting outlet notices vanish at runtime.
@@ -321,10 +324,12 @@ const envSchema = z.object({
   }
 
   if (env.OTP_DELIVERY_CHANNEL === 'sms') {
-    // The SMS sender routes lifecycle and outlet messages to SMTP, because an
-    // outlet is a mailbox with no phone number attached. Without these the
-    // outlet would simply stop being told that a guest is coming, and nothing
-    // would fail loudly enough to notice.
+    // The SMS sender always routes outlet messages to SMTP, because an outlet
+    // is a mailbox with no phone number attached, and falls back to SMTP for
+    // a member's own notices whenever there is no phone on record or the
+    // carrier rejects one. Without these the outlet would simply stop being
+    // told that a guest is coming, and nothing would fail loudly enough to
+    // notice.
     for (const key of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM'] as const) {
       if (env[key] === undefined) {
         context.addIssue({

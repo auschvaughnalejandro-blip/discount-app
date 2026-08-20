@@ -16,26 +16,44 @@
  * SMTP. A guest at this hotel hands over a phone number readily and an email
  * address sometimes. On SMS that constraint disappears.
  *
- * ## Why it does not send everything by SMS
+ * ## Why an outlet notice never goes by SMS
  *
- * At the carrier's published rate SMS costs roughly 170× what email does, and
- * two thirds of this system's traffic is not passcodes — it is "your benefit
- * was recorded", "the outlet has been told", and notices to outlet mailboxes.
- * None of that is security-critical and none of it is worth 170×.
+ * An `OutletDelivery` carries an `email` and no phone at all: an outlet is a
+ * mailbox, not a handset. There is no SMS address to send it to, so that one
+ * message type is always the fallback sender's job.
  *
- * There is also a harder reason than cost. An `OutletDelivery` carries an
- * `email` and no phone at all: an outlet is a mailbox, not a handset. There is
- * no SMS address to send it to.
+ * ## Why a member's own notices do
  *
- * So this sender routes by purpose — **passcodes over SMS, everything else to
- * the fallback sender** — and requires both to be configured. That is not a
- * compromise; it is the only arrangement that can deliver all four message
- * types.
+ * `CodeDelivery` (a passcode) and `LifecycleDelivery` ("the outlet has been
+ * told", "your benefit was recorded") both carry the member's own phone. At
+ * the carrier's published rate SMS costs roughly 170× what email does, so this
+ * is a real spend and not a free upgrade — but a guest who is standing at a
+ * restaurant door benefits from a text landing on the handset in their hand
+ * the same way a passcode does, and email silently going unread is exactly the
+ * failure mode a member-facing product notice cannot afford. So both message
+ * types are attempted over SMS first.
+ *
+ * Falling back to the mail sender is not a compromise here the way it would be
+ * for a passcode: nothing about a lifecycle notice must produce an identical
+ * response regardless of outcome (there is no membership-oracle concern), so
+ * a missing phone number or a carrier rejection can simply fall through to
+ * email rather than the delivery being lost outright.
+ *
+ * So this sender routes by purpose — **anything with a member's own phone
+ * over SMS, an outlet notice to the fallback sender** — and requires both to
+ * be configured, because the fallback is still load-bearing for outlet mail
+ * and for any member who has no phone on record.
  */
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { Env } from '../config/env.js';
-import type { AnyDelivery, CodeDelivery, CodeSender, DeliveryOutcome } from './code-sender.js';
+import type {
+  AnyDelivery,
+  CodeDelivery,
+  CodeSender,
+  DeliveryOutcome,
+  LifecycleDelivery,
+} from './code-sender.js';
 import {
   createDispatcher,
   segmentsFor,
@@ -113,11 +131,77 @@ export function assertSingleSegment(ttlMinutes: number): void {
   }
 }
 
+/**
+ * Cuts a free-text field down before it reaches a template.
+ *
+ * `benefitTitle` and `outletName` are administrator-authored and have no
+ * length that keeps a passcode-style template inside one segment by
+ * construction — a title can run to 200 characters. Rather than let one long
+ * title silently push an entire lifecycle notice into a two- or
+ * three-segment bill, every rendering is bounded here. The ellipsis is three
+ * ASCII periods rather than the Unicode `…` character on purpose: that single
+ * character sits outside the GSM-7 alphabet and would force the *whole
+ * message* to UCS-2 encoding, cutting the segment budget from 160 characters
+ * to 70 — exactly the silent-cost failure this function exists to prevent.
+ */
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 3).trimEnd()}...` : text;
+}
+
+/**
+ * A plain ASCII "QAR 12.34", not `Intl.NumberFormat`.
+ *
+ * The email version (`smtp-sender.ts`) formats through `Intl.NumberFormat`,
+ * which is correct there and unsafe here: depending on the ICU data available
+ * at runtime, a currency format can insert a non-breaking space between the
+ * symbol and the amount, and that single character is enough to tip the whole
+ * message into UCS-2 for the same reason the ellipsis above is banned.
+ */
+function qarPlain(minor: number): string {
+  return `QAR ${(minor / 100).toFixed(2)}`;
+}
+
+const MAX_TITLE_CHARS = 40;
+const MAX_OUTLET_CHARS = 30;
+
+/**
+ * The lifecycle bodies: "the outlet has been told", "not used", "recorded".
+ *
+ * Unlike `passcodeBody`, these are not covered by `assertSingleSegment` —
+ * `benefitTitle` and `outletName` are variable-length business data, not a
+ * fixed template, so no startup check can guarantee one segment for every
+ * value an administrator might enter. `truncate` keeps the realistic case
+ * inside one segment without pretending to guarantee it for every case.
+ *
+ * No membership number, no member name — the same §9 rule `passcodeBody`
+ * follows, for the same reason: this renders on a lock screen.
+ */
+function lifecycleSmsBody(delivery: LifecycleDelivery): string {
+  const title = truncate(delivery.benefitTitle, MAX_TITLE_CHARS);
+
+  switch (delivery.purpose) {
+    case 'request-submitted': {
+      const outlet = delivery.outletName ? truncate(delivery.outletName, MAX_OUTLET_CHARS) : 'The outlet';
+      return `Privilege Guest: ${outlet} has been told you are coming for ${title}. Just show your card.`;
+    }
+    case 'request-not-used':
+      return `Privilege Guest: ${title} was not used, nothing recorded. Your benefit is still available.`;
+    case 'redemption-recorded': {
+      const at = delivery.outletName ? ` at ${truncate(delivery.outletName, MAX_OUTLET_CHARS)}` : '';
+      const saved =
+        delivery.savedMinor === null || delivery.savedMinor === undefined
+          ? ''
+          : `, saved ${qarPlain(delivery.savedMinor)}`;
+      return `Privilege Guest: ${title} recorded${at}${saved}.`;
+    }
+  }
+}
+
 export interface SmsSenderOptions {
   transport: SmsTransport;
   /**
-   * Handles everything that is not a passcode. Required: an outlet notice has
-   * no phone number, so without this those messages have nowhere to go.
+   * Handles outlet notices (no phone to reach) and stands in for a member
+   * notice when there is no phone on record or the carrier rejects one.
    */
   fallback: CodeSender;
   env: Env;
@@ -138,34 +222,45 @@ export function createSmsSender({ transport, fallback, env, log }: SmsSenderOpti
     name: `sms:${transport.name}`,
 
     async send(delivery: AnyDelivery): Promise<DeliveryOutcome> {
-      // Only the three code purposes justify the per-message cost. Lifecycle
-      // notices and outlet notices go to the fallback — see the header.
-      if (!('code' in delivery)) {
-        return fallback.send(delivery);
+      if ('code' in delivery) {
+        // A member with no phone number cannot exist — it is the identifier
+        // they sign in with — so this is a genuine invariant failure rather
+        // than the ordinary missing-email case the SMTP sender handles.
+        if (!delivery.phone) {
+          return { delivered: false, reason: 'no_address' };
+        }
+
+        const message: SmsMessage = { to: delivery.phone, body: passcodeBody(delivery, ttlMinutes) };
+        const result = await dispatcher.send(message);
+
+        if (result.ok) {
+          return { delivered: true };
+        }
+
+        // The reason is carried into the log by `logDeliveryOutcome`, and the
+        // caller's HTTP response stays identical either way — §3 requires the
+        // sign-in endpoint to answer the same whether or not the identifier
+        // exists, and a delivery failure must not become the tell.
+        return {
+          delivered: false,
+          reason: result.reason === 'invalid_recipient' ? 'no_address' : 'transport_failed',
+        };
       }
 
-      // A member with no phone number cannot exist — it is the identifier they
-      // sign in with — so this is a genuine invariant failure rather than the
-      // ordinary missing-email case the SMTP sender handles.
-      if (!delivery.phone) {
-        return { delivered: false, reason: 'no_address' };
+      // An outlet notice has no phone number at all — straight to mail.
+      // A member lifecycle notice has one whenever the member does, and is
+      // attempted over SMS first; there is no membership-oracle constraint
+      // here, so a missing number or a carrier failure can fall through to
+      // mail instead of the notice being lost. See the header.
+      if ('phone' in delivery && delivery.phone) {
+        const message: SmsMessage = { to: delivery.phone, body: lifecycleSmsBody(delivery) };
+        const result = await dispatcher.send(message);
+        if (result.ok) {
+          return { delivered: true };
+        }
       }
 
-      const message: SmsMessage = { to: delivery.phone, body: passcodeBody(delivery, ttlMinutes) };
-      const result = await dispatcher.send(message);
-
-      if (result.ok) {
-        return { delivered: true };
-      }
-
-      // The reason is carried into the log by `logDeliveryOutcome`, and the
-      // caller's HTTP response stays identical either way — §3 requires the
-      // sign-in endpoint to answer the same whether or not the identifier
-      // exists, and a delivery failure must not become the tell.
-      return {
-        delivered: false,
-        reason: result.reason === 'invalid_recipient' ? 'no_address' : 'transport_failed',
-      };
+      return fallback.send(delivery);
     },
   };
 }

@@ -19,3 +19,8 @@ Thumbs.db
 
 .vscode/
 .idea/
+
+# clasp links a local folder to one specific Apps Script project (scriptId) —
+# personal/per-environment, not something to share across checkouts.
+.clasp.json
+.clasprc.json

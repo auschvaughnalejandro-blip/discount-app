@@ -202,25 +202,50 @@ var TOKEN = null, OUTLET = null, FOUND = null, BENEFITS = [], RECORDING = false,
 var LOGIN_GENERATION = 0, LOOKUP_GENERATION = 0, RECORD_GENERATION = 0, SUCCESS_TIMER = null;
 var SCAN_STREAM = null, SCAN_RAF = null;
 
+// Standalone build: this page is hosted outside Apps Script (GitHub Pages)
+// specifically so the browser treats it as a real top-level page and grants
+// camera access normally -- Apps Script's own iframe sandbox blocks that
+// regardless of what the page code asks for. Everything else about this file
+// is identical to apps-script-version/Outlet.html; only the transport below
+// changed, from the google.script.run RPC bridge to a plain fetch() against
+// the same deployed web app's doPost endpoint.
+//
+// EXEC_URL is this specific deployment's URL. If the deployment is ever
+// deleted and recreated (not just redeployed in place with clasp redeploy),
+// this constant has to be updated to match, or every call here will fail.
+var EXEC_URL = 'https://script.google.com/macros/s/AKfycbzKXPAigzpW4dTW4xuZSky4jGz8B27YkXie6r0PQUdrZp6wZfu-z_pl-Aq7q0nIz-rc/exec';
+
 function api(action, data) {
   var callToken = TOKEN;
   var callGeneration = LOGIN_GENERATION;
   return new Promise(function (resolve, reject) {
-    google.script.run
-      .withSuccessHandler(function (r) {
-        if (callToken !== TOKEN || callGeneration !== LOGIN_GENERATION) return;
-        try { r = typeof r === 'string' ? JSON.parse(r) : r; }
-        catch (error) { reject(error); return; }
-        if (r && !r.success && String(r.code || '').toUpperCase() === 'UNAUTHENTICATED') {
-          lockOutlet('This device session ended. Enter the device token again.');
-          return;
-        }
-        resolve(r);
-      })
-      .withFailureHandler(function (error) {
-        if (callToken === TOKEN && callGeneration === LOGIN_GENERATION) reject(error);
-      })
-      .apiCall(action, data || {}, callToken);
+    fetch(EXEC_URL, {
+      method: 'POST',
+      // text/plain avoids a CORS preflight (application/json is not a "simple"
+      // request content type); doPost() only reads the raw body text and never
+      // looks at the declared Content-Type, so this doesn't change what the
+      // server receives.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: action, data: data || {}, token: callToken })
+    }).then(function (response) {
+      return response.text();
+    }).then(function (text) {
+      // Stale: a newer sign-in/lookup/etc. superseded this one while it was in
+      // flight. The google.script.run version this replaced simply never
+      // settled the promise in this case (an early return with no resolve/
+      // reject inside withSuccessHandler) -- matched here for identical
+      // behavior, since callers below don't all guard against a null result.
+      if (callToken !== TOKEN || callGeneration !== LOGIN_GENERATION) return;
+      var r;
+      try { r = JSON.parse(text); } catch (error) { reject(error); return; }
+      if (r && !r.success && String(r.code || '').toUpperCase() === 'UNAUTHENTICATED') {
+        lockOutlet('This device session ended. Enter the device token again.');
+        return;
+      }
+      resolve(r);
+    }).catch(function (error) {
+      if (callToken === TOKEN && callGeneration === LOGIN_GENERATION) reject(error);
+    });
   });
 }
 function lockOutlet(message) {

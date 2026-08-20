@@ -1226,3 +1226,109 @@ The alternative was deleting MFA outright, which was declined. §3's requirement
 about a stolen or phished administrator password reaching the internet, and that
 threat does not go away because the second factor is inconvenient to a developer —
 it only stops applying on a laptop, which is exactly the scope this switch has.
+
+---
+
+**2026-08-19 — Lifecycle notices ("the outlet has been told", "your benefit was
+recorded") now go over SMS too, reversing the "170× buys nothing here" call made
+when `sms-sender.ts` was written.**
+Alternative: leave lifecycle notices on email only, as `sms-sender.ts` originally
+argued — none of them are security-critical, so the per-message cost was judged not
+worth it.
+
+The client asked directly for SMS at three points in the member journey: the
+invitation code, the sign-in/activation passcode, and being told a benefit request
+was sent and a redemption was recorded. The first two were already SMS from Stage
+18 onward — this decision only concerns the third, `LifecycleDelivery`
+(`request-submitted`, `request-not-used`, `redemption-recorded`), which the SMS
+sender had always routed straight to the SMTP fallback alongside outlet notices.
+
+**Cost is still real and unchanged — roughly 170× email per the carrier's
+published rate.** That was true when the original call was made and is true now;
+what changed is not the number but whose call it is to spend it, and the client
+made it. Nothing here removes the counter-argument, it overrides it.
+
+**The routing split is by whether a phone number exists to reach, not by
+purpose.** `OutletDelivery` still has no phone at all — an outlet is a mailbox —
+so it is unconditionally the fallback sender's job. A `LifecycleDelivery` carries
+the same `phone` field a `CodeDelivery` does, so `sms-sender.ts` now attempts SMS
+for both and falls back to `smtp-sender.ts` only when there is no phone on record
+or the carrier rejects the message. Falling back is safe here in a way it is not
+for a passcode: §3's requirement that a sign-in response stay identical regardless
+of delivery outcome does not apply to a benefit notice, so losing nothing to a bad
+phone number is a strict improvement over the old email-only path, not a new risk.
+
+**The message bodies are a new template family, not a reuse of `passcodeBody`.**
+A passcode body is fixed text plus a code and is covered by `assertSingleSegment`
+at startup. A lifecycle body embeds `benefitTitle` and `outletName`, which are
+administrator-authored and unbounded in practice (`title` allows 200 characters) —
+no startup assertion can guarantee one segment for a value nobody has typed yet.
+Instead `truncate()` bounds every rendering (40 characters for a title, 30 for an
+outlet name), and a separate `qarPlain()` formats the saved amount as plain ASCII
+rather than through `Intl.NumberFormat` — the ICU currency formatter can insert a
+non-breaking space that would silently force the whole message to UCS-2 and halve
+the segment budget, the same class of invisible-cost bug the ASCII-only ellipsis
+in `truncate()` avoids.
+
+---
+
+**2026-08-19 — The Apps Script port gets administrator MFA, closing the gap it
+had carried as a documented limitation, and loses the self-service outlet token
+path it had gained as a convenience.**
+Alternative for the first: leave administrators single-factor, as the port's own
+README argued — "hand-rolling TOTP is possible but it is security code and
+belongs in a reviewed change of its own."
+
+That argument was about sequencing, not about whether to do it, and this is that
+separate change. The trigger is the port going live rather than staying a
+demonstration: a single password now stands between the open internet and the
+whole membership list, and §3's requirement about a stolen or phished
+administrator password does not care which build is serving.
+
+**TOTP, not an emailed code, for the reason `security/mfa.ts` already gives:**
+a code sent to a mailbox is not a second *factor* when the first is also
+something-you-know. That reasoning is unchanged by the runtime, so the shape
+matches the PostgreSQL build — mandatory for every active administrator, ±1
+period of skew, ten single-use recovery codes, and the accepted period recorded
+so a code cannot be replayed inside its ~90-second window.
+
+**The one place parity is not reachable is secret storage, and it is recorded as
+a reduction rather than papered over.** `security/mfa.ts` encrypts each secret
+with AES-256-GCM so a stolen dump yields nothing usable. Apps Script exposes no
+symmetric cipher at all, so the equivalent is not available. Instead the secret
+never enters the Sheet: it lives in Script Properties, which a workbook editor
+or exporter cannot read and only someone who can open the script project can.
+That relocates the secret out of the exportable surface rather than encrypting
+it in place — strictly weaker than the PostgreSQL build, strictly stronger than
+a column in `Staff`, and the same trade the port already makes on redemption
+immutability.
+
+**The challenge between password and second factor is a cache entry, not a
+token with a different audience.** The PostgreSQL build separates the two with a
+distinct JWT audience, enforced by a check somebody has to remember to write.
+Here the separation is structural: a challenge exists only in `CacheService`
+under its own key prefix and is never written to `Sessions`, so `requireSession`
+cannot resolve one no matter what is handed to it. Cheaper and harder to get
+wrong, which is the right trade for the surface it protects.
+
+**`requestOutletToken` was removed outright rather than gated.** It let anyone
+who knew an outlet's registered address self-provision an *active* counter
+device token, emailed to that address, with no administrator in the loop — so
+read access to an outlet mailbox was enough to enroll a tablet that can record
+redemptions. It was added as a convenience over "an administrator hands the
+token over in person", and that convenience is not worth an enrollment path that
+bypasses the approval step it replaces. `issueOutletToken`, behind
+`requireStaff`, is now the only way a device is enrolled.
+
+**A `TEMP_resetStaffPasswords` wrapper went with it.** It was left behind to be
+runnable from the editor's function dropdown and marked "delete after use", but
+a top-level function without a trailing underscore is reachable by anyone
+holding the web app URL — meaning a stranger could scramble the administrator
+password at will. That is a denial-of-service hole that costs nothing to close.
+
+Verification is by RFC 6238's Appendix B vectors against the hand-rolled HOTP
+(all six, including the counter above 2^32 where a bit-shift would silently
+misbehave) plus an end-to-end pass over the flow with the Apps Script services
+stubbed: password alone yields no session, a challenge is refused as a session,
+codes and challenges are single-use, recovery codes are single-use and tolerant
+of case and spacing, and the owner reset returns an account to enrollment.

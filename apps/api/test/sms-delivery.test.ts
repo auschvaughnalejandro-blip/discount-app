@@ -249,19 +249,113 @@ describe('routing by purpose', () => {
     expect(fallback.seen).toHaveLength(1);
   });
 
-  it('routes lifecycle notices to mail — 170x the cost buys nothing here', async () => {
+  it('sends a lifecycle notice over SMS when the member has a phone on record', async () => {
     const transport = stubTransport([{ ok: true }]);
     const { sender, fallback } = build(transport);
 
-    await sender.send({
+    const outcome = await sender.send({
       email: 'aisha.thani@example.com',
       phone: '+97455550003',
       purpose: 'redemption-recorded',
       benefitTitle: 'Spa treatment',
     });
 
+    expect(outcome).toEqual({ delivered: true });
+    expect(transport.calls).toBe(1);
+    expect(fallback.seen).toHaveLength(0);
+  });
+
+  it('falls back to mail for a lifecycle notice when no phone is on record', async () => {
+    const transport = stubTransport([{ ok: true }]);
+    const { sender, fallback } = build(transport);
+
+    await sender.send({
+      email: 'aisha.thani@example.com',
+      phone: '',
+      purpose: 'request-submitted',
+      benefitTitle: 'Spa treatment',
+      outletName: 'Al Nakheel',
+    });
+
     expect(transport.calls).toBe(0);
     expect(fallback.seen).toHaveLength(1);
+  });
+
+  it('falls back to mail when the carrier rejects a lifecycle notice', async () => {
+    const transport = stubTransport([{ ok: false, reason: 'rejected' }]);
+    const { sender, fallback } = build(transport);
+
+    const outcome = await sender.send({
+      email: 'aisha.thani@example.com',
+      phone: '+97455550003',
+      purpose: 'request-not-used',
+      benefitTitle: 'Spa treatment',
+    });
+
+    expect(transport.calls).toBe(1);
+    expect(fallback.seen).toHaveLength(1);
+    expect(outcome).toEqual({ delivered: true });
+  });
+});
+
+describe('lifecycle SMS bodies stay affordable', () => {
+  async function captureBody(delivery: AnyDelivery): Promise<string> {
+    let captured = '';
+    const transport: SmsTransport = {
+      name: 'stub',
+      send(message) {
+        captured = message.body;
+        return Promise.resolve({ ok: true });
+      },
+    };
+    const sender = createSmsSender({
+      transport,
+      fallback: { name: 'noop', send: () => Promise.resolve({ delivered: true as const }) },
+      env,
+      log: fakeLogger() as never,
+    });
+    await sender.send(delivery);
+    return captured;
+  }
+
+  it('stays inside one GSM-7 segment for a realistic title and outlet name', async () => {
+    const body = await captureBody({
+      email: null,
+      phone: '+97455550003',
+      purpose: 'redemption-recorded',
+      benefitTitle: '25% off food and beverage',
+      outletName: 'Al Nakheel Restaurant',
+      discountPct: '25',
+      savedMinor: 12345,
+    });
+
+    expect(segmentsFor(body).segments).toBe(1);
+  });
+
+  it('truncates an administrator-authored title long enough to otherwise overrun a segment', async () => {
+    const longTitle = 'A'.repeat(200);
+    const body = await captureBody({
+      email: null,
+      phone: '+97455550003',
+      purpose: 'request-not-used',
+      benefitTitle: longTitle,
+    });
+
+    expect(body).not.toContain(longTitle);
+    expect(segmentsFor(body).segments).toBe(1);
+  });
+
+  it('formats a saved amount without a non-breaking space that would force UCS-2', async () => {
+    const body = await captureBody({
+      email: null,
+      phone: '+97455550003',
+      purpose: 'redemption-recorded',
+      benefitTitle: 'Spa treatment',
+      savedMinor: 5000,
+    });
+
+    expect(segmentsFor(body).encoding).toBe('GSM-7');
+    expect(body).toContain('QAR 50.00');
   });
 });
 
